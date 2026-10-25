@@ -4,7 +4,8 @@
   import { DicePlayer } from '../dice/dicePlayer';
   import { dieLook } from '../dice/palette';
   import { rollDuration } from '../dice/playback';
-  import { playRollSettle, playRollStart } from '../dice/sound';
+  import { impacts, playBounces, playRollSettle } from '../dice/sound';
+  import { sound } from '../dice/sound.svelte';
   import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
 
@@ -50,7 +51,11 @@
     if (!started) return;
     const frames = Math.max(0, ...roll.dice.map((die) => die.keyframes.length));
     const ends = roll.playAt + rollDuration(frames, roll.keyframeDt) * 1000;
-    if (table.clock.serverNow() < ends) playRollStart();
+    if (!sound.muted && table.clock.serverNow() < ends) {
+      for (const die of roll.dice) {
+        playBounces(die.sides, impacts(die.keyframes, roll.keyframeDt), roll.playAt, () => table.clock.serverNow(), die.keyframes[0]?.p[0] ?? 0);
+      }
+    }
   });
 
   function dismiss() {
@@ -67,8 +72,9 @@
   }
 </script>
 
-<div class="pointer-events-auto h-full {showing ? '' : 'invisible'}">
-  <div class="flex h-full flex-col overflow-hidden rounded-2xl border border-[rgba(212,166,86,0.35)] bg-[#24160f]">
+<div class="dice-overlay" class:away={!showing}>
+  <button class="dice-dim" type="button" aria-label="Dismiss the roll" onclick={dismiss}></button>
+  <div class="dice-tray">
     <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" onclick={dismiss}></canvas>
     {#if showing}
       <button class="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left" type="button" onclick={dismiss}>
@@ -81,7 +87,7 @@
                 class="inline-flex items-baseline gap-1 rounded-full px-2 py-0.5"
                 style={`background:${look.body};color:${look.ink}`}
               >
-                <span class="text-[10px] tracking-wide">{chipName(die.tag, die.sides)}</span>
+                <span class="text-xs tracking-wide">{chipName(die.tag, die.sides)}</span>
                 <span class="display text-lg leading-none">{chipText(die.sign, die.value)}</span>
               </span>
             {/each}
@@ -96,7 +102,7 @@
             {/if}
           </span>
         {:else}
-          <p class="ml-auto text-[10px] tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
+          <p class="ml-auto text-xs tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
         {/if}
       </button>
     {/if}

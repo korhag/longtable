@@ -80,6 +80,7 @@ export class TableEngine {
   private fogMesh: THREE.Mesh | null = null;
   private grid: THREE.LineSegments | null = null;
   private gridStyle: 'off' | 'faint' | 'strong' = 'faint';
+  private insets = { left: 0, right: 0, top: 0, bottom: 0 };
   private hoverCell: THREE.LineLoop | null = null;
   private dragLine: THREE.Line | null = null;
   private dragOrigin: { x: number; y: number } | null = null;
@@ -367,13 +368,24 @@ export class TableEngine {
     }
   }
 
+  setInsets(insets: { left: number; right: number; top: number; bottom: number }) {
+    this.insets = insets;
+    this.placeCamera();
+  }
+
   fitMap() {
     const { width, height } = this.bounds();
     this.focus.set(width / 2, 0, height / 2);
-    const aspect = (this.renderer.domElement.clientWidth || 1) / (this.renderer.domElement.clientHeight || 1);
+    const canvas = this.renderer.domElement;
+    const canvasW = canvas.clientWidth || 1;
+    const canvasH = canvas.clientHeight || 1;
+    const visW = Math.max(1, canvasW - this.insets.left - this.insets.right);
+    const visH = Math.max(1, canvasH - this.insets.top - this.insets.bottom);
+    const aspect = visW / visH;
     const needH = height * GROUND_DEPTH * 1.25;
     const needW = width * 1.25;
-    this.distance = Math.max(needH, needW / aspect, 8);
+    const full = Math.max(needH, needW / aspect, 8) * (canvasH / visH);
+    this.distance = full;
     this.placeCamera();
   }
 
@@ -424,13 +436,19 @@ export class TableEngine {
     this.camera.up.set(0, HEIGHT_SCALE, -GROUND_DEPTH);
     this.camera.lookAt(this.focus.x, 0, this.focus.z);
     const canvas = this.renderer.domElement;
-    const aspect = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
+    const canvasW = canvas.clientWidth || 1;
+    const canvasH = canvas.clientHeight || 1;
+    const aspect = canvasW / canvasH;
     const viewH = this.distance;
     const viewW = viewH * aspect;
-    this.camera.left = -viewW / 2;
-    this.camera.right = viewW / 2;
-    this.camera.top = viewH / 2;
-    this.camera.bottom = -viewH / 2;
+    const visibleX = (this.insets.left + (canvasW - this.insets.right)) / 2;
+    const visibleY = (this.insets.top + (canvasH - this.insets.bottom)) / 2;
+    const ndcX = (visibleX / canvasW) * 2 - 1;
+    const ndcY = 1 - (visibleY / canvasH) * 2;
+    this.camera.left = -(ndcX + 1) * viewW / 2;
+    this.camera.right = this.camera.left + viewW;
+    this.camera.bottom = -(ndcY + 1) * viewH / 2;
+    this.camera.top = this.camera.bottom + viewH;
     this.camera.updateProjectionMatrix();
     this.dirty = true;
   }

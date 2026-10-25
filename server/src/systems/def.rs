@@ -145,6 +145,10 @@ pub struct RangeBand {
 #[ts(export, rename_all = "camelCase")]
 pub struct Campaign {
     #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
     pub system_id: Option<String>,
 }
 

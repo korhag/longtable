@@ -28,10 +28,26 @@ const BY_SIDES: Record<number, DieLook> = {
 
 export function dieLook(sides: number, tag?: string | null, tags: TagColor[] = []): DieLook {
   const painted = tag ? tags.find((item) => item.letter === tag) : undefined;
-  if (painted) {
-    return { body: painted.body, ink: painted.ink, stroke: '#f6efe4', bodyHex: hexColor(painted.body) };
-  }
-  return BY_SIDES[sides] ?? BY_SIDES[6]!;
+  const base = BY_SIDES[sides] ?? BY_SIDES[6]!;
+  const body = painted?.body ?? base.body;
+  const contrast = contrastOf(body);
+  if (painted) return { body, ink: contrast.ink, stroke: contrast.stroke, bodyHex: hexColor(body) };
+  return { ...base, stroke: contrast.stroke };
+}
+
+function contrastOf(body: string): { ink: string; stroke: string } {
+  const light = brightness(body) >= 150;
+  return light
+    ? { ink: '#1c140e', stroke: '#f6efe4' }
+    : { ink: '#f6efe4', stroke: '#1c140e' };
+}
+
+function brightness(body: string): number {
+  const value = hexColor(body);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return (red * 299 + green * 587 + blue * 114) / 1000;
 }
 
 function hexColor(body: string): number {

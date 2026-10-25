@@ -117,6 +117,157 @@ button {
   font-size: 0.8rem;
 }
 
+:root {
+  --space: 0.5rem;
+  --radius: 0.85rem;
+  --control: 2rem;
+  --text: 0.75rem;
+  --z-map: 1;
+  --z-dock: 10;
+  --z-float: 30;
+  --z-menu: 40;
+  --z-dice: 50;
+  --z-toast: 60;
+  --z-lobby: 70;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 3.25rem;
+  padding: 0 0.75rem;
+  background: rgba(20, 14, 10, 0.88);
+  border-bottom: 1px solid rgba(212, 166, 86, 0.28);
+  z-index: var(--z-dock);
+}
+
+.dock {
+  display: flex;
+  min-height: 0;
+  background: rgba(16, 12, 10, 0.55);
+  z-index: var(--z-dock);
+}
+
+.dock-stack {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.dock-grip {
+  width: 0.4rem;
+  cursor: col-resize;
+  background: rgba(212, 166, 86, 0.18);
+}
+
+.panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid rgba(212, 166, 86, 0.28);
+  border-radius: var(--radius);
+  background: rgba(20, 14, 10, 0.9);
+}
+
+.panel.grow:not(.floating) {
+  flex: 1;
+}
+
+.panel.floating {
+  position: fixed;
+  z-index: var(--z-float);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: var(--control);
+  padding: 0.25rem 0.5rem;
+  font-size: var(--text);
+  cursor: grab;
+}
+
+.panel-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0.6rem;
+  font-size: var(--text);
+}
+
+.panel-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0.9rem;
+  height: 0.9rem;
+  cursor: nwse-resize;
+}
+
+.portrait-sm {
+  position: relative;
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.65rem;
+}
+
+.seat-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  border: 1px solid black;
+}
+
+.dice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dice);
+  display: grid;
+  place-items: center;
+}
+
+.dice-overlay.away {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.dice-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 6, 4, 0.45);
+}
+
+.dice-tray {
+  position: relative;
+  display: flex;
+  width: min(72vw, 960px);
+  height: min(58vh, 560px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(212, 166, 86, 0.4);
+  border-radius: 1rem;
+  background: #24160f;
+}
+
+.toast {
+  z-index: var(--z-toast);
+}
+
+.lobby {
+  z-index: var(--z-lobby);
+}
+
 .card-enter {
   animation: rise 280ms ease;
 }

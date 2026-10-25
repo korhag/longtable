@@ -1,5 +1,6 @@
 <script lang="ts">
   import { bookmarkMatches, loadBookmarks, removeBookmark, saveBookmarks, upsertBookmark, type DiceBookmark } from '../dice/bookmarks';
+  import { sound } from '../dice/sound.svelte';
   import { dieLook, STANDARD_SIDES } from '../dice/palette';
   import { rollSetup } from '../dice/rollSetup.svelte';
   import { applyModifiers } from '../dice/rollText';
@@ -72,8 +73,8 @@
   }
 </script>
 
-<div class="glass pointer-events-auto flex flex-col gap-2 rounded-2xl px-3 py-2">
-  <div class="flex items-center gap-1.5">
+<div class="flex flex-col gap-2">
+  <div class="flex flex-wrap items-center gap-1.5">
     {#each faces as face (face.sides)}
       <DiePip sides={face.sides} body={face.body} ink={face.ink} onclick={() => addDie(face.sides)} />
     {/each}
@@ -100,24 +101,26 @@
     >★</button>
   </div>
 
+  <input class="field" bind:value={formula} aria-label="Dice formula" onkeydown={(event) => { if (event.key === 'Enter') roll(); }} />
+
   <div class="flex items-center gap-1.5">
-    <input class="field min-w-0 flex-1" bind:value={formula} aria-label="Dice formula" onkeydown={(event) => { if (event.key === 'Enter') roll(); }} />
     <ModifierBox sign="+" value={rollSetup.plus} onchange={(next) => (rollSetup.plus = next)} />
     <ModifierBox sign="−" value={rollSetup.minus} onchange={(next) => (rollSetup.minus = next)} />
   </div>
 
+  <div class="flex flex-col overflow-hidden rounded-lg border border-[rgba(212,166,86,0.3)]">
+    {#each modes as mode (mode.id)}
+      <button
+        class={`px-3 py-2 text-left text-xs ${rollSetup.visibility === mode.id ? 'bg-white/15' : ''}`}
+        type="button"
+        onclick={() => (rollSetup.visibility = mode.id)}
+      >{mode.name}</button>
+    {/each}
+  </div>
   <div class="flex items-center gap-1.5">
-    <div class="flex overflow-hidden rounded-lg border border-[rgba(212,166,86,0.3)]">
-      {#each modes as mode (mode.id)}
-        <button
-          class={`px-2 py-1 text-[11px] ${rollSetup.visibility === mode.id ? 'bg-white/15' : ''}`}
-          type="button"
-          onclick={() => (rollSetup.visibility = mode.id)}
-        >{mode.name}</button>
-      {/each}
-    </div>
-    <button class="btn quiet px-2 py-1 text-xs" type="button" onclick={clear}>Clear</button>
-    <button class="btn display ml-auto px-4 py-1 text-sm" type="button" onclick={roll}>Roll</button>
+    <button class="btn quiet px-2 text-xs" type="button" onclick={() => sound.set(!sound.muted)}>{sound.muted ? 'Sound off' : 'Sound on'}</button>
+    <button class="btn quiet px-2 text-xs" type="button" onclick={clear}>Clear</button>
+    <button class="btn display ml-auto px-4 text-sm" type="button" onclick={roll}>Roll</button>
   </div>
 </div>
 

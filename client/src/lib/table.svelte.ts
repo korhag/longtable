@@ -6,6 +6,7 @@
 
 import { ClockSync } from './net/clock';
 import type { Campaign } from './net/bindings/Campaign.ts';
+import type { Listing } from './net/bindings/Listing.ts';
 import type { Character } from './net/bindings/Character.ts';
 import type { ClientMsg } from './net/bindings/ClientMsg.ts';
 import type { DieMesh } from './net/bindings/DieMesh.ts';
@@ -43,7 +44,9 @@ class TableStore {
   fog = $state<FogView | null>(null);
   rolls = $state<RollLogEntry[]>([]);
   systems = $state<SystemDef[]>([]);
-  campaign = $state<Campaign>({ systemId: null });
+  campaign = $state<Campaign>({ id: '', name: 'Campaign', systemId: null });
+  campaigns = $state<Listing[]>([]);
+  scenes = $state<Listing[]>([]);
   characters = $state<Character[]>([]);
   viewAs = $state<string | null>(null);
   diceMeshes = $state<DieMesh[]>([]);
@@ -81,6 +84,8 @@ class TableStore {
         this.fog = message.fog;
         this.rolls = message.rolls;
         this.campaign = message.campaign;
+        this.campaigns = message.campaigns;
+        this.scenes = message.scenes;
         this.characters = message.characters;
         this.viewAs = message.viewAs;
         this.role = message.you.role;
@@ -137,7 +142,9 @@ class TableStore {
     this.fog = null;
     this.rolls = [];
     this.systems = [];
-    this.campaign = { systemId: null };
+    this.campaign = { id: '', name: 'Campaign', systemId: null };
+    this.campaigns = [];
+    this.scenes = [];
     this.characters = [];
     this.viewAs = null;
     this.activeRoll = null;

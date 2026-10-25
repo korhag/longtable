@@ -45,7 +45,7 @@
       {#if entry.concealed}
         <p class="text-[11px] text-[var(--color-parchment)]/60">{entry.notice}</p>
       {:else if open(entry)}
-        <p class="truncate text-[10px] text-[var(--color-parchment)]/50">
+        <p class="truncate text-sm text-[var(--color-parchment)]/70">
           {dieText(entry)}
           {#if entry.outcome}
             <span class="text-[var(--color-gold-bright)]"> · {entry.outcome.label}</span>

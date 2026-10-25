@@ -7,8 +7,8 @@
 
 use crate::map::Vec2;
 use crate::net::protocol::{
-    DieResult, DoorView, FogMode, FogView, LightView, PlayerInfo, RollLogEntry, RollVisibility, SceneView, SegmentView,
-    Snapshot, TokenKind, TokenView,
+    DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, RollLogEntry, RollVisibility, SceneView,
+    SegmentView, Snapshot, TokenKind, TokenView,
 };
 use crate::systems::Character;
 use crate::vision::{point_in_poly, CELLS_PER_SQUARE};
@@ -177,7 +177,28 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         view_as: if viewer.role == Role::Gm { viewer.view_as.clone() } else { None },
         campaign: table.campaign.clone(),
         characters: visible_characters(table, viewer),
+        campaigns: if matches!(sight, Sight::Gm) { campaign_listings(table) } else { Vec::new() },
+        scenes: if matches!(sight, Sight::Gm) { scene_listings(table) } else { Vec::new() },
     }
+}
+
+fn campaign_listings(table: &Table) -> Vec<Listing> {
+    let mut listings = vec![Listing { id: table.campaign.id.clone(), name: table.campaign.name.clone() }];
+    for shelf in &table.shelved {
+        listings.push(Listing { id: shelf.campaign.id.clone(), name: shelf.campaign.name.clone() });
+    }
+    listings
+}
+
+fn scene_listings(table: &Table) -> Vec<Listing> {
+    let mut listings = Vec::new();
+    if let Some(scene) = &table.scene {
+        listings.push(Listing { id: scene.id.clone(), name: scene.name.clone() });
+    }
+    for shelf in &table.scenes {
+        listings.push(Listing { id: shelf.id.clone(), name: shelf.name.clone() });
+    }
+    listings
 }
 
 enum Sight {
@@ -338,6 +359,10 @@ mod tests {
         assert_eq!(gm_view.rolls[0].total, Some(17));
         assert_eq!(gm_view.rolls[0].outcome.as_ref().map(|outcome| outcome.tone.as_str()), Some("hope"));
         assert_eq!(gm_view.characters.len(), 2);
+        assert!(player_view.campaigns.is_empty());
+        assert!(player_view.scenes.is_empty());
+        assert_eq!(gm_view.campaigns.len(), 1);
+        assert!(gm_view.scenes.is_empty());
     }
 
     #[test]

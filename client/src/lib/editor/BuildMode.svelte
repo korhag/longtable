@@ -1,11 +1,26 @@
 <script lang="ts">
+  import { send } from '../net/socket';
   import { table } from '../table.svelte';
   import { BRUSH_SIZES } from './brush';
   import { editor, type BuildTool } from './draft.svelte';
 
   let width = $state(30);
   let height = $state(20);
+  let blankWidth = $state(30);
+  let blankHeight = $state(20);
   let name = $state('New map');
+  let fileInput: HTMLInputElement;
+
+  async function importMap(file: File) {
+    const body = new FormData();
+    body.append('map', file);
+    const response = await fetch('/api/maps/import', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${table.sessionToken ?? ''}` },
+      body,
+    });
+    if (!response.ok) table.error = await response.text();
+  }
 
   const tools: { id: BuildTool; name: string }[] = [
     { id: 'theme', name: 'Theme' },
@@ -38,9 +53,27 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="glass pointer-events-auto fixed top-20 left-4 z-10 max-h-[70vh] w-72 overflow-auto rounded-2xl p-3">
-  <p class="display text-sm text-[var(--color-gold-bright)]">Build</p>
-  <p class="mt-1 text-[11px] text-[var(--color-parchment)]/60">Brush a theme, then put the map on the table. Middle-drag pans. R or right-click mirrors a prop.</p>
+<div class="flex flex-col gap-1 text-xs">
+  <p class="text-xs text-[var(--color-parchment)]/65">Brush a theme, then put the map on the table. Middle-drag pans. R or right-click mirrors a prop.</p>
+  <div class="mt-2 flex gap-1.5">
+    <button class="btn quiet flex-1" type="button" onclick={() => fileInput.click()}>Import map</button>
+    <input
+      bind:this={fileInput}
+      class="hidden"
+      type="file"
+      accept=".dd2vtt,.uvtt,.json,application/json"
+      onchange={(event) => {
+        const file = event.currentTarget.files?.[0];
+        if (file) void importMap(file);
+        event.currentTarget.value = '';
+      }}
+    />
+  </div>
+  <div class="flex items-end gap-1.5">
+    <input class="field w-16" type="number" min="5" max="200" bind:value={blankWidth} aria-label="Blank width" />
+    <input class="field w-16" type="number" min="5" max="200" bind:value={blankHeight} aria-label="Blank height" />
+    <button class="btn quiet" type="button" onclick={() => send({ type: 'blankMap', width: Math.round(blankWidth), height: Math.round(blankHeight) })}>Blank</button>
+  </div>
 
   <select class="field mt-3" value={editor.draft?.id ?? ''} onchange={(event) => void editor.load(event.currentTarget.value)}>
     <option value="" disabled>Drafts</option>

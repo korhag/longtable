@@ -3,9 +3,14 @@ import type { Campaign } from "./Campaign.ts";
 import type { Character } from "./Character.ts";
 import type { DoorView } from "./DoorView.ts";
 import type { FogView } from "./FogView.ts";
+import type { Listing } from "./Listing.ts";
 import type { PlayerInfo } from "./PlayerInfo.ts";
 import type { RollLogEntry } from "./RollLogEntry.ts";
 import type { SceneView } from "./SceneView.ts";
 import type { TokenView } from "./TokenView.ts";
 
-export type Snapshot = { you: PlayerInfo, players: Array<PlayerInfo>, scene: SceneView | null, tokens: Array<TokenView>, doors: Array<DoorView>, fog: FogView, rolls: Array<RollLogEntry>, viewAs: string | null, campaign: Campaign, characters: Array<Character>, };
+export type Snapshot = { you: PlayerInfo, players: Array<PlayerInfo>, scene: SceneView | null, tokens: Array<TokenView>, doors: Array<DoorView>, fog: FogView, rolls: Array<RollLogEntry>, viewAs: string | null, campaign: Campaign, characters: Array<Character>, 
+/**
+ * Other campaigns and this campaign's scenes. Empty for a player.
+ */
+campaigns: Array<Listing>, scenes: Array<Listing>, };

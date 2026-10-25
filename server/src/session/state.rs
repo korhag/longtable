@@ -103,6 +103,27 @@ pub struct RollJob {
     pub parsed: RollFormula,
 }
 
+/// A scene that is not the one currently on the table.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SceneShelf {
+    pub id: String,
+    pub name: String,
+    pub scene: Option<Scene>,
+    pub tokens: Vec<Token>,
+    pub explored: Explored,
+}
+
+/// A campaign that is not the one currently being played.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CampaignShelf {
+    pub campaign: Campaign,
+    pub scene: Option<Scene>,
+    pub tokens: Vec<Token>,
+    pub explored: Explored,
+    pub characters: Vec<Character>,
+    pub scenes: Vec<SceneShelf>,
+}
+
 pub struct Table {
     pub passphrase: String,
     pub gm_key: String,
@@ -112,6 +133,9 @@ pub struct Table {
     pub explored: Explored,
     pub rolls: Vec<StoredRoll>,
     pub campaign: Campaign,
+    /// Scenes in the live campaign, other than the one on the table.
+    pub scenes: Vec<SceneShelf>,
+    pub shelved: Vec<CampaignShelf>,
     pub characters: Vec<Character>,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
@@ -130,7 +154,13 @@ impl Table {
             tokens: Vec::new(),
             explored: Explored::new(width, height),
             rolls: Vec::new(),
-            campaign: Campaign::default(),
+            campaign: Campaign {
+                id: Uuid::new_v4().to_string(),
+                name: "Campaign".into(),
+                system_id: None,
+            },
+            scenes: Vec::new(),
+            shelved: Vec::new(),
             characters: Vec::new(),
             clients: Vec::new(),
             sessions: HashMap::new(),
@@ -316,8 +346,8 @@ impl Table {
                 self.fog_brush(viewer, mode, &cells)?;
                 Ok(CommandEffect::Refresh)
             }
-            ClientMsg::CreateToken { name, x, y, owner_id, hidden, vision_radius, grants_vision, color } => {
-                self.create_token(viewer, name, x, y, owner_id, hidden, vision_radius, grants_vision, color)?;
+            ClientMsg::CreateToken { name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id } => {
+                self.create_token(viewer, name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id)?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::UpdateToken {
@@ -392,6 +422,38 @@ impl Table {
             }
             ClientMsg::AdjustResource { character_id, field, delta } => {
                 self.adjust_resource(viewer, &character_id, &field, delta, system)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::CreateCampaign { name, system_id } => {
+                self.create_campaign(viewer, name, system_id)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::SwitchCampaign { campaign_id } => {
+                self.switch_campaign(viewer, &campaign_id)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::RenameCampaign { campaign_id, name } => {
+                self.rename_campaign(viewer, &campaign_id, name)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::DeleteCampaign { campaign_id } => {
+                self.delete_campaign(viewer, &campaign_id)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::CreateScene { name, width, height } => {
+                self.create_scene(viewer, name, width, height)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::SwitchScene { scene_id } => {
+                self.switch_scene(viewer, &scene_id)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::RenameScene { scene_id, name } => {
+                self.rename_scene(viewer, &scene_id, name)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::DeleteScene { scene_id } => {
+                self.delete_scene(viewer, &scene_id)?;
                 Ok(CommandEffect::Refresh)
             }
         }
@@ -534,12 +596,23 @@ impl Table {
         vision_radius: f32,
         grants_vision: bool,
         color: String,
+        character_id: Option<String>,
     ) -> Result<(), String> {
         self.require_gm(viewer)?;
         let (width, height) = self.bounds();
         let x = snap_cell(x, width).unwrap_or(1.5);
         let y = snap_cell(y, height).unwrap_or(1.5);
         let owner_id = self.known_owner(owner_id)?;
+        let character_id = match character_id {
+            Some(id) if !id.is_empty() => {
+                if self.characters.iter().any(|character| character.id == id) {
+                    Some(id)
+                } else {
+                    return Err("that character is not at the table".into());
+                }
+            }
+            _ => None,
+        };
         let grants_vision = grants_vision && !hidden;
         self.tokens.push(Token {
             id: Uuid::new_v4().to_string(),
@@ -552,7 +625,7 @@ impl Table {
             hidden,
             vision_radius: vision_radius.clamp(0.0, 80.0),
             grants_vision,
-            character_id: None,
+            character_id,
         });
         self.reveal_from_tokens();
         Ok(())
@@ -843,6 +916,216 @@ impl Table {
         system.and_then(|system| system.actions.iter().find(|action| action.id == action_id).map(|action| action.name.clone()))
     }
 
+    pub fn ensure_campaign(&mut self) {
+        if self.campaign.id.is_empty() {
+            self.campaign.id = Uuid::new_v4().to_string();
+        }
+        if self.campaign.name.trim().is_empty() {
+            self.campaign.name = "Campaign".into();
+        }
+    }
+
+    fn pack_live_scene(&mut self) {
+        let Some(scene) = self.scene.take() else { return };
+        let shelf = SceneShelf {
+            id: scene.id.clone(),
+            name: scene.name.clone(),
+            scene: Some(scene),
+            tokens: std::mem::take(&mut self.tokens),
+            explored: self.explored.clone(),
+        };
+        if let Some(existing) = self.scenes.iter_mut().find(|item| item.id == shelf.id) {
+            *existing = shelf;
+        } else {
+            self.scenes.push(shelf);
+        }
+    }
+
+    fn apply_scene(&mut self, shelf: SceneShelf) {
+        self.scene = shelf.scene;
+        self.tokens = shelf.tokens;
+        self.explored = shelf.explored;
+        self.sync_fog_size();
+        self.reveal_from_tokens();
+    }
+
+    fn shelf_campaign(&self) -> CampaignShelf {
+        CampaignShelf {
+            campaign: self.campaign.clone(),
+            scene: self.scene.clone(),
+            tokens: self.tokens.clone(),
+            explored: self.explored.clone(),
+            characters: self.characters.clone(),
+            scenes: self.scenes.clone(),
+        }
+    }
+
+    fn restore_campaign(&mut self, shelf: CampaignShelf) {
+        self.campaign = shelf.campaign;
+        self.scene = shelf.scene;
+        self.tokens = shelf.tokens;
+        self.explored = shelf.explored;
+        self.characters = shelf.characters;
+        self.scenes = shelf.scenes;
+        self.ensure_campaign();
+        self.sync_fog_size();
+        self.reveal_from_tokens();
+    }
+
+    fn clear_table(&mut self) {
+        self.scene = None;
+        self.tokens.clear();
+        self.characters.clear();
+        self.scenes.clear();
+        let (width, height) = cells_for(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        self.explored = Explored::new(width, height);
+    }
+
+    fn create_campaign(&mut self, viewer: &Viewer, name: String, system_id: Option<String>) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.shelved.len() >= 40 {
+            return Err("the table has enough campaigns".into());
+        }
+        if let Some(id) = &system_id {
+            if !crate::systems::system_id_ok(id) {
+                return Err("that is not a system".into());
+            }
+        }
+        let name = title(&name)?;
+        self.shelved.push(self.shelf_campaign());
+        self.campaign = Campaign { id: Uuid::new_v4().to_string(), name, system_id };
+        self.clear_table();
+        Ok(())
+    }
+
+    fn switch_campaign(&mut self, viewer: &Viewer, campaign_id: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.campaign.id == campaign_id {
+            return Ok(());
+        }
+        let index = self
+            .shelved
+            .iter()
+            .position(|item| item.campaign.id == campaign_id)
+            .ok_or_else(|| "that campaign is not on this table".to_string())?;
+        let incoming = self.shelved.remove(index);
+        let outgoing = self.shelf_campaign();
+        self.shelved.push(outgoing);
+        self.restore_campaign(incoming);
+        Ok(())
+    }
+
+    fn rename_campaign(&mut self, viewer: &Viewer, campaign_id: &str, name: String) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        let name = title(&name)?;
+        if self.campaign.id == campaign_id {
+            self.campaign.name = name;
+            return Ok(());
+        }
+        let campaign = self
+            .shelved
+            .iter_mut()
+            .find(|item| item.campaign.id == campaign_id)
+            .ok_or_else(|| "that campaign is not on this table".to_string())?;
+        campaign.campaign.name = name;
+        Ok(())
+    }
+
+    fn delete_campaign(&mut self, viewer: &Viewer, campaign_id: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.campaign.id == campaign_id {
+            return Err("that campaign is the one being played".into());
+        }
+        let before = self.shelved.len();
+        self.shelved.retain(|item| item.campaign.id != campaign_id);
+        if self.shelved.len() == before {
+            return Err("that campaign is not on this table".into());
+        }
+        Ok(())
+    }
+
+    fn create_scene(&mut self, viewer: &Viewer, name: String, width: u32, height: u32) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.scenes.len() >= 40 {
+            return Err("this campaign has enough scenes".into());
+        }
+        if !(5..=200).contains(&width) || !(5..=200).contains(&height) {
+            return Err("a map is between 5 and 200 squares on a side".into());
+        }
+        let name = title(&name)?;
+        self.pack_live_scene();
+        self.install_scene(Scene {
+            id: Uuid::new_v4().to_string(),
+            name,
+            width: width as f32,
+            height: height as f32,
+            image_file: None,
+            walls: Vec::new(),
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: None,
+            move_blockers: Vec::new(),
+        });
+        Ok(())
+    }
+
+    fn switch_scene(&mut self, viewer: &Viewer, scene_id: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.scene.as_ref().is_some_and(|scene| scene.id == scene_id) {
+            return Ok(());
+        }
+        self.pack_live_scene();
+        let index = self
+            .scenes
+            .iter()
+            .position(|shelf| shelf.id == scene_id)
+            .ok_or_else(|| "that scene is not in this campaign".to_string())?;
+        let shelf = self.scenes.remove(index);
+        self.apply_scene(shelf);
+        Ok(())
+    }
+
+    fn rename_scene(&mut self, viewer: &Viewer, scene_id: &str, name: String) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        let name = title(&name)?;
+        if let Some(scene) = self.scene.as_mut().filter(|scene| scene.id == scene_id) {
+            scene.name = name;
+            return Ok(());
+        }
+        let shelf = self
+            .scenes
+            .iter_mut()
+            .find(|shelf| shelf.id == scene_id)
+            .ok_or_else(|| "that scene is not in this campaign".to_string())?;
+        shelf.name = name.clone();
+        if let Some(scene) = shelf.scene.as_mut() {
+            scene.name = name;
+        }
+        Ok(())
+    }
+
+    fn delete_scene(&mut self, viewer: &Viewer, scene_id: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.scene.as_ref().is_some_and(|scene| scene.id == scene_id) {
+            if self.scenes.is_empty() {
+                self.scene = None;
+                self.tokens.clear();
+                let (width, height) = cells_for(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+                self.explored = Explored::new(width, height);
+                return Ok(());
+            }
+            let next = self.scenes.remove(0);
+            self.apply_scene(next);
+            return Ok(());
+        }
+        let before = self.scenes.len();
+        self.scenes.retain(|shelf| shelf.id != scene_id);
+        if self.scenes.len() == before {
+            return Err("that scene is not in this campaign".into());
+        }
+        Ok(())
+    }
+
     fn set_campaign_system(&mut self, viewer: &Viewer, system_id: Option<String>) -> Result<(), String> {
         self.require_gm(viewer)?;
         if let Some(id) = &system_id {
@@ -1016,6 +1299,12 @@ fn same_key(given: &str, expected: &str) -> bool {
         value.chars().filter(|ch| !ch.is_whitespace() && *ch != '-').flat_map(|ch| ch.to_lowercase()).collect::<String>()
     };
     !expected.is_empty() && fold(given) == fold(expected)
+}
+
+fn title(name: &str) -> Result<String, String> {
+    let cleaned: String = name.chars().filter(|ch| !ch.is_control()).take(48).collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() { Err("it needs a name".into()) } else { Ok(cleaned) }
 }
 
 fn clean_name(name: &str) -> String {
@@ -1277,5 +1566,57 @@ mod tests {
             Some(system),
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn switching_scene_or_campaign_keeps_tokens_and_fog() {
+        use crate::net::protocol::ClientMsg;
+        let mut table = Table::new();
+        table.scene = Some(Scene {
+            id: "hall".into(),
+            name: "Hall".into(),
+            width: 20.0,
+            height: 20.0,
+            image_file: None,
+            walls: Vec::new(),
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: None,
+            move_blockers: Vec::new(),
+        });
+        table.tokens.push(Token {
+            id: "hero".into(),
+            name: "Ada".into(),
+            x: 2.5,
+            y: 2.5,
+            image_file: None,
+            color: "#d4a656".into(),
+            owner_id: None,
+            hidden: false,
+            vision_radius: 8.0,
+            grants_vision: true,
+            character_id: None,
+        });
+        table.explored.set(0, 0, true);
+        table
+            .command(&gm(), ClientMsg::CreateScene { name: "Cellar".into(), width: 10, height: 10 }, None)
+            .unwrap();
+        assert_eq!(table.scene.as_ref().unwrap().name, "Cellar");
+        assert!(table.tokens.is_empty());
+        assert!(!table.explored.get(0, 0));
+        table.command(&gm(), ClientMsg::SwitchScene { scene_id: "hall".into() }, None).unwrap();
+        assert_eq!(table.tokens[0].id, "hero");
+        assert!(table.explored.get(0, 0));
+
+        table
+            .command(&gm(), ClientMsg::CreateCampaign { name: "Next".into(), system_id: None }, None)
+            .unwrap();
+        assert_eq!(table.campaign.name, "Next");
+        assert!(table.tokens.is_empty());
+        let previous = table.shelved[0].campaign.id.clone();
+        table.command(&gm(), ClientMsg::SwitchCampaign { campaign_id: previous }, None).unwrap();
+        assert_eq!(table.campaign.name, "Campaign");
+        assert_eq!(table.tokens[0].id, "hero");
+        assert!(table.explored.get(0, 0));
     }
 }

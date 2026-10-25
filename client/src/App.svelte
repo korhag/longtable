@@ -1,25 +1,33 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { loadCatalog } from './lib/assets/catalog';
+  import CampaignPanel from './lib/campaign/CampaignPanel.svelte';
+  import RulesPreview from './lib/designer/RulesPreview.svelte';
+  import SystemDesigner from './lib/designer/SystemDesigner.svelte';
   import BuildMode from './lib/editor/BuildMode.svelte';
   import { editor } from './lib/editor/draft.svelte';
-  import { designer } from './lib/designer/designer.svelte';
-  import SystemDesigner from './lib/designer/SystemDesigner.svelte';
-  import { leaveTable, send } from './lib/net/socket';
+  import Dock from './lib/layout/Dock.svelte';
+  import { layout } from './lib/layout/layout.svelte';
+  import { modes } from './lib/layout/modes.svelte';
+  import Panel from './lib/layout/Panel.svelte';
+  import TopBar from './lib/layout/TopBar.svelte';
+  import type { SceneView } from './lib/net/bindings/SceneView.ts';
+  import { send } from './lib/net/socket';
   import { TableEngine } from './lib/render/engine';
   import { measure } from './lib/systems/measure';
   import { systems } from './lib/systems/store.svelte';
   import { table } from './lib/table.svelte';
   import CharacterBar from './lib/ui/CharacterBar.svelte';
-  import DiceDock from './lib/ui/DiceDock.svelte';
+  import DiceBar from './lib/ui/DiceBar.svelte';
+  import DiceStage from './lib/ui/DiceStage.svelte';
   import GmToolbar from './lib/ui/GmToolbar.svelte';
   import Lobby from './lib/ui/Lobby.svelte';
-  import Party from './lib/ui/Party.svelte';
+  import RollLog from './lib/ui/RollLog.svelte';
   import TokenPanel from './lib/ui/TokenPanel.svelte';
-  import ViewControls from './lib/ui/ViewControls.svelte';
-  import type { SceneView } from './lib/net/bindings/SceneView.ts';
 
   let host: HTMLDivElement;
+  let topBar = $state<HTMLElement | undefined>();
+  let bottomStrip = $state<HTMLElement | undefined>();
   let engine: TableEngine | undefined;
   let ready = $state(false);
   let measureLabel = $state<string | null>(null);
@@ -100,6 +108,23 @@
   });
 
   $effect(() => {
+    if (!ready || !engine) return;
+    layout.leftWidth;
+    layout.rightWidth;
+    modes.current;
+    table.role;
+    table.viewAs;
+    table.joined;
+    const gmTools = table.role === 'gm' && !table.viewAs;
+    engine.setInsets({
+      left: gmTools ? layout.leftWidth : 0,
+      right: layout.rightWidth,
+      top: topBar?.offsetHeight ?? 52,
+      bottom: bottomStrip?.offsetHeight ?? 0,
+    });
+  });
+
+  $effect(() => {
     if (!table.concealedNotice) return;
     const timer = window.setTimeout(() => table.clearNotice(), 4200);
     return () => window.clearTimeout(timer);
@@ -117,52 +142,69 @@
   <div class="vignette"></div>
 
   {#if table.joined}
-    <Party />
-    {#if table.role === 'gm' && designer.active}
-      <SystemDesigner />
-    {:else if table.role === 'gm' && editor.active}
-      <BuildMode />
-    {:else if table.role === 'gm'}
-      <GmToolbar />
-    {/if}
-    <div class="pointer-events-none fixed bottom-4 left-4 z-10 flex w-[min(42rem,calc(100vw-28rem))] flex-col items-stretch gap-2">
-      <TokenPanel />
-      {#if !designer.active}
-        <CharacterBar />
-      {/if}
+    <div class="pointer-events-none absolute inset-0 flex flex-col">
+      <div bind:this={topBar} class="pointer-events-auto">
+        <TopBar
+          onZoom={(factor) => engine?.zoomBy(factor)}
+          onFit={() => engine?.fitMap()}
+          onMe={() => { const token = mine(); if (token) engine?.centerOn(token.x, token.y); }}
+          onCycle={() => engine?.cycleGrid() ?? 'faint'}
+          onSetGrid={(style) => engine?.setGrid(style)}
+        />
+      </div>
+      <div class="flex min-h-0 flex-1">
+        {#if table.role === 'gm' && !table.viewAs}
+          <Dock side="left">
+            {#if modes.current === 'play'}
+              <Panel id="play" title="Play" grow><GmToolbar /></Panel>
+            {:else if modes.current === 'map'}
+              <Panel id="map" title="Map" grow><BuildMode /></Panel>
+            {:else if modes.current === 'campaign'}
+              <Panel id="campaign" title="Campaign" grow><CampaignPanel /></Panel>
+            {:else}
+              <Panel id="rules" title="Rules" grow><SystemDesigner /></Panel>
+            {/if}
+          </Dock>
+        {/if}
+        <div class="relative min-w-0 flex-1">
+          {#if modes.current === 'rules'}
+            <div class="pointer-events-none absolute inset-0 z-10 flex items-start justify-center overflow-auto p-4">
+              <RulesPreview />
+            </div>
+          {/if}
+          <div bind:this={bottomStrip} class="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-2 p-2">
+            {#if table.selectedTokenId}
+              <div class="pointer-events-auto w-[min(22rem,40%)]">
+                <Panel id="token" title="Token"><TokenPanel /></Panel>
+              </div>
+            {/if}
+            <div class="pointer-events-auto min-w-0 flex-1">
+              <Panel id="character" title="Character"><CharacterBar /></Panel>
+            </div>
+          </div>
+        </div>
+        <Dock side="right">
+          <Panel id="rolls" title="Rolls" grow><RollLog /></Panel>
+          <Panel id="dice" title="Dice"><DiceBar /></Panel>
+        </Dock>
+      </div>
     </div>
-    <DiceDock />
 
-    <div class="glass pointer-events-auto fixed top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full px-4 py-2 text-xs">
-      <span class="tracking-[0.18em] text-[var(--color-gold)] uppercase">{table.connected ? 'At the table' : 'Reconnecting'}</span>
-      <ViewControls
-        onZoom={(factor) => engine?.zoomBy(factor)}
-        onFit={() => engine?.fitMap()}
-        onMe={() => { const token = mine(); if (token) engine?.centerOn(token.x, token.y); }}
-        onCycle={() => engine?.cycleGrid() ?? 'faint'}
-        onSetGrid={(style) => engine?.setGrid(style)}
-      />
-      {#if table.role === 'gm'}
-        <button class="btn quiet px-2 py-1" type="button" onclick={() => { designer.active = false; editor.leave(); }}>Play</button>
-        <button class="btn quiet px-2 py-1" type="button" onclick={() => { designer.active = false; void editor.enter(); }}>Build</button>
-        <button class="btn quiet px-2 py-1" type="button" onclick={() => { editor.leave(); designer.active = true; }}>Rules</button>
-      {/if}
-      <button class="btn quiet px-2 py-1" type="button" onclick={() => leaveTable()}>Leave</button>
-    </div>
+    <DiceStage />
 
     {#if measureLabel}
-      <p class="pointer-events-none fixed z-30 rounded-full bg-[#1c140e]/90 px-2 py-1 text-xs text-[var(--color-gold-bright)]" style={`left:${measureAt.x + 14}px;top:${measureAt.y + 14}px`}>
+      <p class="pointer-events-none fixed z-[var(--z-float)] rounded-full bg-[#1c140e]/90 px-2 py-1 text-xs text-[var(--color-gold-bright)]" style={`left:${measureAt.x + 14}px;top:${measureAt.y + 14}px`}>
         {measureLabel}
       </p>
     {/if}
 
     {#if table.concealedNotice}
-      <p class="glass pointer-events-none fixed top-16 left-1/2 z-20 -translate-x-1/2 rounded-full px-4 py-2 text-sm">
+      <p class="glass toast pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm">
         {table.concealedNotice}
       </p>
     {/if}
     {#if table.error}
-      <p class="glass pointer-events-none fixed bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-[#e7a090]">
+      <p class="glass toast pointer-events-none fixed bottom-24 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-[#e7a090]">
         {table.error}
       </p>
     {/if}

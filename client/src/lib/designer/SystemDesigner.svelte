@@ -1,11 +1,8 @@
 <script lang="ts">
-  import type { Character } from '../net/bindings/Character.ts';
   import type { Diagonal } from '../net/bindings/Diagonal.ts';
   import type { FieldKind } from '../net/bindings/FieldKind.ts';
   import { send } from '../net/socket';
   import { table } from '../table.svelte';
-  import CharacterBar from '../ui/CharacterBar.svelte';
-  import CharacterSheet from '../ui/CharacterSheet.svelte';
   import { designer, moveItem } from './designer.svelte';
 
   let freshId = $state('');
@@ -14,38 +11,15 @@
   const kinds: FieldKind[] = ['number', 'text', 'track', 'pips'];
   const diagonals: Diagonal[] = ['square', 'alternate', 'euclidean'];
 
-  const sample = $derived.by((): Character | null => {
-    const system = designer.draft;
-    if (!system) return null;
-    const numbers: Record<string, number> = {};
-    const texts: Record<string, string> = {};
-    for (const field of system.fields) {
-      if (field.kind === 'text') texts[field.id] = field.textDefault;
-      else numbers[field.id] = field.default;
-    }
-    return { id: 'sample', name: system.name || 'Sample', kind: 'pc', ownerId: null, systemId: system.id, numbers, texts };
-  });
-
   function save() {
     if (!designer.draft) return;
     send({ type: 'saveSystem', system: designer.draft });
   }
 
-  function chooseCampaign(id: string) {
-    send({ type: 'setCampaignSystem', systemId: id || null });
-  }
 </script>
 
-<aside class="glass pointer-events-auto fixed top-16 bottom-4 left-4 z-20 flex w-80 flex-col gap-2 overflow-auto rounded-2xl p-3 text-xs">
-  <p class="text-[10px] tracking-[0.18em] text-[var(--color-gold)] uppercase">Campaign</p>
-  <select class="field" value={table.campaign.systemId ?? ''} onchange={(event) => chooseCampaign(event.currentTarget.value)}>
-    <option value="">No system</option>
-    {#each table.systems as system (system.id)}
-      <option value={system.id}>{system.name}</option>
-    {/each}
-  </select>
-
-  <p class="mt-2 text-[10px] tracking-[0.18em] text-[var(--color-gold)] uppercase">Edit</p>
+<div class="flex flex-col gap-2 text-xs">
+  <p class="text-xs tracking-[0.18em] text-[var(--color-gold)] uppercase">Edit</p>
   <select class="field" value={designer.draft?.id ?? ''} onchange={(event) => {
     const found = table.systems.find((system) => system.id === event.currentTarget.value);
     if (found) designer.open(found);
@@ -168,16 +142,4 @@
       <button class="btn quiet" type="button" onclick={() => designer.revert()}>Revert</button>
     </div>
   {/if}
-</aside>
-
-{#if designer.draft && sample}
-  <div class="pointer-events-none fixed top-16 right-[27rem] bottom-4 left-[22rem] z-10 flex flex-col gap-3 overflow-auto p-4">
-    <div class="pointer-events-auto max-w-xl rounded-2xl border border-[rgba(212,166,86,0.3)] bg-[#1c140e]/90 p-4">
-      <p class="mb-2 text-[10px] tracking-[0.16em] text-[var(--color-gold)] uppercase">Sheet preview</p>
-      <CharacterSheet character={sample} system={designer.draft} preview />
-      <div class="mt-3">
-        <CharacterBar preview={{ character: sample, system: designer.draft }} />
-      </div>
-    </div>
-  </div>
-{/if}
+</div>

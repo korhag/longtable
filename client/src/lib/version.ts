@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.1.1';
-export const VERSION_NOTE = 'Art files and builds stay on this computer.';
+export const VERSION = '0.2.0';
+export const VERSION_NOTE = 'Campaigns, a cleaner table layout, and dice in the middle of the screen.';

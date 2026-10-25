@@ -4,6 +4,8 @@
   import type { FieldDef } from '../net/bindings/FieldDef.ts';
   import type { SystemDef } from '../net/bindings/SystemDef.ts';
   import { send } from '../net/socket';
+  import { layout } from '../layout/layout.svelte';
+  import Panel from '../layout/Panel.svelte';
   import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
   import CharacterSheet from './CharacterSheet.svelte';
@@ -45,7 +47,10 @@
         <p class="display text-base">{character.name}</p>
       {/if}
       {#if character && !preview}
-        <button class="btn quiet ml-auto px-2 py-1 text-[11px]" type="button" onclick={() => (systems.sheetOpen = !systems.sheetOpen)}>Sheet</button>
+        <button class="btn quiet ml-auto px-2 py-1 text-xs" type="button" onclick={() => {
+          systems.sheetOpen = !systems.sheetOpen;
+          if (systems.sheetOpen) layout.patch('sheet', { floating: true, collapsed: false });
+        }}>Sheet</button>
       {/if}
     </div>
 
@@ -89,11 +94,7 @@
 {/if}
 
 {#if !preview && systems.sheetOpen && character && system}
-  <div class="pointer-events-auto fixed top-16 bottom-24 left-4 z-30 w-[min(40rem,calc(100vw-28rem))] overflow-auto rounded-2xl border border-[rgba(212,166,86,0.35)] bg-[#1c140e] p-4 shadow-2xl">
-    <div class="mb-3 flex items-center justify-between">
-      <p class="display text-xl">{character.name}</p>
-      <button class="btn quiet px-2 py-1 text-xs" type="button" onclick={() => (systems.sheetOpen = false)}>Close</button>
-    </div>
+  <Panel id="sheet" title={character.name} onclose={() => (systems.sheetOpen = false)}>
     <CharacterSheet {character} {system} />
-  </div>
+  </Panel>
 {/if}

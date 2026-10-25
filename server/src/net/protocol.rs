@@ -248,6 +248,14 @@ pub struct FogView {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
+pub struct Listing {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
 pub struct Snapshot {
     pub you: PlayerInfo,
     pub players: Vec<PlayerInfo>,
@@ -261,6 +269,11 @@ pub struct Snapshot {
     pub campaign: Campaign,
     #[serde(default)]
     pub characters: Vec<Character>,
+    /// Other campaigns and this campaign's scenes. Empty for a player.
+    #[serde(default)]
+    pub campaigns: Vec<Listing>,
+    #[serde(default)]
+    pub scenes: Vec<Listing>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -311,6 +324,8 @@ pub enum ClientMsg {
         #[serde(default = "default_true")]
         grants_vision: bool,
         color: String,
+        #[serde(default)]
+        character_id: Option<String>,
     },
     UpdateToken {
         token_id: String,
@@ -387,6 +402,35 @@ pub enum ClientMsg {
         plus: i32,
         #[serde(default)]
         minus: i32,
+    },
+    CreateCampaign {
+        name: String,
+        system_id: Option<String>,
+    },
+    SwitchCampaign {
+        campaign_id: String,
+    },
+    RenameCampaign {
+        campaign_id: String,
+        name: String,
+    },
+    DeleteCampaign {
+        campaign_id: String,
+    },
+    CreateScene {
+        name: String,
+        width: u32,
+        height: u32,
+    },
+    SwitchScene {
+        scene_id: String,
+    },
+    RenameScene {
+        scene_id: String,
+        name: String,
+    },
+    DeleteScene {
+        scene_id: String,
     },
 }
 

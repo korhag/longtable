@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::map::Scene;
-use crate::session::state::{Player, StoredRoll, Table, Token};
+use crate::session::state::{CampaignShelf, Player, SceneShelf, StoredRoll, Table, Token};
 use crate::systems::{Campaign, Character};
 use crate::vision::Explored;
 
@@ -28,6 +28,10 @@ struct SaveFile {
     campaign: Campaign,
     #[serde(default)]
     characters: Vec<Character>,
+    #[serde(default)]
+    scenes: Vec<SceneShelf>,
+    #[serde(default)]
+    shelved: Vec<CampaignShelf>,
 }
 
 pub fn load_into(table: &mut Table, data_dir: &Path) {
@@ -56,6 +60,9 @@ pub fn load_into(table: &mut Table, data_dir: &Path) {
             table.rolls = save.rolls;
             table.campaign = save.campaign;
             table.characters = save.characters;
+            table.scenes = save.scenes;
+            table.shelved = save.shelved;
+            table.ensure_campaign();
             table.sync_fog_size();
             tracing::info!("restored {}", path.display());
         }
@@ -80,6 +87,8 @@ pub fn write(table: &Table, data_dir: &Path) -> std::io::Result<()> {
         rolls: table.rolls.clone(),
         campaign: table.campaign.clone(),
         characters: table.characters.clone(),
+        scenes: table.scenes.clone(),
+        shelved: table.shelved.clone(),
     };
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join("state.json");
@@ -121,6 +130,10 @@ mod tests {
         let mut table = Table::new();
         load_into(&mut table, &dir);
         assert!(table.campaign.system_id.is_none());
+        assert_eq!(table.campaign.name, "Campaign");
+        assert!(!table.campaign.id.is_empty());
+        assert!(table.scenes.is_empty());
+        assert!(table.shelved.is_empty());
         assert!(table.characters.is_empty());
         assert_eq!(table.tokens[0].character_id, None);
         let _ = std::fs::remove_dir_all(&dir);

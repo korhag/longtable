@@ -50,7 +50,7 @@
   }
 </script>
 
-<div class="fixed inset-0 z-30 grid place-items-center bg-[#100e0c]/80 p-6">
+<div class="lobby fixed inset-0 grid place-items-center bg-[#100e0c]/80 p-6">
   <form class="glass w-full max-w-md rounded-3xl p-8" onsubmit={(event) => { event.preventDefault(); submit(); }}>
     <p class="text-xs tracking-[0.28em] text-[var(--color-gold)] uppercase">Take a seat</p>
     <h1 class="display mt-2 text-4xl text-[var(--color-gold-bright)]">Game Table</h1>

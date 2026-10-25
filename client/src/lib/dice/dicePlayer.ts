@@ -354,7 +354,7 @@ function numberPlate(
   const center = average(points);
   const direction = new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
   const radius = inscribedRadius(points, center);
-  const plate = texturedPlate(radius * 1.65, value, ink, stroke, underline);
+  const plate = texturedPlate(radius * 1.9, value, ink, stroke, underline);
   plate.position.copy(center).addScaledVector(direction, 0.014);
   alignPlate(plate, direction, new THREE.Vector3(0, 1, 0));
   return plate;
@@ -396,30 +396,31 @@ function texturedPlate(side: number, value: number, ink: string, stroke: string,
 
 function paintNumber(value: number, ink: string, stroke: string, underline: boolean) {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
+  canvas.width = 512;
+  canvas.height = 512;
   const context = canvas.getContext('2d');
   if (!context) return null;
-  context.clearRect(0, 0, 256, 256);
-  context.font = '700 168px Cinzel, serif';
+  context.clearRect(0, 0, 512, 512);
+  context.font = '600 320px Inter, sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
-  context.lineWidth = 16;
+  context.lineWidth = 28;
   context.strokeStyle = stroke;
-  context.strokeText(String(value), 128, 138);
+  context.strokeText(String(value), 256, 270);
   context.fillStyle = ink;
-  context.fillText(String(value), 128, 138);
+  context.fillText(String(value), 256, 270);
   if (underline && (value === 6 || value === 9)) {
     context.strokeStyle = ink;
-    context.lineWidth = 10;
+    context.lineWidth = 18;
     context.beginPath();
-    context.moveTo(86, 198);
-    context.lineTo(170, 198);
+    context.moveTo(170, 390);
+    context.lineTo(342, 390);
     context.stroke();
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
   return texture;
 }
 
@@ -435,7 +436,7 @@ function valueTag(value: number, sign: number, tag: string | null, tags: TagColo
   roundRect(context, 18, 16, 220, 96, 28);
   context.fill();
   context.fillStyle = look.ink;
-  context.font = '700 72px Cinzel, serif';
+  context.font = '600 72px Inter, sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(sign < 0 ? `−${value}` : String(value), 128, 68);
