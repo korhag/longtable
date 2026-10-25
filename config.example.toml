@@ -1,0 +1,13 @@
+# Copy to config.toml. The server also reads RPG_BIND, RPG_GM_KEY,
+# RPG_PASSPHRASE, RPG_DATA_DIR, RPG_STATIC_DIR, RPG_ASSETS_DIR, RPG_SYSTEMS_DIR, and RPG_CONFIG.
+# Run the binary from the repository root so these paths resolve.
+# An empty gm_key is remembered in data/host.key, so a restart
+# keeps the same key.
+
+bind = "0.0.0.0:8080"
+gm_key = ""
+table_passphrase = "table"
+data_dir = "data"
+static_dir = "client/dist"
+assets_dir = "assets"
+systems_dir = "systems"

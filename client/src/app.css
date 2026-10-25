@@ -1,0 +1,133 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Cinzel', serif;
+  --font-sans: 'Inter', sans-serif;
+  --color-ink: #140f0c;
+  --color-parchment: #f4ecdf;
+  --color-gold: #d4a656;
+  --color-gold-bright: #f2d48a;
+  --color-leather: #2a1c14;
+  --color-felt: #1b3a2c;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: #100e0c;
+  color: var(--color-parchment);
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 42%, rgba(8, 6, 4, 0.55) 100%),
+    linear-gradient(to top, rgba(8, 6, 4, 0.45), transparent 18%);
+  z-index: 2;
+}
+
+.glass {
+  background: rgba(20, 14, 10, 0.72);
+  border: 1px solid rgba(212, 166, 86, 0.28);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 236, 210, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+.display {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(212, 166, 86, 0.25);
+  background: rgba(8, 6, 4, 0.45);
+  padding: 0.55rem 0.75rem;
+  outline: none;
+}
+
+.field:focus {
+  border-color: rgba(242, 212, 138, 0.7);
+}
+
+.btn {
+  border-radius: 0.7rem;
+  border: 1px solid rgba(212, 166, 86, 0.45);
+  background: linear-gradient(180deg, #8a6233, #5c3b1e);
+  padding: 0.55rem 0.9rem;
+  color: #f8efdf;
+  box-shadow: inset 0 1px 0 rgba(255, 230, 190, 0.25);
+}
+
+.btn:hover {
+  filter: brightness(1.08);
+}
+
+.btn.quiet {
+  background: rgba(255, 244, 220, 0.04);
+  border-color: rgba(212, 166, 86, 0.22);
+}
+
+.btn.active {
+  background: linear-gradient(180deg, #c6a15a, #8a6233);
+  color: #1a120c;
+}
+
+.die-pip {
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgba(255, 236, 210, 0.2);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+}
+
+.portrait {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 999px;
+  border: 2px solid var(--ring, #d4a656);
+  background: #1a140f;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+}
+
+.card-enter {
+  animation: rise 280ms ease;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

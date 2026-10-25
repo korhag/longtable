@@ -1,0 +1,132 @@
+{
+  "id": "core",
+  "name": "Core",
+  "pixelsPerCell": 128,
+  "filtering": "linear",
+  "terrains": [
+    { "id": "grass", "name": "Grass", "swatch": "#5d8a4a", "layer": 2, "files": [] },
+    { "id": "dirt", "name": "Dirt", "swatch": "#8a6a3e", "layer": 1, "files": [] },
+    { "id": "sand", "name": "Sand", "swatch": "#d2b48c", "layer": 1, "files": [] },
+    { "id": "snow", "name": "Snow", "swatch": "#e7eef2", "layer": 2, "files": [] },
+    { "id": "ice", "name": "Ice", "swatch": "#9ec9d6", "layer": 3, "files": [] },
+    { "id": "swamp", "name": "Swamp", "swatch": "#4d6a45", "layer": 1, "files": [] },
+    { "id": "water", "name": "Water", "swatch": "#3d6e8a", "layer": 0, "files": [] },
+    { "id": "stone", "name": "Stone", "swatch": "#6e675f", "layer": 1, "files": [] }
+  ],
+  "decals": [
+    { "id": "tuft", "name": "Tuft", "size": [1, 1], "rotate": true },
+    { "id": "crack", "name": "Crack", "size": [1, 1], "rotate": true },
+    { "id": "pebble", "name": "Pebble", "size": [1, 1], "rotate": true },
+    { "id": "snow-drift", "name": "Snow drift", "size": [2, 1], "rotate": false },
+    { "id": "puddle", "name": "Puddle", "size": [1, 1], "rotate": true },
+    { "id": "moss", "name": "Moss", "size": [1, 1], "rotate": true }
+  ],
+  "walls": [
+    { "id": "hedge", "name": "Hedge" },
+    { "id": "palisade", "name": "Palisade" },
+    { "id": "sandstone", "name": "Sandstone" },
+    { "id": "ice-wall", "name": "Ice wall" },
+    { "id": "bog-fence", "name": "Bog fence" },
+    { "id": "masonry", "name": "Masonry" }
+  ],
+  "doors": [
+    { "id": "hedge-gate", "name": "Hedge gate", "wall": "hedge" },
+    { "id": "palisade-gate", "name": "Palisade gate", "wall": "palisade" },
+    { "id": "sand-arch", "name": "Sand arch", "wall": "sandstone" },
+    { "id": "ice-gate", "name": "Ice gate", "wall": "ice-wall" },
+    { "id": "bog-gate", "name": "Bog gate", "wall": "bog-fence" },
+    { "id": "dungeon-door", "name": "Dungeon door", "wall": "masonry" }
+  ],
+  "props": [
+    { "id": "oak", "name": "Oak", "footprint": [2, 2], "blocks": "sight", "mirror": true, "height": 3 },
+    { "id": "pine", "name": "Pine", "footprint": [2, 2], "blocks": "sight", "mirror": true, "height": 3 },
+    { "id": "bush", "name": "Bush", "footprint": [1, 1], "blocks": "none", "mirror": true, "height": 0.6 },
+    { "id": "rock", "name": "Rock", "footprint": [1, 1], "blocks": "move", "mirror": true, "height": 0.5 },
+    { "id": "cactus", "name": "Cactus", "footprint": [1, 1], "blocks": "move", "mirror": false, "height": 1.5 },
+    { "id": "dead-tree", "name": "Dead tree", "footprint": [2, 2], "blocks": "sight", "mirror": true, "height": 2.5 },
+    { "id": "reed", "name": "Reed", "footprint": [1, 1], "blocks": "none", "mirror": true, "height": 1 },
+    { "id": "ice-spike", "name": "Ice spike", "footprint": [1, 1], "blocks": "move", "mirror": false, "height": 1.2 },
+    { "id": "crate", "name": "Crate", "footprint": [1, 1], "blocks": "move", "mirror": true, "height": 0.8 },
+    { "id": "barrel", "name": "Barrel", "footprint": [1, 1], "blocks": "move", "mirror": true, "height": 1 },
+    { "id": "table", "name": "Table", "footprint": [2, 1], "blocks": "move", "mirror": true, "height": 0.75 },
+    { "id": "pillar", "name": "Pillar", "footprint": [1, 1], "blocks": "sight", "mirror": false, "height": 2 }
+  ],
+  "themes": [
+    {
+      "id": "grassland",
+      "name": "Grassland",
+      "terrain": "grass",
+      "wall": "hedge",
+      "door": "hedge-gate",
+      "scatter": [
+        { "asset": "core/bush", "density": 1.2, "spacing": 2 },
+        { "asset": "core/rock", "density": 0.6, "spacing": 2 },
+        { "asset": "core/tuft", "density": 3, "spacing": 1 }
+      ]
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "terrain": "grass",
+      "wall": "palisade",
+      "door": "palisade-gate",
+      "scatter": [
+        { "asset": "core/oak", "density": 1.6, "spacing": 3 },
+        { "asset": "core/pine", "density": 1.2, "spacing": 3 },
+        { "asset": "core/bush", "density": 1.5, "spacing": 2 },
+        { "asset": "core/tuft", "density": 2, "spacing": 1 }
+      ]
+    },
+    {
+      "id": "desert",
+      "name": "Desert",
+      "terrain": "sand",
+      "wall": "sandstone",
+      "door": "sand-arch",
+      "scatter": [
+        { "asset": "core/cactus", "density": 1.2, "spacing": 2 },
+        { "asset": "core/rock", "density": 0.8, "spacing": 2 },
+        { "asset": "core/crack", "density": 2, "spacing": 1 }
+      ]
+    },
+    {
+      "id": "glacier",
+      "name": "Glacier",
+      "terrain": "snow",
+      "wall": "ice-wall",
+      "door": "ice-gate",
+      "scatter": [
+        { "asset": "core/ice-spike", "density": 1.4, "spacing": 2 },
+        { "asset": "core/rock", "density": 0.5, "spacing": 2 },
+        { "asset": "core/snow-drift", "density": 1.5, "spacing": 2 }
+      ]
+    },
+    {
+      "id": "swamp",
+      "name": "Swamp",
+      "terrain": "swamp",
+      "wall": "bog-fence",
+      "door": "bog-gate",
+      "scatter": [
+        { "asset": "core/dead-tree", "density": 1, "spacing": 3 },
+        { "asset": "core/reed", "density": 2.5, "spacing": 1 },
+        { "asset": "core/puddle", "density": 1.5, "spacing": 2 }
+      ]
+    },
+    {
+      "id": "dungeon",
+      "name": "Dungeon",
+      "terrain": "stone",
+      "wall": "masonry",
+      "door": "dungeon-door",
+      "scatter": [
+        { "asset": "core/crate", "density": 0.8, "spacing": 2 },
+        { "asset": "core/barrel", "density": 0.8, "spacing": 2 },
+        { "asset": "core/table", "density": 0.4, "spacing": 3 },
+        { "asset": "core/pillar", "density": 0.5, "spacing": 3 },
+        { "asset": "core/moss", "density": 2, "spacing": 1 }
+      ]
+    }
+  ],
+  "tray": {}
+}

@@ -1,0 +1,15 @@
+# Build output. The client and server source stay.
+target/
+node_modules/
+dist/
+*.log
+
+# This computer's table: saves, the host key, and the local config.
+data/
+config.toml
+
+# Drawn art. Pack definitions stay, and so do the game systems in systems/.
+assets/**/*.*
+!assets/**/*.json
+
+.DS_Store

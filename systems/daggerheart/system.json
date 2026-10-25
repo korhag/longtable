@@ -1,0 +1,65 @@
+{
+  "id": "daggerheart",
+  "name": "Daggerheart",
+  "fields": [
+    { "id": "agility", "name": "Agility", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "strength", "name": "Strength", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "finesse", "name": "Finesse", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "instinct", "name": "Instinct", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "presence", "name": "Presence", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "knowledge", "name": "Knowledge", "kind": "number", "min": -5, "max": 6, "default": 0 },
+    { "id": "evasion", "name": "Evasion", "kind": "number", "min": 0, "max": 40, "default": 10 },
+    { "id": "armorscore", "name": "Armor score", "kind": "number", "min": 0, "max": 12, "default": 0 },
+    { "id": "proficiency", "name": "Proficiency", "kind": "number", "min": 1, "max": 6, "default": 1 },
+    { "id": "level", "name": "Level", "kind": "number", "min": 1, "max": 10, "default": 1 },
+    { "id": "major", "name": "Major", "kind": "number", "min": 0, "max": 40, "default": 7 },
+    { "id": "severe", "name": "Severe", "kind": "number", "min": 0, "max": 50, "default": 13 },
+    { "id": "hpmax", "name": "HP max", "kind": "number", "min": 1, "max": 20, "default": 6 },
+    { "id": "hp", "name": "HP", "kind": "track", "min": 0, "maxFrom": "hpmax", "default": 6 },
+    { "id": "stress", "name": "Stress", "kind": "track", "min": 0, "max": 6, "default": 0 },
+    { "id": "hope", "name": "Hope", "kind": "pips", "min": 0, "max": 6, "default": 2 },
+    { "id": "armor", "name": "Armor", "kind": "pips", "min": 0, "maxFrom": "armorscore", "default": 0 },
+    { "id": "ancestry", "name": "Ancestry", "kind": "text", "textDefault": "" },
+    { "id": "community", "name": "Community", "kind": "text", "textDefault": "" },
+    { "id": "class", "name": "Class", "kind": "text", "textDefault": "" },
+    { "id": "experiences", "name": "Experiences", "kind": "text", "textDefault": "" },
+    { "id": "notes", "name": "Notes", "kind": "text", "textDefault": "" }
+  ],
+  "dieTags": [
+    { "letter": "h", "id": "hope", "name": "Hope", "body": "#d4a656", "ink": "#1c140e" },
+    { "letter": "f", "id": "fear", "name": "Fear", "body": "#3c2158", "ink": "#f4ecdf" }
+  ],
+  "actions": [
+    { "id": "agility", "name": "Agility", "formula": "1d12h+1d12f+@agility" },
+    { "id": "strength", "name": "Strength", "formula": "1d12h+1d12f+@strength" },
+    { "id": "finesse", "name": "Finesse", "formula": "1d12h+1d12f+@finesse" },
+    { "id": "instinct", "name": "Instinct", "formula": "1d12h+1d12f+@instinct" },
+    { "id": "presence", "name": "Presence", "formula": "1d12h+1d12f+@presence" },
+    { "id": "knowledge", "name": "Knowledge", "formula": "1d12h+1d12f+@knowledge" }
+  ],
+  "sheet": {
+    "sections": [
+      { "title": "Identity", "columns": 2, "fields": ["ancestry", "community", "class", "level"] },
+      { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
+      { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "major", "severe", "hpmax"] },
+      { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope", "armor"] },
+      { "title": "Notes", "columns": 1, "fields": ["experiences", "notes"] }
+    ]
+  },
+  "toolbar": {
+    "resources": ["hp", "stress", "hope", "armor"],
+    "actions": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"]
+  },
+  "grid": {
+    "perSquare": 1,
+    "unit": "",
+    "diagonal": "square",
+    "ranges": [
+      { "name": "Melee", "upTo": 1 },
+      { "name": "Very Close", "upTo": 3 },
+      { "name": "Close", "upTo": 6 },
+      { "name": "Far", "upTo": 12 },
+      { "name": "Very Far", "upTo": 100 }
+    ]
+  }
+}

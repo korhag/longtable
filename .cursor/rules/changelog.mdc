@@ -1,0 +1,25 @@
+---
+description: Bump the lobby version and CHANGELOG.md whenever the game changes
+alwaysApply: true
+---
+
+# Version and changelog
+
+After a change to the game, docs, or config, update both files in the same edit:
+
+- `client/src/lib/version.ts` — `VERSION` and `VERSION_NOTE`
+- `CHANGELOG.md` — a new entry at the top
+
+```markdown
+## 0.2.0 — 2026-10-25
+
+- The lobby shows who is seated.
+```
+
+`VERSION_NOTE` and the first bullet of the newest entry are the same sentence. The note says what changed for someone at the table.
+
+- A fix bumps the patch: `0.1.0` becomes `0.1.1`.
+- Something a player can use bumps the minor: `0.2.0`.
+- A major bump (`1.0.0`) is only when a saved table or a connection would break.
+
+Do not bump for a question, a review, or an edit that only touches `CHANGELOG.md` or `client/src/lib/version.ts`. Do not rewrite older entries.
