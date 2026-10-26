@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::dice::{parse_formula, RollFormula, KEYFRAME_DT};
 use crate::map::compile::Compiled;
@@ -19,7 +19,7 @@ use crate::net::protocol::{
     ClientMsg, ConcealedRoll, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg,
 };
 use crate::systems::{
-    apply_modifiers, field_ceiling, fill_formula, Character, CharacterKind, FieldKind, SystemDef, Campaign,
+    apply_modifiers, field_ceiling, fill_formula, threshold_marks, Character, CharacterKind, FieldKind, SystemDef, Campaign,
 };
 use crate::vision::{cells_for, path_blocked, visibility_polygon, Explored, CELLS_PER_SQUARE};
 
@@ -342,6 +342,10 @@ impl Table {
                 self.set_door(viewer, &door_id, open)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::SetLighting { lighting } => {
+                self.set_lighting(viewer, &lighting)?;
+                Ok(CommandEffect::Refresh)
+            }
             ClientMsg::FogBrush { mode, cells } => {
                 self.fog_brush(viewer, mode, &cells)?;
                 Ok(CommandEffect::Refresh)
@@ -422,6 +426,10 @@ impl Table {
             }
             ClientMsg::AdjustResource { character_id, field, delta } => {
                 self.adjust_resource(viewer, &character_id, &field, delta, system)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::ApplyDamage { character_id, field_id, amount } => {
+                self.apply_damage(viewer, &character_id, &field_id, amount, system)?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::CreateCampaign { name, system_id } => {
@@ -570,6 +578,20 @@ impl Table {
             .ok_or_else(|| "that door is not on this map".to_string())?;
         door.open = open;
         self.reveal_from_tokens();
+        Ok(())
+    }
+
+    fn set_lighting(&mut self, viewer: &Viewer, lighting: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        let scene = self.scene.as_mut().ok_or_else(|| "there is no map".to_string())?;
+        let presentation = scene.presentation.as_mut().ok_or_else(|| "this map has no lighting to change".to_string())?;
+        if !presentation.lightings.iter().any(|item| item.id == lighting) {
+            return Err("that lighting is not in this package".into());
+        }
+        if !presentation.views.iter().all(|view| view.variants.iter().any(|variant| variant.id == lighting)) {
+            return Err("that lighting is missing a picture".into());
+        }
+        presentation.active_lighting = lighting.to_string();
         Ok(())
     }
 
@@ -752,6 +774,7 @@ impl Table {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            presentation: None,
         });
         Ok(())
     }
@@ -775,6 +798,7 @@ impl Table {
             lights: Vec::new(),
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
+            presentation: None,
         });
         Ok(())
     }
@@ -903,17 +927,37 @@ impl Table {
             .ok_or_else(|| "that character is not at the table".to_string())?;
         self.require_character(viewer, character)?;
         let system = system.ok_or_else(|| "this table has no system".to_string())?;
-        let action = system
-            .actions
-            .iter()
-            .find(|action| action.id == action_id)
-            .ok_or_else(|| "that action is not on this system".to_string())?;
-        let filled = fill_formula(&action.formula, &character.numbers)?;
+        let formula = if let Some(action) = system.actions.iter().find(|action| action.id == action_id) {
+            action.formula.clone()
+        } else if let Some(field) = system.fields.iter().find(|field| field.id == action_id && field.kind == FieldKind::Dice) {
+            character
+                .texts
+                .get(&field.id)
+                .filter(|text| !text.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| field.formula.clone())
+        } else {
+            return Err("that roll is not on this system".into());
+        };
+        let filled = fill_formula(&formula, &character.numbers)?;
         Ok(apply_modifiers(&filled, plus, minus))
     }
 
     pub fn action_label(&self, action_id: &str, system: Option<&SystemDef>) -> Option<String> {
-        system.and_then(|system| system.actions.iter().find(|action| action.id == action_id).map(|action| action.name.clone()))
+        system.and_then(|system| {
+            system
+                .actions
+                .iter()
+                .find(|action| action.id == action_id)
+                .map(|action| action.name.clone())
+                .or_else(|| {
+                    system
+                        .fields
+                        .iter()
+                        .find(|field| field.id == action_id && field.kind == FieldKind::Dice)
+                        .map(|field| field.name.clone())
+                })
+        })
     }
 
     pub fn ensure_campaign(&mut self) {
@@ -1065,6 +1109,7 @@ impl Table {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            presentation: None,
         });
         Ok(())
     }
@@ -1151,11 +1196,39 @@ impl Table {
         let mut numbers = BTreeMap::new();
         let mut texts = BTreeMap::new();
         if let Some(system) = system {
+            let placed: HashSet<&str> = system
+                .sheet_for(kind)
+                .sections
+                .iter()
+                .flat_map(|section| section.fields.iter().map(String::as_str))
+                .collect();
             for field in &system.fields {
-                if field.kind == FieldKind::Text {
-                    texts.insert(field.id.clone(), field.text_default.clone());
-                } else {
-                    numbers.insert(field.id.clone(), field.default);
+                if !placed.contains(field.id.as_str()) {
+                    continue;
+                }
+                match field.kind {
+                    FieldKind::Text => {
+                        texts.insert(field.id.clone(), field.text_default.clone());
+                    }
+                    FieldKind::Choice => {
+                        let value = if field.options.iter().any(|option| option == &field.text_default) {
+                            field.text_default.clone()
+                        } else {
+                            field.options.first().cloned().unwrap_or_default()
+                        };
+                        texts.insert(field.id.clone(), value);
+                    }
+                    FieldKind::Dice => {
+                        texts.insert(field.id.clone(), field.formula.clone());
+                    }
+                    FieldKind::Number | FieldKind::Pool => {
+                        numbers.insert(field.id.clone(), field.default);
+                    }
+                    FieldKind::Thresholds => {
+                        for step in &field.steps {
+                            numbers.insert(step.id.clone(), step.default);
+                        }
+                    }
                 }
             }
         }
@@ -1247,7 +1320,7 @@ impl Table {
             .find(|field| field.id == field_id)
             .ok_or_else(|| "that is not a field on this system".to_string())?;
         if !field.kind.holds_number() {
-            return Err("that field is text".into());
+            return Err("that field is not a number or a pool".into());
         }
         let ceiling = {
             let character = self
@@ -1261,6 +1334,51 @@ impl Table {
         let character = self.characters.iter_mut().find(|character| character.id == character_id).unwrap();
         let current = character.numbers.get(field_id).copied().unwrap_or(0);
         character.numbers.insert(field_id.to_string(), (current + delta).clamp(0, ceiling));
+        Ok(())
+    }
+
+    fn apply_damage(
+        &mut self,
+        viewer: &Viewer,
+        character_id: &str,
+        field_id: &str,
+        amount: i32,
+        system: Option<&SystemDef>,
+    ) -> Result<(), String> {
+        if amount < 0 {
+            return Err("damage cannot be negative".into());
+        }
+        let system = system.ok_or_else(|| "this table has no system".to_string())?;
+        let field = system
+            .fields
+            .iter()
+            .find(|field| field.id == field_id)
+            .ok_or_else(|| "that is not a thing on this system".to_string())?;
+        if field.kind != FieldKind::Thresholds {
+            return Err("that is not a damage threshold".into());
+        }
+        let pool_id = field.pool.clone().ok_or_else(|| "those thresholds are not linked to a pool".to_string())?;
+        let pool = system
+            .fields
+            .iter()
+            .find(|item| item.id == pool_id && item.kind == FieldKind::Pool)
+            .ok_or_else(|| "those thresholds are not linked to a pool".to_string())?;
+        let (marks, ceiling, current) = {
+            let character = self
+                .characters
+                .iter()
+                .find(|character| character.id == character_id)
+                .ok_or_else(|| "that character is not at the table".to_string())?;
+            self.require_character(viewer, character)?;
+            let Some(marks) = threshold_marks(field, amount, &character.numbers) else {
+                return Ok(());
+            };
+            let ceiling = field_ceiling(pool, &character.numbers);
+            let current = character.numbers.get(&pool_id).copied().unwrap_or(0);
+            (marks, ceiling, current)
+        };
+        let character = self.characters.iter_mut().find(|character| character.id == character_id).unwrap();
+        character.numbers.insert(pool_id, (current + marks).clamp(0, ceiling));
         Ok(())
     }
 
@@ -1382,6 +1500,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            presentation: None,
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -1424,6 +1543,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            presentation: None,
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -1470,6 +1590,7 @@ mod tests {
                 Segment { a: Vec2::new(3.0, 6.0), b: Vec2::new(1.0, 6.0) },
                 Segment { a: Vec2::new(1.0, 6.0), b: Vec2::new(1.0, 5.0) },
             ],
+            presentation: None,
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -1569,6 +1690,83 @@ mod tests {
     }
 
     #[test]
+    fn damage_marks_the_linked_pool_and_a_new_character_only_gets_its_sheet() {
+        use crate::net::protocol::ClientMsg;
+        use crate::systems::{CharacterKind, SystemDef};
+        let system: SystemDef = serde_json::from_str(
+            r#"{
+                "id": "sample",
+                "name": "Sample",
+                "fields": [
+                    {"id": "hpmax", "name": "HP max", "kind": "number", "default": 6},
+                    {"id": "hp", "name": "HP", "kind": "pool", "max": 6, "maxFrom": "hpmax"},
+                    {"id": "armor", "name": "Armor", "kind": "pool", "max": 3},
+                    {"id": "str", "name": "Strength", "kind": "number", "default": 2},
+                    {"id": "thresholds", "name": "Thresholds", "kind": "thresholds", "pool": "hp", "steps": [
+                        {"id": "minor", "name": "Minor", "default": 1, "marks": 1},
+                        {"id": "major", "name": "Major", "default": 7, "marks": 2},
+                        {"id": "severe", "name": "Severe", "default": 13, "marks": 3}
+                    ]},
+                    {"id": "damage", "name": "Damage", "kind": "dice", "formula": "1d6+@str"}
+                ],
+                "sheets": {
+                    "pc": {
+                        "sections": [{"title": "Vitals", "columns": 2, "fields": ["hpmax", "hp", "armor", "str", "thresholds", "damage"]}],
+                        "toolbar": {"resources": ["hp"], "actions": ["damage"]}
+                    },
+                    "adversary": {
+                        "sections": [{"title": "Card", "columns": 1, "fields": ["hpmax", "hp", "thresholds"]}],
+                        "toolbar": {"resources": ["hp"], "actions": []}
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let mut table = Table::new();
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Ada".into(), kind: CharacterKind::Pc }, Some(&system))
+            .unwrap();
+        assert!(table.characters[0].numbers.contains_key("armor"));
+        assert_eq!(table.characters[0].numbers.get("minor").copied(), Some(1));
+        assert_eq!(table.characters[0].texts.get("damage").map(String::as_str), Some("1d6+@str"));
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Foe".into(), kind: CharacterKind::Adversary }, Some(&system))
+            .unwrap();
+        let foe = &table.characters[1];
+        assert!(!foe.numbers.contains_key("armor"));
+        assert!(!foe.numbers.contains_key("str"));
+        assert!(foe.numbers.contains_key("hp"));
+        assert!(foe.numbers.contains_key("major"));
+
+        let id = table.characters[0].id.clone();
+        table.characters[0].numbers.insert("hp".into(), 0);
+        table
+            .command(&gm(), ClientMsg::ApplyDamage { character_id: id.clone(), field_id: "thresholds".into(), amount: 0 }, Some(&system))
+            .unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+        table
+            .command(&gm(), ClientMsg::ApplyDamage { character_id: id.clone(), field_id: "thresholds".into(), amount: 1 }, Some(&system))
+            .unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(1));
+        table
+            .command(&gm(), ClientMsg::ApplyDamage { character_id: id.clone(), field_id: "thresholds".into(), amount: 7 }, Some(&system))
+            .unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(3));
+        table
+            .command(&gm(), ClientMsg::ApplyDamage { character_id: id.clone(), field_id: "thresholds".into(), amount: 13 }, Some(&system))
+            .unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(6));
+        table
+            .command(&gm(), ClientMsg::ApplyDamage { character_id: id.clone(), field_id: "thresholds".into(), amount: 20 }, Some(&system))
+            .unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(6));
+
+        table.characters[0].texts.insert("damage".into(), "2d6+@str".into());
+        let formula = table.action_formula(&gm(), &id, "damage", 0, 0, Some(&system)).unwrap();
+        assert_eq!(formula, "2d6+2");
+    }
+
+    #[test]
     fn switching_scene_or_campaign_keeps_tokens_and_fog() {
         use crate::net::protocol::ClientMsg;
         let mut table = Table::new();
@@ -1583,6 +1781,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            presentation: None,
         });
         table.tokens.push(Token {
             id: "hero".into(),
@@ -1618,5 +1817,97 @@ mod tests {
         assert_eq!(table.campaign.name, "Campaign");
         assert_eq!(table.tokens[0].id, "hero");
         assert!(table.explored.get(0, 0));
+    }
+
+    #[test]
+    fn lighting_changes_the_picture_without_resetting_the_table() {
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        let picture = |lighting: &str| crate::map::presentation::SavedVariant {
+            id: lighting.into(),
+            file: format!("views/view-0/{lighting}.png"),
+        };
+        table.install_scene(Scene {
+            id: "camp".into(),
+            name: "Camp".into(),
+            width: 20.0,
+            height: 20.0,
+            image_file: None,
+            walls: vec![Segment { a: Vec2::new(1.0, 1.0), b: Vec2::new(4.0, 1.0) }],
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: None,
+            move_blockers: Vec::new(),
+            presentation: Some(crate::map::Prerendered {
+                active_lighting: "day".into(),
+                default_view: "view-0".into(),
+                view_order: vec!["view-0".into(), "view-1".into()],
+                lightings: vec![
+                    crate::map::presentation::LightingDef { id: "day".into(), label: "Day".into() },
+                    crate::map::presentation::LightingDef { id: "night".into(), label: "Night".into() },
+                ],
+                views: vec![crate::map::presentation::SavedView {
+                    id: "view-0".into(),
+                    azimuth_deg: 0.0,
+                    elevation_deg: 53.13,
+                    ortho_half_width: 12.0,
+                    ortho_half_height: 10.0,
+                    target: [10.0, 1.0, 10.0],
+                    image_size: [32, 32],
+                    ground_to_image: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    height_to_image: [0.0, -1.0],
+                    pull: 40.0,
+                    near: 0.05,
+                    far: 200.0,
+                    pixels_per_square: 32.0,
+                    depth_file: None,
+                    variants: vec![picture("day"), picture("night")],
+                }],
+                doors: Vec::new(),
+                capabilities: crate::map::presentation::Capabilities {
+                    depth: true,
+                    doors: false,
+                    move_blockers: false,
+                    walls: true,
+                    lights: false,
+                    snow: false,
+                },
+                warnings: vec!["Furniture does not block movement.".into()],
+            }),
+        });
+        table.tokens.push(Token {
+            id: "ada".into(),
+            name: "Ada".into(),
+            x: 2.5,
+            y: 2.5,
+            image_file: None,
+            color: "#7eb8a2".into(),
+            owner_id: Some("p".into()),
+            hidden: false,
+            vision_radius: 2.0,
+            grants_vision: true,
+            character_id: None,
+        });
+        table.explored.set(19, 19, true);
+        let player = Viewer {
+            player_id: "p".into(),
+            role: Role::Player,
+            view_as: None,
+            session_token: "seat".into(),
+        };
+        assert!(table.command(&player, ClientMsg::SetLighting { lighting: "night".into() }, None).is_err());
+        table.command(&gm(), ClientMsg::SetLighting { lighting: "night".into() }, None).unwrap();
+        let scene = table.scene.as_ref().unwrap();
+        assert_eq!(scene.id, "camp");
+        assert_eq!(scene.presentation.as_ref().unwrap().active_lighting, "night");
+        assert_eq!(scene.walls.len(), 1);
+        assert_eq!(table.tokens.len(), 1);
+        assert!(table.explored.get(19, 19));
     }
 }

@@ -12,18 +12,43 @@
     { "id": "armorscore", "name": "Armor score", "kind": "number", "min": 0, "max": 12, "default": 0 },
     { "id": "proficiency", "name": "Proficiency", "kind": "number", "min": 1, "max": 6, "default": 1 },
     { "id": "level", "name": "Level", "kind": "number", "min": 1, "max": 10, "default": 1 },
-    { "id": "major", "name": "Major", "kind": "number", "min": 0, "max": 40, "default": 7 },
-    { "id": "severe", "name": "Severe", "kind": "number", "min": 0, "max": 50, "default": 13 },
     { "id": "hpmax", "name": "HP max", "kind": "number", "min": 1, "max": 20, "default": 6 },
-    { "id": "hp", "name": "HP", "kind": "track", "min": 0, "maxFrom": "hpmax", "default": 6 },
-    { "id": "stress", "name": "Stress", "kind": "track", "min": 0, "max": 6, "default": 0 },
-    { "id": "hope", "name": "Hope", "kind": "pips", "min": 0, "max": 6, "default": 2 },
-    { "id": "armor", "name": "Armor", "kind": "pips", "min": 0, "maxFrom": "armorscore", "default": 0 },
+    { "id": "stressmax", "name": "Stress max", "kind": "number", "min": 0, "max": 20, "default": 6 },
+    { "id": "tier", "name": "Tier", "kind": "number", "min": 1, "max": 4, "default": 1 },
+    { "id": "difficulty", "name": "Difficulty", "kind": "number", "min": 1, "max": 30, "default": 11 },
+    { "id": "attack", "name": "Attack", "kind": "number", "min": -5, "max": 12, "default": 1 },
+    {
+      "id": "thresholds",
+      "name": "Thresholds",
+      "kind": "thresholds",
+      "pool": "hp",
+      "hint": "Apply damage marks HP.",
+      "steps": [
+        { "id": "minor", "name": "Minor", "default": 1, "marks": 1 },
+        { "id": "major", "name": "Major", "default": 7, "marks": 2 },
+        { "id": "severe", "name": "Severe", "default": 13, "marks": 3 }
+      ]
+    },
+    { "id": "hp", "name": "HP", "kind": "pool", "look": "boxes", "min": 0, "max": 6, "maxFrom": "hpmax", "default": 0, "hint": "Marked hit points." },
+    { "id": "stress", "name": "Stress", "kind": "pool", "look": "boxes", "min": 0, "max": 6, "maxFrom": "stressmax", "default": 0 },
+    { "id": "hope", "name": "Hope", "kind": "pool", "look": "pips", "min": 0, "max": 6, "default": 2 },
+    { "id": "armor", "name": "Armor", "kind": "pool", "look": "pips", "min": 0, "max": 0, "maxFrom": "armorscore", "default": 0 },
+    { "id": "damage", "name": "Damage", "kind": "dice", "formula": "1d8", "hint": "Weapon damage. Change it on the sheet." },
+    { "id": "atkdamage", "name": "Attack damage", "kind": "dice", "formula": "1d8", "hint": "Damage this attack deals." },
+    {
+      "id": "advtype",
+      "name": "Type",
+      "kind": "choice",
+      "options": ["Standard", "Minion", "Horde", "Ranged", "Skulk", "Bruiser", "Leader", "Solo", "Social", "Support"],
+      "textDefault": "Standard"
+    },
     { "id": "ancestry", "name": "Ancestry", "kind": "text", "textDefault": "" },
     { "id": "community", "name": "Community", "kind": "text", "textDefault": "" },
     { "id": "class", "name": "Class", "kind": "text", "textDefault": "" },
     { "id": "experiences", "name": "Experiences", "kind": "text", "textDefault": "" },
-    { "id": "notes", "name": "Notes", "kind": "text", "textDefault": "" }
+    { "id": "notes", "name": "Notes", "kind": "text", "textDefault": "" },
+    { "id": "motives", "name": "Motives", "kind": "text", "textDefault": "" },
+    { "id": "features", "name": "Features", "kind": "text", "textDefault": "" }
   ],
   "dieTags": [
     { "letter": "h", "id": "hope", "name": "Hope", "body": "#d4a656", "ink": "#1c140e" },
@@ -35,20 +60,51 @@
     { "id": "finesse", "name": "Finesse", "formula": "1d12h+1d12f+@finesse" },
     { "id": "instinct", "name": "Instinct", "formula": "1d12h+1d12f+@instinct" },
     { "id": "presence", "name": "Presence", "formula": "1d12h+1d12f+@presence" },
-    { "id": "knowledge", "name": "Knowledge", "formula": "1d12h+1d12f+@knowledge" }
+    { "id": "knowledge", "name": "Knowledge", "formula": "1d12h+1d12f+@knowledge" },
+    { "id": "attackroll", "name": "Attack", "formula": "1d20+@attack" }
   ],
-  "sheet": {
-    "sections": [
-      { "title": "Identity", "columns": 2, "fields": ["ancestry", "community", "class", "level"] },
-      { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
-      { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "major", "severe", "hpmax"] },
-      { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope", "armor"] },
-      { "title": "Notes", "columns": 1, "fields": ["experiences", "notes"] }
-    ]
-  },
-  "toolbar": {
-    "resources": ["hp", "stress", "hope", "armor"],
-    "actions": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"]
+  "sheets": {
+    "pc": {
+      "sections": [
+        { "title": "Identity", "columns": 2, "fields": ["ancestry", "community", "class", "level"] },
+        { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
+        { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "hpmax"] },
+        { "title": "Thresholds", "columns": 1, "fields": ["thresholds"] },
+        { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope", "armor"] },
+        { "title": "Damage", "columns": 1, "fields": ["damage"] },
+        { "title": "Notes", "columns": 1, "fields": ["experiences", "notes"] }
+      ],
+      "toolbar": {
+        "resources": ["hp", "stress", "hope", "armor"],
+        "actions": ["agility", "strength", "finesse", "instinct", "presence", "knowledge", "damage"]
+      }
+    },
+    "npc": {
+      "sections": [
+        { "title": "Identity", "columns": 2, "fields": ["ancestry", "level"] },
+        { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
+        { "title": "Defense", "columns": 2, "fields": ["evasion", "hpmax", "thresholds"] },
+        { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope"] },
+        { "title": "Notes", "columns": 1, "fields": ["notes"] }
+      ],
+      "toolbar": {
+        "resources": ["hp", "stress", "hope"],
+        "actions": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"]
+      }
+    },
+    "adversary": {
+      "sections": [
+        { "title": "Rank", "columns": 2, "fields": ["advtype", "tier", "difficulty"] },
+        { "title": "Attack", "columns": 2, "fields": ["attack", "atkdamage"] },
+        { "title": "Thresholds", "columns": 1, "fields": ["thresholds"] },
+        { "title": "Resources", "columns": 2, "fields": ["hpmax", "hp", "stressmax", "stress"] },
+        { "title": "Notes", "columns": 1, "fields": ["motives", "features"] }
+      ],
+      "toolbar": {
+        "resources": ["hp", "stress"],
+        "actions": ["attackroll", "atkdamage"]
+      }
+    }
   },
   "grid": {
     "perSquare": 1,

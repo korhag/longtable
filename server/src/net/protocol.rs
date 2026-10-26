@@ -169,6 +169,84 @@ pub struct LightView {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
+pub struct PresentationLighting {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PresentationCapabilities {
+    pub depth: bool,
+    pub doors: bool,
+    pub move_blockers: bool,
+    pub walls: bool,
+    pub lights: bool,
+    pub snow: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PresentationVariant {
+    pub id: String,
+    pub color_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PresentationView {
+    pub id: String,
+    pub azimuth_deg: f32,
+    pub elevation_deg: f32,
+    pub ortho_half_width: f32,
+    pub ortho_half_height: f32,
+    pub target: [f32; 3],
+    pub image_size: [u32; 2],
+    pub pull: f32,
+    pub near: f32,
+    pub far: f32,
+    pub depth_url: Option<String>,
+    pub variants: Vec<PresentationVariant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PresentationDoorLayer {
+    pub view: String,
+    pub lighting: String,
+    pub color_url: String,
+    pub depth_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PresentationDoor {
+    pub id: String,
+    pub layers: Vec<PresentationDoorLayer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct Presentation {
+    pub active_lighting: String,
+    pub default_view: String,
+    pub view_order: Vec<String>,
+    pub lightings: Vec<PresentationLighting>,
+    pub views: Vec<PresentationView>,
+    pub doors: Vec<PresentationDoor>,
+    pub capabilities: PresentationCapabilities,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
 pub struct SceneView {
     pub id: String,
     pub name: String,
@@ -182,6 +260,9 @@ pub struct SceneView {
     /// the same way they receive an imported image. Fog still covers the view.
     #[serde(default)]
     pub layout: Option<MapLayout>,
+    /// Angled pictures of this grid. Missing on an ordinary battle map.
+    #[serde(default)]
+    pub presentation: Option<Presentation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -308,6 +389,9 @@ pub enum ClientMsg {
         door_id: String,
         open: bool,
     },
+    SetLighting {
+        lighting: String,
+    },
     FogBrush {
         mode: FogBrushMode,
         cells: Vec<FogCell>,
@@ -393,6 +477,11 @@ pub enum ClientMsg {
         character_id: String,
         field: String,
         delta: i32,
+    },
+    ApplyDamage {
+        character_id: String,
+        field_id: String,
+        amount: i32,
     },
     RollAction {
         character_id: String,

@@ -1,1 +1,9 @@
-{ "id": "shadowdark", "name": "Shadowdark" }
+{
+  "id": "shadowdark",
+  "name": "Shadowdark",
+  "sheets": {
+    "pc": { "sections": [], "toolbar": { "resources": [], "actions": [] } },
+    "npc": { "sections": [], "toolbar": { "resources": [], "actions": [] } },
+    "adversary": { "sections": [], "toolbar": { "resources": [], "actions": [] } }
+  }
+}

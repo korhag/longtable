@@ -3,4 +3,4 @@ import type { PlayedDie } from "./PlayedDie.ts";
 import type { RollOutcome } from "./RollOutcome.ts";
 import type { RollVisibility } from "./RollVisibility.ts";
 
-export type RollEvent = { id: string, rollerId: string, rollerName: string, formula: string, label: string | null, visibility: RollVisibility, modifier: number, total: number, playAt: number, keyframeDt: number, dice: Array<PlayedDie>, outcome: RollOutcome | null, };
+export type RollEvent = { id: string, rollerId: string, rollerName: string, formula: string, label: string | null, visibility: RollVisibility, modifier: number, total: number, playAt: bigint, keyframeDt: number, dice: Array<PlayedDie>, outcome: RollOutcome | null, };

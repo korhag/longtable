@@ -19,7 +19,13 @@
       headers: { Authorization: `Bearer ${table.sessionToken ?? ''}` },
       body,
     });
-    if (!response.ok) table.error = await response.text();
+    if (!response.ok) {
+      table.error = await response.text();
+      return;
+    }
+    const payload = await response.json() as { warnings?: string[] };
+    const note = payload.warnings?.find((line) => line.trim().length > 0);
+    if (note) table.error = note;
   }
 
   const tools: { id: BuildTool; name: string }[] = [
@@ -61,7 +67,7 @@
       bind:this={fileInput}
       class="hidden"
       type="file"
-      accept=".dd2vtt,.uvtt,.json,application/json"
+      accept=".dd2vtt,.uvtt,.ltmap,.json,application/json"
       onchange={(event) => {
         const file = event.currentTarget.files?.[0];
         if (file) void importMap(file);

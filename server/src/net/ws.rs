@@ -33,11 +33,15 @@ use crate::net::protocol::{dice_meshes, ClientMsg, Keyframe, PlayedDie, RollEven
 use crate::session::state::{now_ms, CommandEffect};
 
 pub fn router(app: Arc<App>) -> Router {
+    let import = Router::new()
+        .route("/api/maps/import", post(import_map))
+        .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
+        .with_state(app.clone());
     let mut router = Router::new()
         .route("/api/health", get(health))
         .route("/api/host", get(host_info))
-        .route("/api/maps/import", post(import_map))
         .route("/api/maps/{id}/image", get(map_image))
+        .route("/api/maps/{id}/assets/{*path}", get(map_asset))
         .route("/api/tokens/{id}/image", post(upload_token_image).get(token_image))
         .route("/api/packs", get(packs))
         .route("/api/drafts", get(list_drafts).post(create_draft))
@@ -45,7 +49,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/drafts/{id}/publish", post(publish_draft))
         .route("/ws", get(websocket))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
-        .with_state(app.clone());
+        .with_state(app.clone())
+        .merge(import);
 
     let packs_dir = ServeDir::new(app.assets_dir.join("packs"));
     router = router.nest_service("/packs", packs_dir);
@@ -360,13 +365,16 @@ async fn dispatch(app: &App, player_id: &str, epoch: u64, message: ClientMsg) ->
             reply_error(app, player_id, epoch, "only the GM can do that").await;
             return true;
         }
-        if let Err(message) = save_system(&app.systems_dir, &system) {
-            reply_error(app, player_id, epoch, &message).await;
-            return true;
-        }
+        let saved = match save_system(&app.systems_dir, &system) {
+            Ok(saved) => saved,
+            Err(message) => {
+                reply_error(app, player_id, epoch, &message).await;
+                return true;
+            }
+        };
         let systems = {
             let mut catalog = app.systems.lock().await;
-            catalog.upsert(system);
+            catalog.upsert(saved);
             catalog.list.clone()
         };
         let table = app.table.lock().await;
@@ -529,6 +537,9 @@ async fn import_map(
         }
     }
     let (name, bytes) = read_file_field(&mut multipart, "map").await?;
+    if bytes.starts_with(b"PK") {
+        return import_package(app, &token, &name, &bytes).await;
+    }
     let parsed = crate::map::parse_uvtt(&bytes).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?;
 
     let id = Uuid::new_v4().to_string();
@@ -562,6 +573,7 @@ async fn import_map(
         lights: parsed.lights,
         layout: None,
         move_blockers: Vec::new(),
+        presentation: None,
     };
 
     let mut table = app.table.lock().await;
@@ -573,6 +585,95 @@ async fn import_map(
     drop(table);
     app.request_save();
     Ok(Json(json!({ "id": id, "name": map_name })))
+}
+
+async fn import_package(app: Arc<App>, token: &str, name: &str, bytes: &[u8]) -> Result<Json<serde_json::Value>, ApiError> {
+    let loaded = crate::map::read_package(bytes).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let id = Uuid::new_v4().to_string();
+    let map_name = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("Imported map")
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(48)
+        .collect::<String>();
+    let incoming = app.data_dir.join("maps").join(format!(".incoming-{id}"));
+    if let Err(err) = write_package_files(&incoming, &loaded.files) {
+        let _ = std::fs::remove_dir_all(&incoming);
+        return Err(err);
+    }
+    let final_dir = app.data_dir.join("maps").join(&id);
+    if let Err(err) = std::fs::rename(&incoming, &final_dir) {
+        let _ = std::fs::remove_dir_all(&incoming);
+        return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
+    }
+    let scene = Scene {
+        id: id.clone(),
+        name: if map_name.is_empty() { "Imported map".into() } else { map_name.clone() },
+        width: loaded.parsed.width,
+        height: loaded.parsed.height,
+        image_file: None,
+        walls: loaded.parsed.walls,
+        doors: loaded.parsed.doors,
+        lights: loaded.parsed.lights,
+        layout: None,
+        move_blockers: Vec::new(),
+        presentation: Some(loaded.presentation),
+    };
+    let warnings = scene.presentation.as_ref().map(|item| item.warnings.clone()).unwrap_or_default();
+    let mut table = app.table.lock().await;
+    if table.viewer_for_session(token).is_none() {
+        drop(table);
+        let _ = std::fs::remove_dir_all(&final_dir);
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "sign in again".into()));
+    }
+    table.install_scene(scene);
+    table.broadcast_state();
+    drop(table);
+    app.request_save();
+    Ok(Json(json!({ "id": id, "name": map_name, "warnings": warnings })))
+}
+
+fn write_package_files(dir: &std::path::Path, files: &[(String, Vec<u8>)]) -> Result<(), ApiError> {
+    std::fs::create_dir_all(dir).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    for (name, bytes) in files {
+        let relative = crate::map::safe_relative(name).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "bad package path".into()))?;
+        let path = dir.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        }
+        std::fs::write(&path, bytes).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn map_asset(
+    State(app): State<Arc<App>>,
+    Path((id, asset_path)): Path<(String, String)>,
+    Query(query): Query<SessionQuery>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let token = bearer(&headers).or(query.session).ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "sign in first".into()))?;
+    let table = app.table.lock().await;
+    if table.viewer_for_session(&token).is_none() {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "sign in again".into()));
+    }
+    let allowed = table.scene.as_ref().is_some_and(|scene| scene.id == id);
+    drop(table);
+    if !allowed {
+        return Err(ApiError(StatusCode::NOT_FOUND, "no map image".into()));
+    }
+    let relative = crate::map::safe_relative(&asset_path).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "bad package path".into()))?;
+    let path = app.data_dir.join("maps").join(safe_name(&id)?).join(relative);
+    let bytes = tokio::fs::read(&path).await.map_err(|_| ApiError(StatusCode::NOT_FOUND, "file missing".into()))?;
+    let content_type = match path.extension().and_then(|ext| ext.to_str()) {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("exr") => "image/x-exr",
+        _ => "application/octet-stream",
+    };
+    Ok(([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "private, max-age=60")], bytes).into_response())
 }
 
 async fn map_image(

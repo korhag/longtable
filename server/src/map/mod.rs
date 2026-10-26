@@ -7,6 +7,8 @@
 pub mod compile;
 pub mod drafts;
 pub mod layout;
+mod package;
+pub(crate) mod presentation;
 mod scene;
 mod uvtt;
 
@@ -17,4 +19,7 @@ pub use layout::MapLayout;
 #[allow(unused_imports)]
 pub use scene::{Door, Light, Scene, Segment, Vec2};
 #[allow(unused_imports)]
+pub use package::{read_package, safe_relative, LoadedPackage, PackageError};
+#[allow(unused_imports)]
+pub use presentation::Prerendered;
 pub use uvtt::{parse_uvtt, ParsedMap, UvttError};

@@ -6,7 +6,9 @@ Nothing here has to be pretty yet. A pack with only colors still builds a map. P
 
 ## The view
 
-The camera looks **north**, down at **53.13 degrees** above the ground. It never turns and it never changes that angle. It can pan and zoom.
+This section is the contract for pictures in an editor pack. An angled Dungeon Alchemist scene is a different package, described at the end of this file.
+
+The camera for a pack looks **north**, down at **53.13 degrees** above the ground. It never turns and it never changes that angle. It can pan and zoom.
 
 That angle is chosen so the numbers stay simple:
 
@@ -312,3 +314,10 @@ Themes, and what they scatter:
 | Glacier | snow | ice-spike, rock, snow-drift |
 | Swamp | swamp | dead-tree, reed, puddle |
 | Dungeon | stone | crate, barrel, table, pillar, moss |
+
+## Angled scenes (`.ltmap`)
+
+A `.ltmap` file is not a pack. It is one map: a Universal VTT file for the walls, doors, and lights, plus orthographic pictures of that same grid. The pictures may include up to four directions and a few lighting variants, such as day, night, and snow. Longtable points its camera along the exported direction and draws the picture on a card that faces that camera. Tokens, the grid, and clicks stay on the real grid.
+
+Furniture in the picture does not block movement. Walls and closed doors do. Opening a door changes the picture of that door and what it blocks. Fog is painted from the floor cell under each pixel, so a tall wall takes the fog of the square it stands on. That fog is only the view: a seat can still download the whole scenery image.
+

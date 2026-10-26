@@ -1,1 +1,9 @@
-{ "id": "nimble", "name": "Nimble" }
+{
+  "id": "nimble",
+  "name": "Nimble",
+  "sheets": {
+    "pc": { "sections": [], "toolbar": { "resources": [], "actions": [] } },
+    "npc": { "sections": [], "toolbar": { "resources": [], "actions": [] } },
+    "adversary": { "sections": [], "toolbar": { "resources": [], "actions": [] } }
+  }
+}

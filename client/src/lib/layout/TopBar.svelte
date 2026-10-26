@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { designer } from '../designer/designer.svelte';
   import { leaveTable, send } from '../net/socket';
+  import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
   import ViewControls from '../ui/ViewControls.svelte';
+  import { VERSION, VERSION_NOTE } from '../version';
   import { layout } from './layout.svelte';
-  import { modes, type TableMode } from './modes.svelte';
+  import { appMode, modes, type AppMode, type TableMode } from './modes.svelte';
 
   let { onZoom, onFit, onMe, onCycle, onSetGrid }: {
     onZoom: (factor: number) => void;
@@ -14,11 +17,20 @@
   } = $props();
 
   const gm = $derived(table.role === 'gm' && !table.viewAs);
-  const tabs: { id: TableMode; name: string }[] = [
-    { id: 'play', name: 'Play' },
+  const mode = $derived<AppMode>(gm ? appMode(modes.current) : 'play');
+  const sceneName = $derived(table.scene?.name ?? 'No scene');
+  const systemName = $derived(systems.active?.name ?? 'No system');
+  const expectation = $derived.by(() => {
+    if (mode === 'play') return 'Running the table.';
+    if (mode === 'edit') return 'Preparing maps, scenes, and the cast.';
+    const name = designer.draft?.name;
+    const base = name ? `Editing the ${name} rule set` : 'Choose a rule set to edit';
+    return designer.dirty ? `${base} · unsaved` : `${base}.`;
+  });
+
+  const editTabs: { id: TableMode; name: string }[] = [
     { id: 'map', name: 'Map' },
     { id: 'campaign', name: 'Campaign' },
-    { id: 'rules', name: 'Rules' },
   ];
 
   function dismiss(playerId: string) {
@@ -28,17 +40,27 @@
   }
 </script>
 
-<header class="topbar">
+<header class="topbar" data-mode={mode}>
   <div class="min-w-0">
-    <p class="truncate text-sm">{table.campaign.name || 'Campaign'}</p>
-    <p class="truncate text-xs text-[var(--color-parchment)]/60">{table.scene?.name ?? 'No scene'}</p>
+    <div class="flex min-w-0 items-center gap-2">
+      <span class="mode-badge {mode}">{mode}</span>
+      <p class="truncate text-sm">{expectation}</p>
+    </div>
+    <p class="truncate text-xs text-[var(--color-parchment)]/60">
+      {table.campaign.name || 'Campaign'} · {sceneName} · {systemName} ·
+      <span title={VERSION_NOTE}>v{VERSION}</span>
+    </p>
   </div>
 
   {#if gm}
-    <div class="flex shrink-0 gap-1">
-      {#each tabs as tab (tab.id)}
+    <div class="flex shrink-0 items-center gap-2">
+      <button class="btn quiet px-2" class:active={modes.current === 'play'} type="button" onclick={() => modes.set('play')}>Play</button>
+      <span class="text-[11px] tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Edit</span>
+      {#each editTabs as tab (tab.id)}
         <button class="btn quiet px-2" class:active={modes.current === tab.id} type="button" onclick={() => modes.set(tab.id)}>{tab.name}</button>
       {/each}
+      <span class="text-[11px] tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Design</span>
+      <button class="btn quiet px-2" class:active={modes.current === 'rules'} type="button" onclick={() => modes.set('rules')}>Rules</button>
     </div>
   {/if}
 

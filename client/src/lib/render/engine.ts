@@ -17,6 +17,8 @@ import type { TokenView } from '../net/bindings/TokenView.ts';
 import { bitAt, decodeBits } from '../fog/bits';
 import type { Tool } from '../table.svelte';
 import { DecalLayer } from './decals';
+import { PrerenderedLayer } from './prerendered';
+import { basis, panGround } from './projection';
 import { StandeeLayer } from './standees';
 import { TerrainLayer } from './terrain';
 import { ELEVATION_COS, ELEVATION_SIN, GROUND_DEPTH, HEIGHT_SCALE } from './view';
@@ -29,6 +31,7 @@ export interface EngineHooks {
   onBuild?: (phase: 'down' | 'move' | 'up' | 'hover', point: { x: number; y: number }, button: number) => void;
   canDrag: (token: TokenView) => boolean;
   onMeasure?: (delta: { dx: number; dy: number; x: number; y: number } | null) => void;
+  onWarning?: (message: string) => void;
 }
 
 interface View {
@@ -42,6 +45,7 @@ interface View {
   packs: Pack[];
   ghost: { x: number; y: number }[];
   buildMode: boolean;
+  viewId: string;
 }
 
 interface TokenNode {
@@ -50,6 +54,7 @@ interface TokenNode {
   disc: THREE.Mesh;
   ring: THREE.Mesh;
   label: THREE.Sprite;
+  card: THREE.Mesh;
   imageUrl: string | null;
 }
 
@@ -75,6 +80,7 @@ export class TableEngine {
     packs: [],
     ghost: [],
     buildMode: false,
+    viewId: '',
   };
   private mapMesh: THREE.Mesh | null = null;
   private fogMesh: THREE.Mesh | null = null;
@@ -107,6 +113,9 @@ export class TableEngine {
   private fogKey = '';
   private framedScene = '';
   private frameId = 0;
+  private standing = false;
+  private fogTexture: THREE.Texture | null = null;
+  private prerendered: PrerenderedLayer;
 
   constructor(
     private host: HTMLElement,
@@ -129,6 +138,7 @@ export class TableEngine {
     this.terrain = new TerrainLayer(this.scene3);
     this.decals = new DecalLayer(this.scene3);
     this.standees = new StandeeLayer(this.scene3);
+    this.prerendered = new PrerenderedLayer(this.scene3);
     this.resize();
 
     const canvas = this.renderer.domElement;
@@ -158,12 +168,14 @@ export class TableEngine {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('resize', this.resize);
     this.terrain.clear();
+    this.prerendered.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
 
   sync(view: View) {
     this.view = view;
+    this.standing = this.activePresentation() != null;
     this.ensureMap();
     this.syncFog();
     this.syncWalls();
@@ -172,6 +184,10 @@ export class TableEngine {
     this.syncTokens();
     this.syncBuilt();
     this.syncGhost();
+    this.applyPresentation();
+    if (this.standing) {
+      for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
+    }
     this.dirty = true;
   }
 
@@ -236,6 +252,7 @@ export class TableEngine {
     const fog = this.view.fog;
     const { width, height } = this.bounds();
     if (!fog) {
+      this.fogTexture = null;
       this.fogMesh?.removeFromParent();
       return;
     }
@@ -246,6 +263,7 @@ export class TableEngine {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
+    this.fogTexture = texture;
     if (!this.fogMesh) {
       this.fogMesh = new THREE.Mesh(
         plane(width, height),
@@ -286,7 +304,7 @@ export class TableEngine {
 
   private syncDoors() {
     clearGroup(this.doorGroup);
-    if (this.view.scene?.layout) return;
+    if (this.view.scene?.layout || this.standing) return;
     for (const door of this.view.doors) {
       const mesh = segmentQuad(door.a, door.b, 0.12, door.open ? 0xc6a15a : 0x8d3d32, 0.05);
       mesh.userData.doorId = door.id;
@@ -359,7 +377,7 @@ export class TableEngine {
       }
       const dragging = this.dragging?.id === token.id;
       if (!dragging) node.group.position.set(token.x, 0, token.y);
-      paintToken(node, token, token.id === this.view.selectedId);
+      paintToken(node, token, token.id === this.view.selectedId, this.standing);
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;
@@ -374,29 +392,32 @@ export class TableEngine {
   }
 
   fitMap() {
+    const framed = this.activePresentation();
     const { width, height } = this.bounds();
-    this.focus.set(width / 2, 0, height / 2);
+    if (framed) this.focus.set(framed.target[0], framed.target[1], framed.target[2]);
+    else this.focus.set(width / 2, 0, height / 2);
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
     const visW = Math.max(1, canvasW - this.insets.left - this.insets.right);
     const visH = Math.max(1, canvasH - this.insets.top - this.insets.bottom);
     const aspect = visW / visH;
-    const needH = height * GROUND_DEPTH * 1.25;
-    const needW = width * 1.25;
-    const full = Math.max(needH, needW / aspect, 8) * (canvasH / visH);
+    const needH = framed ? framed.orthoHalfHeight * 2 * 1.08 : height * GROUND_DEPTH * 1.25;
+    const needW = framed ? framed.orthoHalfWidth * 2 * 1.08 : width * 1.25;
+    const full = Math.max(needH, needW / aspect, framed ? 1 : 8) * (canvasH / visH);
     this.distance = full;
     this.placeCamera();
   }
 
   centerOn(x: number, y: number) {
-    this.focus.set(x, 0, y);
+    this.focus.set(x, this.activePresentation()?.target[1] ?? 0, y);
     this.placeCamera();
   }
 
   zoomBy(factor: number, event?: { clientX: number; clientY: number }) {
     const before = event ? this.hitMap(event) : null;
-    this.distance = THREE.MathUtils.clamp(this.distance * factor, 6, 140);
+    const [min, max] = this.activePresentation() ? [2, 400] : [6, 140];
+    this.distance = THREE.MathUtils.clamp(this.distance * factor, min, max);
     this.placeCamera();
     if (!before || !event) return;
     const after = this.hitMap(event);
@@ -427,14 +448,33 @@ export class TableEngine {
   }
 
   private placeCamera() {
+    const framed = this.activePresentation();
     const { width, height } = this.bounds();
     this.focus.x = THREE.MathUtils.clamp(this.focus.x, 0, width);
     this.focus.z = THREE.MathUtils.clamp(this.focus.z, 0, height);
     this.distance = this.snap(this.distance);
-    const pull = 48;
-    this.camera.position.set(this.focus.x, ELEVATION_SIN * pull, this.focus.z + ELEVATION_COS * pull);
-    this.camera.up.set(0, HEIGHT_SCALE, -GROUND_DEPTH);
-    this.camera.lookAt(this.focus.x, 0, this.focus.z);
+    if (framed) {
+      const { forward, up } = basis(framed.azimuthDeg, framed.elevationDeg);
+      this.focus.y = framed.target[1];
+      const pull = framed.pull;
+      this.camera.position.set(
+        this.focus.x - forward.x * pull,
+        this.focus.y - forward.y * pull,
+        this.focus.z - forward.z * pull,
+      );
+      this.camera.up.set(up.x, up.y, up.z);
+      this.camera.lookAt(this.focus);
+      this.camera.near = 0.05;
+      this.camera.far = 8000;
+    } else {
+      this.focus.y = 0;
+      const pull = 48;
+      this.camera.position.set(this.focus.x, ELEVATION_SIN * pull, this.focus.z + ELEVATION_COS * pull);
+      this.camera.up.set(0, HEIGHT_SCALE, -GROUND_DEPTH);
+      this.camera.lookAt(this.focus.x, 0, this.focus.z);
+      this.camera.near = 0.1;
+      this.camera.far = 400;
+    }
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
@@ -450,6 +490,9 @@ export class TableEngine {
     this.camera.bottom = -(ndcY + 1) * viewH / 2;
     this.camera.top = this.camera.bottom + viewH;
     this.camera.updateProjectionMatrix();
+    if (this.standing) {
+      for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
+    }
     this.dirty = true;
   }
 
@@ -466,6 +509,38 @@ export class TableEngine {
     this.renderer.setSize(width, height, false);
     this.placeCamera();
   };
+
+  private activePresentation() {
+    const presentation = this.view.scene?.presentation;
+    if (!presentation) return null;
+    const id = this.view.viewId || presentation.defaultView;
+    return presentation.views.find((view) => view.id === id)
+      ?? presentation.views.find((view) => view.id === presentation.defaultView)
+      ?? presentation.views[0]
+      ?? null;
+  }
+
+  private applyPresentation() {
+    const presentation = this.standing ? this.view.scene?.presentation : null;
+    if (this.mapMesh) this.mapMesh.visible = !presentation && !this.view.scene?.layout;
+    if (this.board) this.board.visible = !presentation;
+    if (this.fogMesh) this.fogMesh.visible = !presentation;
+    if (!presentation) {
+      this.prerendered.hide();
+      return;
+    }
+    const { width, height } = this.bounds();
+    this.prerendered.sync({
+      presentation,
+      viewId: this.view.viewId || presentation.defaultView,
+      doors: this.view.doors,
+      fog: this.fogTexture,
+      mapWidth: width,
+      mapHeight: height,
+      maxTextureSize: this.renderer.capabilities.maxTextureSize,
+      onWarning: (message) => this.hooks.onWarning?.(message),
+    });
+  }
 
   private hitMap(event: { clientX: number; clientY: number }): THREE.Vector3 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -608,8 +683,16 @@ export class TableEngine {
   private pan(event: PointerEvent) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const scale = this.distance / Math.max(1, rect.height);
-    this.focus.x -= event.movementX * scale;
-    this.focus.z -= (event.movementY * scale) / GROUND_DEPTH;
+    const framed = this.activePresentation();
+    if (framed) {
+      const { right, up } = basis(framed.azimuthDeg, framed.elevationDeg);
+      const shift = panGround(right, up, event.movementX, event.movementY, scale);
+      this.focus.x += shift.x;
+      this.focus.z += shift.z;
+    } else {
+      this.focus.x -= event.movementX * scale;
+      this.focus.z -= (event.movementY * scale) / GROUND_DEPTH;
+    }
     this.placeCamera();
   }
 
@@ -748,32 +831,48 @@ function createToken(token: TokenView): TokenNode {
   label.position.set(0, 0.2, 0.62);
   label.scale.set(1.3, 0.34, 1);
   label.userData.tokenId = token.id;
-  group.add(disc, ring, label);
+  const card = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 1.55),
+    new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.35, depthTest: true, depthWrite: true, side: THREE.DoubleSide }),
+  );
+  card.position.y = 0.78;
+  card.visible = false;
+  card.renderOrder = 2;
+  card.userData.tokenId = token.id;
+  group.add(disc, ring, label, card);
   group.position.set(token.x, 0, token.y);
-  return { id: token.id, group, disc, ring, label, imageUrl: '' };
+  return { id: token.id, group, disc, ring, label, card, imageUrl: '' };
 }
 
-function paintToken(node: TokenNode, token: TokenView, selected: boolean) {
+function paintToken(node: TokenNode, token: TokenView, selected: boolean, standing: boolean) {
   const ring = node.ring.material as THREE.MeshBasicMaterial;
   ring.color.set(selected ? 0xf2d48a : token.color);
   node.ring.scale.setScalar(selected ? 1.08 : 1);
   const disc = node.disc.material as THREE.MeshLambertMaterial;
   disc.opacity = token.hidden ? 0.45 : 1;
   disc.transparent = token.hidden;
+  const cardMaterial = node.card.material as THREE.MeshBasicMaterial;
+  const applyPortrait = (texture: THREE.Texture | null) => {
+    disc.map = texture;
+    disc.needsUpdate = true;
+    cardMaterial.map = texture;
+    cardMaterial.needsUpdate = true;
+  };
   if (node.imageUrl !== token.imageUrl) {
     disc.map?.dispose();
     node.imageUrl = token.imageUrl;
     if (token.imageUrl) {
       new THREE.TextureLoader().load(token.imageUrl, (texture) => {
         texture.colorSpace = THREE.SRGBColorSpace;
-        disc.map = texture;
-        disc.needsUpdate = true;
+        applyPortrait(texture);
       });
     } else {
-      disc.map = initialTexture(token.name, token.color);
-      disc.needsUpdate = true;
+      applyPortrait(initialTexture(token.name, token.color));
     }
   }
+  node.disc.visible = !standing;
+  node.card.visible = standing;
+  node.label.position.y = standing ? 1.7 : 0.2;
   const material = node.label.material as THREE.SpriteMaterial;
   const previous = material.userData.name as string | undefined;
   if (previous !== token.name) {

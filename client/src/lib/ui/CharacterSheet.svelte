@@ -3,6 +3,7 @@
   import type { FieldDef } from '../net/bindings/FieldDef.ts';
   import type { SystemDef } from '../net/bindings/SystemDef.ts';
   import { send } from '../net/socket';
+  import FieldWidget from './FieldWidget.svelte';
 
   let { character, system, preview = false, onpreview }: {
     character: Character;
@@ -11,13 +12,21 @@
     onpreview?: (next: Character) => void;
   } = $props();
 
-  function definition(id: string) {
-    return system.fields.find((field) => field.id === id);
-  }
+  const sheet = $derived(system.sheets[character.kind]);
+  const card = $derived(character.kind === 'adversary');
+  const typeLine = $derived.by(() => {
+    if (!card) return null;
+    for (const section of sheet.sections) {
+      for (const id of section.fields) {
+        const field = definition(id);
+        if (field?.kind === 'choice') return character.texts[id] || field.options[0] || '';
+      }
+    }
+    return null;
+  });
 
-  function ceiling(field: FieldDef) {
-    if (field.maxFrom) return Math.max(0, character.numbers[field.maxFrom] ?? 0);
-    return field.max ?? 1000;
+  function definition(id: string): FieldDef | undefined {
+    return system.fields.find((field) => field.id === id);
   }
 
   function setNumber(id: string, value: number) {
@@ -31,32 +40,24 @@
   }
 </script>
 
-<div class="flex flex-col gap-3">
-  {#each system.sheet.sections as section (section.title)}
+<div class="flex flex-col gap-3 {card ? 'rounded-xl border border-[rgba(212,166,86,0.45)] bg-[#1a120c] p-3' : ''}">
+  {#if card}
+    <header>
+      <p class="display text-lg">{character.name}</p>
+      {#if typeLine}<p class="text-[12px] tracking-[0.14em] text-[var(--color-gold)] uppercase">{typeLine}</p>{/if}
+    </header>
+  {/if}
+  {#if sheet.sections.length === 0}
+    <p class="text-[12px] text-[var(--color-parchment)]/50">Nothing on this sheet yet.</p>
+  {/if}
+  {#each sheet.sections as section, index (index)}
     <section>
-      <p class="text-[10px] tracking-[0.16em] text-[var(--color-gold)] uppercase">{section.title}</p>
+      <p class="text-[12px] tracking-[0.16em] text-[var(--color-gold)] uppercase">{section.title}</p>
       <div class="mt-1 grid gap-2" style={`grid-template-columns:repeat(${section.columns},minmax(0,1fr))`}>
         {#each section.fields as id (id)}
           {@const field = definition(id)}
           {#if field}
-            <label class="text-[11px]">
-              <span class="text-[var(--color-parchment)]/60">{field.name}</span>
-              {#if field.kind === 'text'}
-                <textarea class="field mt-1 min-h-16" value={character.texts[id] ?? ''} onchange={(event) => setText(id, event.currentTarget.value)}></textarea>
-              {:else}
-                <input
-                  class="field mt-1"
-                  type="number"
-                  min={field.kind === 'number' ? field.min : 0}
-                  max={ceiling(field)}
-                  value={character.numbers[id] ?? 0}
-                  onchange={(event) => setNumber(id, Math.trunc(Number(event.currentTarget.value) || 0))}
-                />
-                {#if field.kind !== 'number'}
-                  <span class="text-[10px] text-[var(--color-parchment)]/45">of {ceiling(field)}</span>
-                {/if}
-              {/if}
-            </label>
+            <FieldWidget {field} {character} {system} {preview} onnumber={setNumber} ontext={setText} />
           {/if}
         {/each}
       </div>

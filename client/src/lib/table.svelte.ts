@@ -55,9 +55,11 @@ class TableStore {
   concealedNotice = $state<string | null>(null);
   selectedTokenId = $state<string | null>(null);
   tool = $state<Tool>('select');
+  viewId = $state('');
   clock = new ClockSync();
 
   private queue: RollEvent[] = [];
+  private framedScene = '';
 
   apply(message: ServerMsg) {
     switch (message.type) {
@@ -78,6 +80,7 @@ class TableStore {
         break;
       case 'snapshot':
         this.players = message.players;
+        this.rememberView(message.scene);
         this.scene = message.scene;
         this.tokens = message.tokens;
         this.doors = message.doors;
@@ -129,6 +132,28 @@ class TableStore {
     this.concealedNotice = null;
   }
 
+  turnView(step: number) {
+    const order = this.scene?.presentation?.viewOrder ?? [];
+    if (order.length < 2) return;
+    const index = order.indexOf(this.viewId);
+    const start = index < 0 ? 0 : index;
+    const count = order.length;
+    this.viewId = order[((start + step) % count + count) % count] ?? order[0] ?? '';
+  }
+
+  private rememberView(scene: SceneView | null) {
+    const presentation = scene?.presentation;
+    if (!scene || !presentation) {
+      this.viewId = '';
+      this.framedScene = scene?.id ?? '';
+      return;
+    }
+    if (scene.id !== this.framedScene || !presentation.viewOrder.includes(this.viewId)) {
+      this.framedScene = scene.id;
+      this.viewId = presentation.defaultView;
+    }
+  }
+
   reset() {
     this.joined = false;
     this.connected = false;
@@ -151,6 +176,8 @@ class TableStore {
     this.landedRollId = null;
     this.concealedNotice = null;
     this.selectedTokenId = null;
+    this.viewId = '';
+    this.framedScene = '';
     this.queue = [];
   }
 

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import { send } from '../net/socket';
+  import { table } from '../table.svelte';
+
   let { onZoom, onFit, onMe, onCycle, onSetGrid }: {
     onZoom: (factor: number) => void;
     onFit: () => void;
@@ -31,11 +34,31 @@
     const next = onCycle();
     localStorage.setItem(STORAGE_KEY, next);
   }
+
+  const presentation = $derived(table.scene?.presentation ?? null);
+  const canTurn = $derived((presentation?.viewOrder.length ?? 0) > 1);
+  const gm = $derived(table.role === 'gm' && !table.viewAs);
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 <div class="pointer-events-auto flex items-center gap-1">
+  {#if canTurn}
+    <button class="btn quiet px-2 py-1" type="button" aria-label="Turn left" onclick={() => table.turnView(-1)}>↺</button>
+    <button class="btn quiet px-2 py-1" type="button" aria-label="Turn right" onclick={() => table.turnView(1)}>↻</button>
+  {/if}
+  {#if gm && presentation && presentation.lightings.length > 0}
+    <select
+      class="field w-28"
+      aria-label="Lighting"
+      value={presentation.activeLighting}
+      onchange={(event) => send({ type: 'setLighting', lighting: event.currentTarget.value })}
+    >
+      {#each presentation.lightings as lighting (lighting.id)}
+        <option value={lighting.id}>{lighting.label}</option>
+      {/each}
+    </select>
+  {/if}
   <button class="btn quiet px-2 py-1" type="button" aria-label="Zoom out" onclick={() => onZoom(1.18)}>−</button>
   <button class="btn quiet px-2 py-1" type="button" aria-label="Zoom in" onclick={() => onZoom(0.85)}>+</button>
   <button class="btn quiet px-2 py-1" type="button" onclick={onFit}>Fit</button>

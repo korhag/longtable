@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { loadCatalog } from './lib/assets/catalog';
   import CampaignPanel from './lib/campaign/CampaignPanel.svelte';
-  import RulesPreview from './lib/designer/RulesPreview.svelte';
-  import SystemDesigner from './lib/designer/SystemDesigner.svelte';
+  import RulesPanel from './lib/designer/RulesPanel.svelte';
+  import RulesBoard from './lib/designer/RulesBoard.svelte';
   import BuildMode from './lib/editor/BuildMode.svelte';
   import { editor } from './lib/editor/draft.svelte';
   import Dock from './lib/layout/Dock.svelte';
@@ -43,6 +43,7 @@
         walls: [],
         lights: [],
         layout: editor.draft.layout,
+        presentation: null,
       }
     : table.scene);
 
@@ -67,6 +68,9 @@
         measureLabel = result.range ? `${result.text} · ${result.range}` : result.text;
         measureAt = { x: delta.x, y: delta.y };
       },
+      onWarning: (message) => {
+        table.error = message;
+      },
     });
     engine.start();
     ready = true;
@@ -89,6 +93,7 @@
       packs: editor.packs,
       ghost: editor.ghost,
       buildMode: editor.active,
+      viewId: editor.active ? '' : table.viewId,
     });
   });
 
@@ -162,16 +167,17 @@
             {:else if modes.current === 'campaign'}
               <Panel id="campaign" title="Campaign" grow><CampaignPanel /></Panel>
             {:else}
-              <Panel id="rules" title="Rules" grow><SystemDesigner /></Panel>
+              <Panel id="rules" title="Rules" grow><RulesPanel /></Panel>
             {/if}
           </Dock>
         {/if}
         <div class="relative min-w-0 flex-1">
-          {#if modes.current === 'rules'}
-            <div class="pointer-events-none absolute inset-0 z-10 flex items-start justify-center overflow-auto p-4">
-              <RulesPreview />
+          {#if modes.current === 'rules' && table.role === 'gm' && !table.viewAs}
+            <div class="pointer-events-none absolute inset-0 z-10 flex p-3">
+              <RulesBoard />
             </div>
           {/if}
+          {#if !(modes.current === 'rules' && table.role === 'gm' && !table.viewAs)}
           <div bind:this={bottomStrip} class="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-2 p-2">
             {#if table.selectedTokenId}
               <div class="pointer-events-auto w-[min(22rem,40%)]">
@@ -182,6 +188,7 @@
               <Panel id="character" title="Character"><CharacterBar /></Panel>
             </div>
           </div>
+          {/if}
         </div>
         <Dock side="right">
           <Panel id="rolls" title="Rolls" grow><RollLog /></Panel>

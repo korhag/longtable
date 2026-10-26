@@ -13,7 +13,7 @@ mod registry;
 mod rules;
 
 pub use def::{
-    field_ceiling, system_id_ok, Campaign, Character, CharacterKind, FieldKind, SystemDef,
+    field_ceiling, system_id_ok, threshold_marks, Campaign, Character, CharacterKind, FieldKind, SystemDef,
 };
 pub use fill::{apply_modifiers, fill_formula};
 pub use load::{load_systems, save_system, SystemCatalog};

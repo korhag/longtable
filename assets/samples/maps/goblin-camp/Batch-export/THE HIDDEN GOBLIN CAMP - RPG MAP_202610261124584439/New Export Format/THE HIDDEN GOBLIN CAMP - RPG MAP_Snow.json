@@ -1,0 +1,36 @@
+{
+  "name": "THE HIDDEN GOBLIN CAMP - RPG MAP_Snow",
+  "width": 5700,
+  "height": 5700,
+  "grid": 150,
+  "shiftX": 0,
+  "shiftY": 0,
+  "gridDistance": 5.0,
+  "gridUnits": "ft",
+  "padding": 0.0,
+  "gridColor": "#000000",
+  "gridAlpha": 0.2,
+  "globalLight": true,
+  "darkness": 0.0,
+  "lights": [
+    {
+      "x": 2640,
+      "y": 2475,
+      "dim": 20.0,
+      "bright": 10.0,
+      "tintColor": "#FFAD00",
+      "tintAlpha": 0.0
+    },
+    {
+      "x": 2843,
+      "y": 2469,
+      "dim": 20.0,
+      "bright": 10.0,
+      "tintColor": "#FFAD00",
+      "tintAlpha": 0.0
+    }
+  ],
+  "walls": [],
+  "img": null,
+  "foreground": null
+}

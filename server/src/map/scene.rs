@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::map::layout::MapLayout;
+use crate::map::presentation::Prerendered;
 
 /// A point on the battle map, in grid squares.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -98,6 +99,9 @@ pub struct Scene {
     /// Props that stop walking but not sight, such as a table.
     #[serde(default)]
     pub move_blockers: Vec<Segment>,
+    /// Angled pictures of this same grid. Absent on older saves.
+    #[serde(default)]
+    pub presentation: Option<Prerendered>,
 }
 
 #[cfg(test)]

@@ -3,4 +3,4 @@ import type { DieResult } from "./DieResult.ts";
 import type { RollOutcome } from "./RollOutcome.ts";
 import type { RollVisibility } from "./RollVisibility.ts";
 
-export type RollLogEntry = { id: string, rollerName: string, formula: string | null, label: string | null, visibility: RollVisibility, modifier: number, total: number | null, dice: Array<DieResult>, concealed: boolean, notice: string | null, createdAt: number, outcome: RollOutcome | null, };
+export type RollLogEntry = { id: string, rollerName: string, formula: string | null, label: string | null, visibility: RollVisibility, modifier: number, total: number | null, dice: Array<DieResult>, concealed: boolean, notice: string | null, createdAt: bigint, outcome: RollOutcome | null, };

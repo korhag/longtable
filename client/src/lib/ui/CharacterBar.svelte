@@ -6,6 +6,7 @@
   import { send } from '../net/socket';
   import { layout } from '../layout/layout.svelte';
   import Panel from '../layout/Panel.svelte';
+  import { ceiling } from '../systems/fields';
   import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
   import CharacterSheet from './CharacterSheet.svelte';
@@ -15,16 +16,27 @@
   const character = $derived(preview?.character ?? systems.chosen);
   const system = $derived(preview?.system ?? systems.active);
   const gm = $derived(!preview && table.role === 'gm' && !table.viewAs);
+  const sheet = $derived(character && system ? system.sheets[character.kind] : null);
 
-  function ceiling(field: FieldDef) {
-    if (!character) return 0;
-    if (field.maxFrom) return Math.max(0, character.numbers[field.maxFrom] ?? 0);
-    return field.max ?? 1000;
+  function fieldOf(id: string): FieldDef | undefined {
+    return system?.fields.find((item) => item.id === id);
   }
 
   function adjust(field: string, delta: number) {
     if (preview || !character) return;
     send({ type: 'adjustResource', characterId: character.id, field, delta });
+  }
+
+  function roll(actionId: string) {
+    if (preview || !character) return;
+    send({
+      type: 'rollAction',
+      characterId: character.id,
+      actionId,
+      visibility: rollSetup.visibility,
+      plus: rollSetup.plus,
+      minus: rollSetup.minus,
+    });
   }
 </script>
 
@@ -42,50 +54,37 @@
             <option value={item.id}>{item.name}</option>
           {/each}
         </select>
-        <button class="btn quiet px-2 py-1 text-[11px]" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
+        <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
       {:else if character}
         <p class="display text-base">{character.name}</p>
       {/if}
       {#if character && !preview}
-        <button class="btn quiet ml-auto px-2 py-1 text-xs" type="button" onclick={() => {
+        <button class="btn quiet ml-auto px-2 py-1 text-[12px]" type="button" onclick={() => {
           systems.sheetOpen = !systems.sheetOpen;
           if (systems.sheetOpen) layout.patch('sheet', { floating: true, collapsed: false });
         }}>Sheet</button>
       {/if}
     </div>
 
-    {#if character}
+    {#if character && sheet}
       <div class="mt-2 flex flex-wrap items-center gap-2">
-        {#each system.toolbar.resources as id (id)}
-          {@const field = system.fields.find((item) => item.id === id)}
-          {#if field}
-            <div class="flex items-center gap-1 rounded-lg border border-[rgba(212,166,86,0.3)] px-1.5 py-1 text-[11px]">
+        {#each sheet.toolbar.resources as id (id)}
+          {@const field = fieldOf(id)}
+          {#if field && (field.kind === 'pool' || field.kind === 'number')}
+            <div class="flex items-center gap-1 rounded-lg border border-[rgba(212,166,86,0.3)] px-1.5 py-1 text-[12px]">
               <span>{field.name}</span>
               <button type="button" aria-label={`Decrease ${field.name}`} onclick={() => adjust(id, -1)}>−</button>
               <span class="display text-sm">{character.numbers[id] ?? 0}</span>
-              {#if field.kind !== 'number'}<span class="text-[var(--color-parchment)]/45">/ {ceiling(field)}</span>{/if}
+              {#if field.kind === 'pool'}<span class="text-[var(--color-parchment)]/45">/ {ceiling(field, character.numbers)}</span>{/if}
               <button type="button" aria-label={`Increase ${field.name}`} onclick={() => adjust(id, 1)}>+</button>
             </div>
           {/if}
         {/each}
-        {#each system.toolbar.actions as id (id)}
+        {#each sheet.toolbar.actions as id (id)}
           {@const action = system.actions.find((item) => item.id === id)}
-          {#if action}
-            <button
-              class="btn quiet px-2 py-1 text-[11px]"
-              type="button"
-              onclick={() => {
-                if (preview || !character) return;
-                send({
-                  type: 'rollAction',
-                  characterId: character.id,
-                  actionId: id,
-                  visibility: rollSetup.visibility,
-                  plus: rollSetup.plus,
-                  minus: rollSetup.minus,
-                });
-              }}
-            >{action.name}</button>
+          {@const dice = system.fields.find((item) => item.id === id && item.kind === 'dice')}
+          {#if action || dice}
+            <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => roll(id)}>{action?.name ?? dice?.name}</button>
           {/if}
         {/each}
       </div>

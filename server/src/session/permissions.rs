@@ -7,8 +7,9 @@
 
 use crate::map::Vec2;
 use crate::net::protocol::{
-    DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, RollLogEntry, RollVisibility, SceneView,
-    SegmentView, Snapshot, TokenKind, TokenView,
+    DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, Presentation, PresentationCapabilities,
+    PresentationDoor, PresentationDoorLayer, PresentationLighting, PresentationVariant, PresentationView, RollLogEntry,
+    RollVisibility, SceneView, SegmentView, Snapshot, TokenKind, TokenView,
 };
 use crate::systems::Character;
 use crate::vision::{point_in_poly, CELLS_PER_SQUARE};
@@ -29,6 +30,74 @@ pub fn conceal_notice(visibility: RollVisibility, roller_name: &str) -> String {
         RollVisibility::GmSecret => "The GM rolls in secret…".into(),
         RollVisibility::ToGm => format!("{roller_name} rolls to the GM…"),
         RollVisibility::Public => String::new(),
+    }
+}
+
+fn asset_url(scene_id: &str, session: &str, file: &str) -> String {
+    format!("/api/maps/{scene_id}/assets/{file}?session={session}")
+}
+
+fn present(scene_id: &str, session: &str, presentation: &crate::map::Prerendered) -> Presentation {
+    Presentation {
+        active_lighting: presentation.active_lighting.clone(),
+        default_view: presentation.default_view.clone(),
+        view_order: presentation.view_order.clone(),
+        lightings: presentation
+            .lightings
+            .iter()
+            .map(|lighting| PresentationLighting { id: lighting.id.clone(), label: lighting.label.clone() })
+            .collect(),
+        views: presentation
+            .views
+            .iter()
+            .map(|view| PresentationView {
+                id: view.id.clone(),
+                azimuth_deg: view.azimuth_deg,
+                elevation_deg: view.elevation_deg,
+                ortho_half_width: view.ortho_half_width,
+                ortho_half_height: view.ortho_half_height,
+                target: view.target,
+                image_size: view.image_size,
+                pull: view.pull,
+                near: view.near,
+                far: view.far,
+                depth_url: view.depth_file.as_ref().map(|file| asset_url(scene_id, session, file)),
+                variants: view
+                    .variants
+                    .iter()
+                    .map(|variant| PresentationVariant {
+                        id: variant.id.clone(),
+                        color_url: asset_url(scene_id, session, &variant.file),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        doors: presentation
+            .doors
+            .iter()
+            .map(|door| PresentationDoor {
+                id: door.id.clone(),
+                layers: door
+                    .views
+                    .iter()
+                    .map(|layer| PresentationDoorLayer {
+                        view: layer.view.clone(),
+                        lighting: layer.lighting.clone(),
+                        color_url: asset_url(scene_id, session, &layer.file),
+                        depth_url: layer.depth_file.as_ref().map(|file| asset_url(scene_id, session, file)),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        capabilities: PresentationCapabilities {
+            depth: presentation.capabilities.depth,
+            doors: presentation.capabilities.doors,
+            move_blockers: presentation.capabilities.move_blockers,
+            walls: presentation.capabilities.walls,
+            lights: presentation.capabilities.lights,
+            snow: presentation.capabilities.snow,
+        },
+        warnings: presentation.warnings.clone(),
     }
 }
 
@@ -76,6 +145,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                 Vec::new()
             },
             layout: scene.layout.clone(),
+            presentation: scene.presentation.as_ref().map(|presentation| present(scene.id.as_str(), &viewer.session_token, presentation)),
         }),
         tokens: table
             .tokens

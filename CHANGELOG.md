@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 — 2026-10-26
+
+- Import an angled Dungeon Alchemist scene and turn it, day or night.
+- Tokens stand in front of or behind the scenery, and fog follows the floor under a tall wall.
+- Opening a door changes its picture and what it blocks. Furniture does not block movement yet.
+- Each seat can face a different direction. The GM's lighting is shared and stays after a reconnect.
+
+## 0.4.1 — 2026-10-26
+
+- Load opens a rule set again, and the Rules panel says when it loaded or why it could not.
+
+## 0.4.0 — 2026-10-26
+
+- The top bar shows the mode and version, and Design shows the whole rule set on the table.
+- Rules lists each system with Load. Design opens on the campaign's system, and the center board reads the rules beside the sheet.
+
+## 0.3.0 — 2026-10-26
+
+- Adversaries have their own card, and applying damage marks the linked pool.
+- The Rules screen edits things, rolls, and a separate sheet for PCs, NPCs, and adversaries.
+
 ## 0.2.2 — 2026-10-26
 
 - Dice are thrown into the tray, the tray camera starts closer, and dice menus open on top.
