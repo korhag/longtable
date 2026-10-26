@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.2.0';
-export const VERSION_NOTE = 'Campaigns, a cleaner table layout, and dice in the middle of the screen.';
+export const VERSION = '0.2.2';
+export const VERSION_NOTE = 'Dice are thrown into the tray, the tray camera starts closer, and dice menus open on top.';

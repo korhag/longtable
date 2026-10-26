@@ -7,7 +7,7 @@
   } = $props();
 
   const points = $derived(shape(sides));
-  const labelY = $derived(sides === 4 ? 68 : 56);
+  const labelY = $derived(sides === 4 ? 58 : 50);
 
   function shape(count: number): string {
     if (count === 4) return '50,8 92,90 8,90';
@@ -29,7 +29,7 @@
 <button class="die-shape" type="button" aria-label={`Add a d${sides}`} onclick={onclick}>
   <svg viewBox="0 0 100 100" aria-hidden="true">
     <polygon {points} fill={body} stroke="rgba(255,236,210,0.45)" stroke-width="3" stroke-linejoin="round" />
-    <text x="50" y={labelY} text-anchor="middle" fill={ink} font-weight="700" font-size="22" font-family="Cinzel, serif">d{sides}</text>
+    <text x="50" y={labelY} text-anchor="middle" dominant-baseline="central" fill={ink} font-weight="700" font-size="42" font-family="Inter, sans-serif">{sides}</text>
   </svg>
 </button>
 

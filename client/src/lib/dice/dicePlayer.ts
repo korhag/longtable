@@ -106,7 +106,7 @@ export class DicePlayer {
       .map((die, index) => ({ die, index }))
       .sort((a, b) => tagRank(a.die.tag, order) - tagRank(b.die.tag, order) || a.index - b.index);
     const slots = lineUpSlots(ordered.length);
-    this.frameTray();
+    this.frameTray(roll.dice);
     this.frameLineup(slots);
     for (const [place, item] of ordered.entries()) {
       const die = item.die;
@@ -214,15 +214,44 @@ export class DicePlayer {
     this.camera.updateProjectionMatrix();
   }
 
-  private frameTray() {
+  private frameTray(dice: { keyframes: { p: [number, number, number] }[] }[]) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let any = false;
+    for (const die of dice) {
+      const start = die.keyframes.findIndex((frame) => frame.p[1] < 1.2);
+      if (start < 0) continue;
+      for (const frame of die.keyframes.slice(start)) {
+        any = true;
+        minX = Math.min(minX, frame.p[0]);
+        maxX = Math.max(maxX, frame.p[0]);
+        minZ = Math.min(minZ, frame.p[2]);
+        maxZ = Math.max(maxZ, frame.p[2]);
+      }
+    }
+    if (!any) {
+      minX = -1.5;
+      maxX = 1.5;
+      minZ = -1.1;
+      maxZ = 1.1;
+    } else {
+      minX -= 1;
+      maxX += 1;
+      minZ -= 1;
+      maxZ += 1;
+    }
+    const halfW = Math.min(8.5, Math.max((maxX - minX) / 2, 1.5));
+    const halfD = Math.min(6.3, Math.max((maxZ - minZ) / 2, 1.1));
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
     const pitch = THREE.MathUtils.degToRad(70);
-    const halfW = 8.5;
-    const halfD = 6.3;
     const vertical = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
     const horizontal = vertical * Math.max(this.camera.aspect, 0.4);
     const dist = Math.max(halfW / horizontal, halfD / vertical / Math.sin(pitch)) * 1.15;
-    this.trayAim.set(0, 0.1, 0);
-    this.trayEye.set(0, Math.sin(pitch) * dist, Math.cos(pitch) * dist);
+    this.trayAim.set(cx, 0.1, cz);
+    this.trayEye.set(cx, Math.sin(pitch) * dist, cz + Math.cos(pitch) * dist);
   }
 
   private frameLineup(slots: Slot[]) {
@@ -354,7 +383,7 @@ function numberPlate(
   const center = average(points);
   const direction = new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
   const radius = inscribedRadius(points, center);
-  const plate = texturedPlate(radius * 1.9, value, ink, stroke, underline);
+  const plate = texturedPlate(radius * 2.1, value, ink, stroke, underline);
   plate.position.copy(center).addScaledVector(direction, 0.014);
   alignPlate(plate, direction, new THREE.Vector3(0, 1, 0));
   return plate;
@@ -371,7 +400,7 @@ function cornerPlate(mesh: DieMesh, faceIndex: number, vertexIndex: number, valu
   const toward = corner.clone().sub(center);
   const direction = new THREE.Vector3(face.normal[0], face.normal[1], face.normal[2]).normalize();
   const radius = inscribedRadius(points, center);
-  const plate = texturedPlate(radius * 0.9, value, ink, stroke, false);
+  const plate = texturedPlate(radius * 1.05, value, ink, stroke, false);
   plate.position.copy(center).addScaledVector(toward, 0.58).addScaledVector(direction, 0.016);
   alignPlate(plate, direction, toward);
   return plate;
@@ -401,21 +430,29 @@ function paintNumber(value: number, ink: string, stroke: string, underline: bool
   const context = canvas.getContext('2d');
   if (!context) return null;
   context.clearRect(0, 0, 512, 512);
-  context.font = '600 320px Inter, sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
-  context.lineWidth = 28;
+  const text = String(value);
+  let size = 400;
+  context.font = `600 ${size}px Inter, sans-serif`;
+  const measured = context.measureText(text).width;
+  if (measured > 450) size = Math.floor(size * (450 / measured));
+  context.font = `600 ${size}px Inter, sans-serif`;
+  context.lineWidth = Math.max(18, Math.round(28 * (size / 320)));
   context.strokeStyle = stroke;
-  context.strokeText(String(value), 256, 270);
+  context.strokeText(text, 256, 270);
   context.fillStyle = ink;
-  context.fillText(String(value), 256, 270);
+  context.fillText(text, 256, 270);
   if (underline && (value === 6 || value === 9)) {
+    const scale = size / 320;
+    const underlineY = 270 + 120 * scale;
+    const half = 86 * scale;
     context.strokeStyle = ink;
-    context.lineWidth = 18;
+    context.lineWidth = Math.max(12, Math.round(18 * scale));
     context.beginPath();
-    context.moveTo(170, 390);
-    context.lineTo(342, 390);
+    context.moveTo(256 - half, underlineY);
+    context.lineTo(256 + half, underlineY);
     context.stroke();
   }
   const texture = new THREE.CanvasTexture(canvas);

@@ -33,6 +33,24 @@ const MAX_STEPS: usize = 60 * 7;
 const FLAT_ALIGNMENT: f32 = 0.82;
 
 pub fn simulate(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<ThrownDie> {
+    let mut last = Vec::new();
+    for _attempt in 0..3 {
+        last = throw_once(formula, rng);
+        if last.iter().all(rests_inside) {
+            return last;
+        }
+    }
+    last
+}
+
+fn rests_inside(die: &ThrownDie) -> bool {
+    let Some(frame) = die.keyframes.last() else {
+        return false;
+    };
+    frame.p[0].abs() < 8.0 && frame.p[2].abs() < 5.0 && frame.p[1] < 2.0
+}
+
+fn throw_once(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<ThrownDie> {
     let spec = formula.dice();
     let mut pipeline = PhysicsPipeline::new();
     let gravity = vec3(0.0, -18.0, 0.0);
@@ -55,21 +73,22 @@ pub fn simulate(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<Throw
     for (index, (kind, _sign, _role)) in spec.iter().enumerate() {
         let template = DieTemplate::get(*kind);
         let column = index % columns;
-        let row = index / columns;
-        let x = column as f32 - (columns.saturating_sub(1) as f32) * 0.5;
-        let z = row as f32 * 1.15 - 0.4;
-        let jitter = rng.random_range(-0.12..0.12);
+        let x = ((column as f32 - (columns.saturating_sub(1) as f32) * 0.5) * 1.15).clamp(-6.0, 6.0);
         let body = RigidBodyBuilder::dynamic()
-            .translation(vec3(x * 1.25 + jitter, 2.1 + row as f32 * 0.15, z + jitter))
+            .translation(vec3(
+                x + rng.random_range(-0.15..0.15),
+                3.2 + index as f32 * 0.35,
+                7.5 + rng.random_range(-0.2..0.2),
+            ))
             .rotation(vec3(
                 rng.random_range(-3.0..3.0),
                 rng.random_range(-3.0..3.0),
                 rng.random_range(-3.0..3.0),
             ))
             .linvel(vec3(
-                rng.random_range(-1.4..1.4),
-                rng.random_range(-1.0..0.2),
-                rng.random_range(-1.4..1.4),
+                rng.random_range(-1.2..1.2),
+                rng.random_range(1.2..2.4),
+                rng.random_range(-9.0..-7.0),
             ))
             .angvel(vec3(
                 rng.random_range(-9.0..9.0),
@@ -98,6 +117,7 @@ pub fn simulate(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<Throw
 
     let mut frames: Vec<Vec<SimFrame>> = vec![Vec::new(); handles.len()];
     let mut nudges = 0;
+    record(&bodies, &handles, &mut frames);
     for step in 0..MAX_STEPS {
         pipeline.step(
             gravity,
@@ -185,7 +205,11 @@ fn spawn_tray(bodies: &mut RigidBodySet, colliders: &mut ColliderSet) {
     ];
     for (x, y, z, hx, hy, hz) in walls {
         let body = bodies.insert(RigidBodyBuilder::fixed().translation(vec3(x, y, z)).build());
-        colliders.insert_with_parent(ColliderBuilder::cuboid(hx, hy, hz).build(), body, bodies);
+        colliders.insert_with_parent(
+            ColliderBuilder::cuboid(hx, hy, hz).friction(0.6).restitution(0.15).build(),
+            body,
+            bodies,
+        );
     }
 }
 
@@ -234,5 +258,25 @@ mod tests {
         assert!((1..=4).contains(&dice[1].value));
         assert!(dice[0].keyframes.len() > 5);
         assert!(dice.iter().all(|die| die.keyframes.len() == dice[0].keyframes.len()));
+    }
+
+    #[test]
+    fn dice_enter_from_outside_and_rest_inside() {
+        let formula = parse_formula("2d12").unwrap();
+        for seed in [3_u64, 11, 19] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let dice = simulate(&formula, &mut rng);
+            assert_eq!(dice.len(), 2);
+            for die in &dice {
+                let start = die.keyframes.first().expect("a throw has a first frame");
+                let end = die.keyframes.last().expect("a throw has a last frame");
+                assert!(start.p[2] > 5.5, "seed {seed} started at {:?}", start.p);
+                assert!(
+                    end.p[0].abs() < 8.3 && end.p[2].abs() < 5.3,
+                    "seed {seed} ended at {:?}",
+                    end.p
+                );
+            }
+        }
     }
 }

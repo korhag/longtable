@@ -9,6 +9,7 @@
 
   let config = $state<DualityConfig>(loadDuality());
   let menu = $state(false);
+  let anchor = $state({ left: 0, top: 0, right: 0, bottom: 0 });
 
   function roll() {
     send({
@@ -45,14 +46,23 @@
     type="button"
     title="Left click rolls. Right click changes Hope, Fear, and advantage."
     onclick={roll}
-    oncontextmenu={(event) => { event.preventDefault(); menu = !menu; }}
+    oncontextmenu={(event) => {
+      event.preventDefault();
+      if (menu) {
+        menu = false;
+        return;
+      }
+      const box = event.currentTarget.getBoundingClientRect();
+      anchor = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+      menu = true;
+    }}
   >
     <span class="swatch" style="background:#d4a656"></span>
     <span class="swatch fear" style="background:#3c2158"></span>
     {dualityCaption(config)}
   </button>
   {#if menu}
-    <DualityMenu {config} onchange={save} onclose={() => (menu = false)} />
+    <DualityMenu {config} {anchor} onchange={save} onclose={() => (menu = false)} />
   {/if}
 </div>
 

@@ -18,6 +18,7 @@
   let formula = $state('1d20');
   let label = $state('');
   let savedOpen = $state(false);
+  let savedAnchor = $state({ left: 0, top: 0, right: 0, bottom: 0 });
   let bookmarks = $state<DiceBookmark[]>(loadBookmarks());
 
   const modes = $derived(
@@ -81,10 +82,22 @@
     {#if Extra}
       <Extra />
     {/if}
-    <div class="relative ml-auto">
-      <button class="btn quiet px-2 py-1 text-xs" type="button" onclick={() => (savedOpen = !savedOpen)}>Saved</button>
+    <div class="ml-auto">
+      <button
+        class="btn quiet px-2 py-1 text-xs"
+        type="button"
+        onclick={(event) => {
+          if (savedOpen) {
+            savedOpen = false;
+            return;
+          }
+          const box = event.currentTarget.getBoundingClientRect();
+          savedAnchor = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+          savedOpen = true;
+        }}
+      >Saved</button>
       {#if savedOpen}
-        <BookmarkMenu {bookmarks} onpick={pick} onremove={forget} onclose={() => (savedOpen = false)} />
+        <BookmarkMenu {bookmarks} anchor={savedAnchor} onpick={pick} onremove={forget} onclose={() => (savedOpen = false)} />
       {/if}
     </div>
   </div>
