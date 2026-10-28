@@ -16,7 +16,7 @@
   import { TableEngine } from './lib/render/engine';
   import { measure } from './lib/systems/measure';
   import { systems } from './lib/systems/store.svelte';
-  import { overlaysFor } from './systems';
+  import { overlaysFor, playChromeFor } from './systems';
   import { table } from './lib/table.svelte';
   import CharacterBar from './lib/ui/CharacterBar.svelte';
   import DiceBar from './lib/ui/DiceBar.svelte';
@@ -33,6 +33,7 @@
   let ready = $state(false);
   let measureLabel = $state<string | null>(null);
   let measureAt = $state({ x: 0, y: 0 });
+  let aimPoint = $state<{ x: number; y: number } | null>(null);
 
   const shown = $derived<SceneView | null>(editor.active && editor.draft
     ? {
@@ -58,8 +59,28 @@
       onMove: (tokenId, x, y) => send({ type: 'moveToken', tokenId, x, y }),
       onSelect: (tokenId) => {
         table.selectedTokenId = tokenId;
+        table.menu = null;
         const token = table.tokens.find((item) => item.id === tokenId);
         if (token?.characterId) systems.selectedId = token.characterId;
+      },
+      onTarget: (tokenId) => {
+        table.targetTokenId = tokenId;
+        table.menu = null;
+      },
+      onMenu: (tokenId, x, y) => {
+        if (!tokenId) {
+          table.menu = null;
+          return;
+        }
+        table.menu = { tokenId, x, y };
+      },
+      onPaint: () => {
+        const id = table.targetTokenId;
+        const raw = id ? engine?.screenOf(id) ?? null : null;
+        const next = raw ? { x: Math.round(raw.x), y: Math.round(raw.y) } : null;
+        if (next?.x === aimPoint?.x && next?.y === aimPoint?.y) return;
+        if (!next && !aimPoint) return;
+        aimPoint = next;
       },
       onBrush: (mode, cells) => send({ type: 'fogBrush', mode, cells }),
       onToggleDoor: (doorId, open) => send({ type: 'setDoor', doorId, open }),
@@ -95,6 +116,8 @@
       fog: editor.active ? null : table.fog,
       role: table.viewAs ? 'player' : table.role,
       selectedId: table.selectedTokenId,
+      targetId: table.targetTokenId,
+      hoverId: table.hoverTokenId,
       tool: editor.active || table.viewAs ? 'select' : table.tool,
       packs: editor.packs,
       ghost: editor.ghost,
@@ -141,6 +164,17 @@
     return () => window.clearTimeout(timer);
   });
   const Overlays = $derived(overlaysFor(table.campaign.systemId));
+  const PlayChrome = $derived(playChromeFor(table.campaign.systemId));
+
+  $effect(() => {
+    if (table.role !== 'player' || table.viewAs || table.selectedTokenId) return;
+    const owned = table.tokens.filter((token) => token.ownerId === table.playerId);
+    if (owned.length !== 1) return;
+    const token = owned[0];
+    if (!token) return;
+    table.selectedTokenId = token.id;
+    if (token.characterId) systems.selectedId = token.characterId;
+  });
 
   function mine() {
     const characterId = systems.chosen?.id;
@@ -180,6 +214,9 @@
           </Dock>
         {/if}
         <div class="relative min-w-0 flex-1">
+          {#if PlayChrome && modes.current === 'play' && !editor.active}
+            <PlayChrome {aimPoint} onCenter={(x, y) => engine?.centerOn(x, y)} />
+          {/if}
           {#if modes.current === 'rules' && table.role === 'gm' && !table.viewAs}
             <div class="pointer-events-none absolute inset-0 z-10 flex p-3">
               <RulesBoard />

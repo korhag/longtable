@@ -6,7 +6,7 @@ The map fills the window. Everything else sits in a region, so two panels cannot
 
 - **Top bar.** The mode badge and what the app expects, then the campaign, scene, system, and version. Hover the version for the latest note. The view buttons, the party, and Leave sit on the right. A player sees only Play.
 - **Left dock.** The tool for the current mode. Players do not get this dock.
-- **Center.** The map. In Design the map is covered by an opaque board: Overview, PC sheet, NPC sheet, and Adversary card. While dice are rolling, the tray sits here.
+- **Center.** The map. In Play, a Daggerheart table draws Fear, adversary portraits, and the party column over this map. In Design the map is covered by an opaque board: Overview, PC sheet, NPC sheet, and Adversary card. While dice are rolling, the tray sits here.
 - **Right dock.** The roll history and the dice controls.
 - **Bottom strip.** The selected token and the character bar, between the docks. Hidden in Design.
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { loadHost, type HostInfo } from '../net/host';
-  import { joinTable } from '../net/socket';
+  import { joinTable, shouldSkipAutoJoin } from '../net/socket';
   import { loadSeat, saveSeat, table, type SeatRequest } from '../table.svelte';
   import { VERSION, VERSION_NOTE } from '../version';
 
@@ -20,7 +20,7 @@
       gmKey = host.gmKey;
       if (!saved) asGm = true;
     }
-    if (!saved?.name) return;
+    if (shouldSkipAutoJoin() || !saved?.name) return;
     enter({
       name: saved.name,
       passphrase: host?.passphrase || saved.passphrase,

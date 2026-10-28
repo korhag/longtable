@@ -15,10 +15,17 @@ let pingTimer = 0;
 let reconnectTimer = 0;
 let attempt = 0;
 let allowReconnect = false;
+let skipAutoJoin = false;
+
+// The lobby reads this once, after a kick, so a saved seat does not sit back down.
+export function shouldSkipAutoJoin(): boolean {
+  return skipAutoJoin;
+}
 
 export function joinTable(next: SeatRequest) {
   seat = next;
   allowReconnect = true;
+  skipAutoJoin = false;
   attempt = 0;
   open();
 }
@@ -64,6 +71,10 @@ function open() {
       table.error = message.message;
       return;
     }
+    if (message.type === 'kicked') {
+      droppedByGm(message.message);
+      return;
+    }
     table.apply(message);
   });
   socket.addEventListener('close', () => {
@@ -74,6 +85,15 @@ function open() {
     attempt += 1;
     reconnectTimer = window.setTimeout(open, wait);
   });
+}
+
+function droppedByGm(message: string) {
+  allowReconnect = false;
+  closeSocket();
+  sessionStorage.removeItem('battle-map-id');
+  skipAutoJoin = true;
+  table.reset();
+  table.error = message;
 }
 
 function ping() {

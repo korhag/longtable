@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 — 2026-10-28
+
+- Click a token to target it, and click it again to take control.
+- A right-click offers Attack, and the GM can take control, show, or hide.
+- Portraits show a health word, a stress word, and Hope, and Fear sits above the map.
+
+## 0.7.0 — 2026-10-28
+
+- Right-click a seat in the top bar to kick them, even while they still look connected.
+
 ## 0.6.1 — 2026-10-28
 
 - A light or a wall you click onto a map stays there.

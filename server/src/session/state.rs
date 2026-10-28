@@ -29,6 +29,7 @@ const COLORS: [&str; 6] = ["#d4a656", "#7eb8a2", "#d27b66", "#8aa6d4", "#c98bb8"
 pub const DEFAULT_WIDTH: f32 = 40.0;
 pub const DEFAULT_HEIGHT: f32 = 30.0;
 const ROLL_LOG_LIMIT: usize = 40;
+const FEAR_CAP: u8 = 12;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Player {
@@ -137,6 +138,7 @@ pub struct Table {
     pub scenes: Vec<SceneShelf>,
     pub shelved: Vec<CampaignShelf>,
     pub characters: Vec<Character>,
+    pub fear: u8,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
     epoch: u64,
@@ -162,6 +164,7 @@ impl Table {
             scenes: Vec::new(),
             shelved: Vec::new(),
             characters: Vec::new(),
+            fear: 0,
             clients: Vec::new(),
             sessions: HashMap::new(),
             epoch: 0,
@@ -428,6 +431,10 @@ impl Table {
                 self.adjust_resource(viewer, &character_id, &field, delta, system)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::AdjustFear { delta } => {
+                self.adjust_fear(viewer, delta)?;
+                Ok(CommandEffect::Refresh)
+            }
             ClientMsg::ApplyDamage { character_id, field_id, amount } => {
                 self.apply_damage(viewer, &character_id, &field_id, amount, system)?;
                 Ok(CommandEffect::Refresh)
@@ -528,6 +535,19 @@ impl Table {
             let extra = self.rolls.len() - ROLL_LOG_LIMIT;
             self.rolls.drain(0..extra);
         }
+        if self.campaign.system_id.as_deref() == Some("daggerheart")
+            && roll.visibility == RollVisibility::Public
+            && roll.outcome.as_ref().is_some_and(|outcome| outcome.tone == "fear")
+        {
+            self.fear = self.fear.saturating_add(1).min(FEAR_CAP);
+        }
+    }
+
+    fn adjust_fear(&mut self, viewer: &Viewer, delta: i32) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        let next = self.fear as i32 + delta;
+        self.fear = next.clamp(0, FEAR_CAP as i32) as u8;
+        Ok(())
     }
 
     pub fn keyframe_dt() -> f32 {
@@ -728,14 +748,22 @@ impl Table {
         if player_id == viewer.player_id {
             return Err("you cannot dismiss yourself".into());
         }
-        let player = self
-            .players
-            .iter()
-            .find(|player| player.id == player_id)
-            .ok_or_else(|| "that person is not at the table".to_string())?;
-        if player.connected {
-            return Err("wait until they disconnect".into());
+        if !self.players.iter().any(|player| player.id == player_id) {
+            return Err("that person is not at the table".into());
         }
+        let notice = ServerMsg::Kicked {
+            message: "The GM asked you to leave.".into(),
+        };
+        for client in self.clients.iter().filter(|client| client.player_id == player_id) {
+            let _ = client.out.send(notice.clone());
+        }
+        self.clients.retain(|client| client.player_id != player_id);
+        for client in &mut self.clients {
+            if client.view_as.as_deref() == Some(player_id) {
+                client.view_as = None;
+            }
+        }
+        self.sessions.retain(|_, id| id != player_id);
         self.players.retain(|player| player.id != player_id);
         for token in &mut self.tokens {
             if token.owner_id.as_deref() == Some(player_id) {
@@ -1466,6 +1494,53 @@ mod tests {
         assert_eq!(seat.role, Role::Gm);
         let again = table.take_seat("Ada", "table", true, Some("nope"), Some(&seat.player_id));
         assert!(again.is_err());
+    }
+
+    #[test]
+    fn the_gm_can_kick_a_seat_that_is_still_connected() {
+        let mut table = Table::new();
+        table.passphrase = "table".into();
+        table.gm_key = "AB12CD".into();
+        let gm_seat = table.take_seat("Ada", "table", true, Some("AB12CD"), None).unwrap();
+        let player = table.take_seat("Bri", "table", false, None, None).unwrap();
+        let (gm_tx, _gm_rx) = mpsc::unbounded_channel();
+        let (gm_epoch, _) = table.attach(&gm_seat.player_id, gm_tx).unwrap();
+        let (player_tx, mut player_rx) = mpsc::unbounded_channel();
+        let (_, player_token) = table.attach(&player.player_id, player_tx).unwrap();
+        table.tokens.push(Token {
+            id: "bri".into(),
+            name: "Bri".into(),
+            x: 1.5,
+            y: 1.5,
+            image_file: None,
+            color: "#7eb8a2".into(),
+            owner_id: Some(player.player_id.clone()),
+            hidden: false,
+            vision_radius: 6.0,
+            grants_vision: true,
+            character_id: None,
+        });
+
+        let gm_viewer = table.viewer(&gm_seat.player_id, gm_epoch).unwrap();
+        table
+            .command(&gm_viewer, ClientMsg::ViewAs { player_id: Some(player.player_id.clone()) }, None)
+            .unwrap();
+        let gm_viewer = table.viewer(&gm_seat.player_id, gm_epoch).unwrap();
+        table
+            .command(&gm_viewer, ClientMsg::RemovePlayer { player_id: player.player_id.clone() }, None)
+            .unwrap();
+
+        match player_rx.try_recv().unwrap() {
+            ServerMsg::Kicked { message } => assert_eq!(message, "The GM asked you to leave."),
+            other => panic!("expected a kick, got {other:?}"),
+        }
+        assert!(table.players.iter().all(|seat| seat.id != player.player_id));
+        assert!(table.viewer_for_session(&player_token).is_none());
+        assert_eq!(table.tokens[0].owner_id, None);
+        assert!(table.viewer(&gm_seat.player_id, gm_epoch).unwrap().view_as.is_none());
+
+        let again = table.take_seat("Bri", "table", false, None, Some(&player.player_id)).unwrap();
+        assert_ne!(again.player_id, player.player_id);
     }
 
     #[test]

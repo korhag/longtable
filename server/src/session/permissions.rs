@@ -9,12 +9,12 @@ use crate::map::Vec2;
 use crate::net::protocol::{
     DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, Presentation, PresentationCapabilities,
     PresentationDoor, PresentationDoorLayer, PresentationLighting, PresentationVariant, PresentationView, RollLogEntry,
-    RollVisibility, SceneView, SegmentView, Snapshot, TokenKind, TokenView,
+    RollVisibility, SceneView, SegmentView, Snapshot, TokenKind, TokenView, Figure,
 };
-use crate::systems::Character;
+use crate::systems::{Character, CharacterKind};
 use crate::vision::{point_in_poly, CELLS_PER_SQUARE};
 
-use super::state::{Table, Viewer};
+use super::state::{Table, Token, Viewer};
 use crate::net::protocol::Role;
 
 pub fn can_see_roll(viewer: &Viewer, visibility: RollVisibility, roller_id: &str) -> bool {
@@ -249,7 +249,50 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         characters: visible_characters(table, viewer),
         campaigns: if matches!(sight, Sight::Gm) { campaign_listings(table) } else { Vec::new() },
         scenes: if matches!(sight, Sight::Gm) { scene_listings(table) } else { Vec::new() },
+        fear: table.fear,
+        figures: faces(table, &sight, &polygons),
     }
+}
+
+const HEALTH: [&str; 5] = ["Uninjured", "Slightly Wounded", "Wounded", "Badly Wounded", "Near Death"];
+const STRESS: [&str; 5] = ["Clear", "Uneasy", "Strained", "Stressed", "Spent"];
+
+fn faces(table: &Table, sight: &Sight, polygons: &[Vec<Vec2>]) -> Vec<Figure> {
+    table
+        .tokens
+        .iter()
+        .filter(|token| match sight {
+            Sight::Gm => true,
+            Sight::Player { id } => token_visible(token, id, polygons),
+        })
+        .filter_map(|token| figure_for(table, token))
+        .collect()
+}
+
+fn figure_for(table: &Table, token: &Token) -> Option<Figure> {
+    let id = token.character_id.as_ref()?;
+    let character = table.characters.iter().find(|character| &character.id == id)?;
+    let number = |key: &str| character.numbers.get(key).copied().unwrap_or(0);
+    Some(Figure {
+        token_id: token.id.clone(),
+        name: token.name.clone(),
+        kind: character.kind,
+        health: track_word(number("hp"), number("hpmax"), &HEALTH),
+        stress: track_word(number("stress"), number("stressmax"), &STRESS),
+        hope: if character.kind == CharacterKind::Pc { Some(number("hope")) } else { None },
+    })
+}
+
+/// Name a mark track by quarters. The last quarter, including a full track, is the final word.
+fn track_word(marked: i32, max: i32, names: &[&str; 5]) -> String {
+    if max <= 0 || marked <= 0 {
+        return names[0].to_string();
+    }
+    if marked >= max {
+        return names[4].to_string();
+    }
+    let step = ((marked as f64 / max as f64) * 4.0).ceil() as usize;
+    names[step.clamp(1, 4)].to_string()
 }
 
 fn campaign_listings(table: &Table) -> Vec<Listing> {
@@ -367,7 +410,7 @@ mod tests {
             hidden: true,
             vision_radius: 6.0,
             grants_vision: false,
-            character_id: None,
+            character_id: Some("lurker".into()),
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -380,7 +423,7 @@ mod tests {
             hidden: false,
             vision_radius: 8.0,
             grants_vision: true,
-            character_id: None,
+            character_id: Some("ada-sheet".into()),
         });
         table.rolls.push(StoredRoll {
             id: "r".into(),
@@ -401,7 +444,10 @@ mod tests {
             kind: CharacterKind::Pc,
             owner_id: Some("p1".into()),
             system_id: None,
-            numbers: Default::default(),
+            numbers: [("hp", 2), ("hpmax", 6), ("stress", 0), ("stressmax", 6), ("hope", 2)]
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
             texts: Default::default(),
         });
         table.characters.push(Character {
@@ -410,8 +456,11 @@ mod tests {
             kind: CharacterKind::Adversary,
             owner_id: None,
             system_id: None,
-            numbers: Default::default(),
-            texts: Default::default(),
+            numbers: [("hp", 5), ("hpmax", 5), ("stress", 3), ("stressmax", 3)]
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+            texts: [("feature".into(), "SECRET-FEATURE-XYZ".into())].into_iter().collect(),
         });
 
         let player_view = snapshot(&table, &viewer(Role::Player, "p1"));
@@ -422,6 +471,13 @@ mod tests {
         assert!(player_view.rolls[0].outcome.is_none());
         assert!(player_view.characters.iter().any(|character| character.id == "ada-sheet"));
         assert!(player_view.characters.iter().all(|character| character.id != "lurker"));
+        let player_json = serde_json::to_string(&player_view).unwrap();
+        assert!(!player_json.contains("SECRET-FEATURE-XYZ"));
+        assert_eq!(player_view.figures.len(), 1);
+        assert_eq!(player_view.figures[0].token_id, "ada");
+        assert_eq!(player_view.figures[0].health, "Wounded");
+        assert_eq!(player_view.figures[0].stress, "Clear");
+        assert_eq!(player_view.figures[0].hope, Some(2));
         assert!(player_view.scene.is_none() || player_view.scene.as_ref().unwrap().walls.is_empty());
 
         let gm_view = snapshot(&table, &viewer(Role::Gm, "gm"));
@@ -433,6 +489,73 @@ mod tests {
         assert!(player_view.scenes.is_empty());
         assert_eq!(gm_view.campaigns.len(), 1);
         assert!(gm_view.scenes.is_empty());
+        let lurker = gm_view.figures.iter().find(|figure| figure.token_id == "secret").unwrap();
+        assert_eq!(lurker.health, "Near Death");
+        assert_eq!(lurker.stress, "Spent");
+        assert_eq!(lurker.hope, None);
+    }
+
+    #[test]
+    fn quarters_name_both_tracks() {
+        let health = ["Uninjured", "Slightly Wounded", "Wounded", "Badly Wounded", "Near Death"];
+        assert_eq!(track_word(0, 8, &health), "Uninjured");
+        assert_eq!(track_word(1, 8, &health), "Slightly Wounded");
+        assert_eq!(track_word(2, 8, &health), "Slightly Wounded");
+        assert_eq!(track_word(3, 8, &health), "Wounded");
+        assert_eq!(track_word(4, 8, &health), "Wounded");
+        assert_eq!(track_word(5, 8, &health), "Badly Wounded");
+        assert_eq!(track_word(6, 8, &health), "Badly Wounded");
+        assert_eq!(track_word(7, 8, &health), "Near Death");
+        assert_eq!(track_word(8, 8, &health), "Near Death");
+        assert_eq!(track_word(0, 0, &health), "Uninjured");
+        let stress = ["Clear", "Uneasy", "Strained", "Stressed", "Spent"];
+        assert_eq!(track_word(0, 6, &stress), "Clear");
+        assert_eq!(track_word(6, 6, &stress), "Spent");
+    }
+
+    #[test]
+    fn a_public_fear_roll_fills_the_pool_and_stops_at_twelve() {
+        use crate::net::protocol::{ClientMsg, RollEvent};
+
+        let mut table = Table::new();
+        table.campaign.system_id = Some("daggerheart".into());
+        let fear = RollEvent {
+            id: "r".into(),
+            roller_id: "gm".into(),
+            roller_name: "Mara".into(),
+            formula: "1d12h+1d12f".into(),
+            label: None,
+            visibility: RollVisibility::Public,
+            modifier: 0,
+            total: 10,
+            play_at: 0,
+            keyframe_dt: 0.0,
+            dice: Vec::new(),
+            outcome: Some(RollOutcome { label: "with Fear".into(), tone: "fear".into() }),
+        };
+        for _ in 0..13 {
+            table.commit_roll(&fear);
+        }
+        assert_eq!(table.fear, 12);
+        table.command(&viewer(Role::Gm, "gm"), ClientMsg::AdjustFear { delta: -1 }, None).unwrap();
+        assert_eq!(table.fear, 11);
+        assert!(table.command(&viewer(Role::Player, "p1"), ClientMsg::AdjustFear { delta: 1 }, None).is_err());
+        assert_eq!(table.fear, 11);
+
+        table.campaign.system_id = None;
+        table.commit_roll(&fear);
+        assert_eq!(table.fear, 11);
+        table.campaign.system_id = Some("daggerheart".into());
+
+        let mut secret = fear.clone();
+        secret.visibility = RollVisibility::GmSecret;
+        table.commit_roll(&secret);
+        assert_eq!(table.fear, 11);
+
+        let mut hope = fear.clone();
+        hope.outcome = Some(RollOutcome { label: "with Hope".into(), tone: "hope".into() });
+        table.commit_roll(&hope);
+        assert_eq!(table.fear, 11);
     }
 
     #[test]

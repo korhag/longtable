@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::map::MapLayout;
-use crate::systems::{Campaign, Character, RollOutcome, SystemDef};
+use crate::systems::{Campaign, Character, CharacterKind, RollOutcome, SystemDef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -334,6 +334,19 @@ pub struct Listing {
     pub name: String,
 }
 
+/// A token's public face. Words only: exact marks stay on the sheet.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct Figure {
+    pub token_id: String,
+    pub name: String,
+    pub kind: CharacterKind,
+    pub health: String,
+    pub stress: String,
+    pub hope: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
@@ -355,6 +368,11 @@ pub struct Snapshot {
     pub campaigns: Vec<Listing>,
     #[serde(default)]
     pub scenes: Vec<Listing>,
+    /// Daggerheart Fear. Zero on any other system, and on a save from before it existed.
+    #[serde(default)]
+    pub fear: u8,
+    #[serde(default)]
+    pub figures: Vec<Figure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -478,6 +496,9 @@ pub enum ClientMsg {
         field: String,
         delta: i32,
     },
+    AdjustFear {
+        delta: i32,
+    },
     ApplyDamage {
         character_id: String,
         field_id: String,
@@ -546,6 +567,10 @@ pub enum ServerMsg {
     Roll(RollEvent),
     Concealed(ConcealedRoll),
     Error {
+        message: String,
+    },
+    /// The GM removed this seat. The browser should leave and not reconnect.
+    Kicked {
         message: String,
     },
     Systems {

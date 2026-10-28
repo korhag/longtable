@@ -32,6 +32,8 @@ struct SaveFile {
     scenes: Vec<SceneShelf>,
     #[serde(default)]
     shelved: Vec<CampaignShelf>,
+    #[serde(default)]
+    fear: u8,
 }
 
 pub fn load_into(table: &mut Table, data_dir: &Path) {
@@ -62,6 +64,7 @@ pub fn load_into(table: &mut Table, data_dir: &Path) {
             table.characters = save.characters;
             table.scenes = save.scenes;
             table.shelved = save.shelved;
+            table.fear = save.fear;
             table.ensure_campaign();
             table.sync_fog_size();
             tracing::info!("restored {}", path.display());
@@ -89,6 +92,7 @@ pub fn write(table: &Table, data_dir: &Path) -> std::io::Result<()> {
         characters: table.characters.clone(),
         scenes: table.scenes.clone(),
         shelved: table.shelved.clone(),
+        fear: table.fear,
     };
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join("state.json");
@@ -136,6 +140,7 @@ mod tests {
         assert!(table.shelved.is_empty());
         assert!(table.characters.is_empty());
         assert_eq!(table.tokens[0].character_id, None);
+        assert_eq!(table.fear, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

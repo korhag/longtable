@@ -13,6 +13,7 @@ import { creation } from './daggerheart/creation.svelte';
 import DualityButton from './daggerheart/DualityButton.svelte';
 import Overlays from './daggerheart/Overlays.svelte';
 import PcSheet from './daggerheart/PcSheet.svelte';
+import PlayChrome from './daggerheart/PlayChrome.svelte';
 
 const extras: Record<string, Component> = {
   daggerheart: DualityButton,
@@ -28,6 +29,15 @@ const overlays: Record<string, Component> = {
   daggerheart: Overlays,
 };
 
+export interface PlayAim {
+  aimPoint: { x: number; y: number } | null;
+  onCenter: (x: number, y: number) => void;
+}
+
+const playChrome: Record<string, Component<PlayAim>> = {
+  daggerheart: PlayChrome,
+};
+
 export function extraFor(systemId: string | null): Component | null {
   if (!systemId) return null;
   return extras[systemId] ?? null;
@@ -41,6 +51,11 @@ export function sheetFor(systemId: string | null, kind: CharacterKind): SheetVie
 export function overlaysFor(systemId: string | null): Component | null {
   if (!systemId) return null;
   return overlays[systemId] ?? null;
+}
+
+export function playChromeFor(systemId: string | null): Component<PlayAim> | null {
+  if (!systemId) return null;
+  return playChrome[systemId] ?? null;
 }
 
 export function openCreation(kind: 'pc' | 'adversary') {

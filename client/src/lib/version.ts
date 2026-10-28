@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.6.1';
-export const VERSION_NOTE = 'A light or a wall you click onto a map stays there.';
+export const VERSION = '0.8.0';
+export const VERSION_NOTE = 'Click a token to target it, and click it again to take control.';

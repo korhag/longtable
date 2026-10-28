@@ -1,12 +1,15 @@
 <script lang="ts">
   import { designer } from '../designer/designer.svelte';
+  import type { PlayerInfo } from '../net/bindings/PlayerInfo.ts';
   import { leaveTable, send } from '../net/socket';
   import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
   import ViewControls from '../ui/ViewControls.svelte';
+  import type { Anchor } from '../ui/portal';
   import { VERSION, VERSION_NOTE } from '../version';
   import { layout } from './layout.svelte';
   import { appMode, modes, type AppMode, type TableMode } from './modes.svelte';
+  import SeatMenu from './SeatMenu.svelte';
 
   let { onZoom, onFit, onMe, onCycle, onSetGrid }: {
     onZoom: (factor: number) => void;
@@ -33,11 +36,45 @@
     { id: 'campaign', name: 'Campaign' },
   ];
 
+  let seatMenu = $state<{ id: string; name: string; anchor: Anchor } | null>(null);
+
   function dismiss(playerId: string) {
     const player = table.players.find((item) => item.id === playerId);
     if (!gm || !player || player.id === table.playerId || player.connected) return;
     send({ type: 'removePlayer', playerId });
   }
+
+  function seatTitle(player: PlayerInfo): string {
+    const role = player.role === 'gm' ? ' · GM' : '';
+    if (!gm || player.id === table.playerId) return `${player.name}${role}`;
+    const gone = player.connected ? '' : ' · click to dismiss';
+    return `${player.name}${role}${gone} · right-click to kick`;
+  }
+
+  function openSeat(event: MouseEvent, player: PlayerInfo) {
+    event.preventDefault();
+    if (!gm || player.id === table.playerId) {
+      seatMenu = null;
+      return;
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    seatMenu = {
+      id: player.id,
+      name: player.name,
+      anchor: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+    };
+  }
+
+  function kick(playerId: string) {
+    seatMenu = null;
+    send({ type: 'removePlayer', playerId });
+  }
+
+  $effect(() => {
+    if (!seatMenu) return;
+    const openId = seatMenu.id;
+    if (!gm || !table.players.some((player) => player.id === openId)) seatMenu = null;
+  });
 </script>
 
 <header class="topbar" data-mode={mode}>
@@ -72,14 +109,23 @@
           class="portrait portrait-sm"
           style={`--ring:${player.color}`}
           type="button"
-          title={`${player.name}${player.role === 'gm' ? ' · GM' : ''}${!player.connected && gm && player.id !== table.playerId ? ' · click to dismiss' : ''}`}
+          title={seatTitle(player)}
           onclick={() => dismiss(player.id)}
+          oncontextmenu={(event) => openSeat(event, player)}
         >
           {player.name.slice(0, 2).toUpperCase()}
           <span class={`seat-dot ${player.connected ? 'bg-emerald-400' : 'bg-stone-500'}`}></span>
         </button>
       {/each}
     </div>
+    {#if seatMenu}
+      <SeatMenu
+        name={seatMenu.name}
+        anchor={seatMenu.anchor}
+        onkick={() => seatMenu && kick(seatMenu.id)}
+        onclose={() => (seatMenu = null)}
+      />
+    {/if}
     <button class="btn quiet px-2" type="button" onclick={() => layout.reset()}>Reset</button>
     <button class="btn quiet px-2" type="button" onclick={() => leaveTable()}>Leave</button>
   </div>

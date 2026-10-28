@@ -32,6 +32,9 @@ export interface EngineHooks {
   canDrag: (token: TokenView) => boolean;
   onMeasure?: (delta: { dx: number; dy: number; x: number; y: number } | null) => void;
   onWarning?: (message: string) => void;
+  onTarget?: (tokenId: string | null) => void;
+  onMenu?: (tokenId: string | null, x: number, y: number) => void;
+  onPaint?: () => void;
 }
 
 interface View {
@@ -41,6 +44,8 @@ interface View {
   fog: FogView | null;
   role: Role;
   selectedId: string | null;
+  targetId: string | null;
+  hoverId: string | null;
   tool: Tool;
   packs: Pack[];
   ghost: { x: number; y: number }[];
@@ -76,6 +81,8 @@ export class TableEngine {
     fog: null,
     role: 'player',
     selectedId: null,
+    targetId: null,
+    hoverId: null,
     tool: 'select',
     packs: [],
     ghost: [],
@@ -99,6 +106,7 @@ export class TableEngine {
   private raycaster = new THREE.Raycaster();
   private ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private dragging: { id: string; moved: boolean } | null = null;
+  private acted = false;
   private panning = false;
   private brushing = false;
   private building = false;
@@ -158,6 +166,7 @@ export class TableEngine {
       this.frameId = requestAnimationFrame(loop);
       if (!this.dirty) return;
       this.renderer.render(this.scene3, this.camera);
+      this.hooks.onPaint?.();
       this.dirty = false;
     };
     loop();
@@ -384,7 +393,7 @@ export class TableEngine {
       }
       const dragging = this.dragging?.id === token.id;
       if (!dragging) node.group.position.set(token.x, 0, token.y);
-      paintToken(node, token, token.id === this.view.selectedId, this.standing);
+      paintToken(node, token, ringMark(token.id, this.view), this.standing);
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;
@@ -419,6 +428,20 @@ export class TableEngine {
   centerOn(x: number, y: number) {
     this.focus.set(x, this.activePresentation()?.target[1] ?? 0, y);
     this.placeCamera();
+  }
+
+  screenOf(id: string): { x: number; y: number } | null {
+    const node = this.nodes.get(id);
+    if (!node) return null;
+    const point = node.group.position.clone();
+    point.y = 0.8;
+    point.project(this.camera);
+    if (point.z < -1 || point.z > 1) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + (point.x * 0.5 + 0.5) * rect.width),
+      y: Math.round(rect.top + (-point.y * 0.5 + 0.5) * rect.height),
+    };
   }
 
   zoomBy(factor: number, event?: { clientX: number; clientY: number }) {
@@ -588,7 +611,8 @@ export class TableEngine {
 
   private onDown = (event: PointerEvent) => {
     this.pointer = { x: event.clientX, y: event.clientY };
-    if (event.button === 1 || event.altKey || (event.button === 2 && !this.view.buildMode)) {
+    this.acted = false;
+    if (event.button === 1 || event.altKey) {
       this.panning = true;
       return;
     }
@@ -600,6 +624,13 @@ export class TableEngine {
       }
       return;
     }
+    if (event.button === 2) {
+      const tokenId = this.tokenAt(event);
+      if (tokenId && tokenId !== this.view.selectedId) this.hooks.onTarget?.(tokenId);
+      this.hooks.onMenu?.(tokenId, event.clientX, event.clientY);
+      this.acted = true;
+      return;
+    }
     if (event.button !== 0) return;
     if (this.view.tool !== 'select' && this.view.role === 'gm') {
       this.brushing = true;
@@ -607,17 +638,31 @@ export class TableEngine {
       return;
     }
     const tokenId = this.tokenAt(event);
-    if (tokenId) {
-      const token = this.view.tokens.find((item) => item.id === tokenId);
-      this.hooks.onSelect(tokenId);
+    if (!tokenId) {
+      this.hooks.onTarget?.(null);
+      this.panning = true;
+      return;
+    }
+    const token = this.view.tokens.find((item) => item.id === tokenId);
+    this.acted = true;
+    if (!this.view.selectedId) {
+      if (token && this.hooks.canDrag(token)) this.hooks.onSelect(tokenId);
+      else this.hooks.onTarget?.(tokenId);
+      return;
+    }
+    if (tokenId === this.view.selectedId) {
       if (token && this.hooks.canDrag(token)) {
         this.dragging = { id: tokenId, moved: false };
         this.dragOrigin = { x: token.x, y: token.y };
       }
       return;
     }
-    this.hooks.onSelect(null);
-    this.panning = true;
+    if (tokenId === this.view.targetId && this.view.role === 'gm' && token && this.hooks.canDrag(token)) {
+      this.hooks.onSelect(tokenId);
+      this.hooks.onTarget?.(null);
+      return;
+    }
+    this.hooks.onTarget?.(tokenId);
   };
 
   private onMove = (event: PointerEvent) => {
@@ -670,7 +715,7 @@ export class TableEngine {
     if (this.dragging?.moved) {
       const node = this.nodes.get(this.dragging.id);
       if (node) this.hooks.onMove(this.dragging.id, node.group.position.x, node.group.position.z);
-    } else if (!this.dragging && !this.brushing && this.view.role === 'gm') {
+    } else if (!this.dragging && !this.brushing && !this.acted && this.view.role === 'gm') {
       const travel = Math.hypot(event.clientX - this.pointer.x, event.clientY - this.pointer.y);
       if (travel < 5) this.toggleNearestDoor(event);
     }
@@ -851,10 +896,22 @@ function createToken(token: TokenView): TokenNode {
   return { id: token.id, group, disc, ring, label, card, imageUrl: '' };
 }
 
-function paintToken(node: TokenNode, token: TokenView, selected: boolean, standing: boolean) {
+type RingMark = 'control' | 'target' | 'hover' | null;
+
+function ringMark(id: string, view: View): RingMark {
+  if (id === view.selectedId) return 'control';
+  if (id === view.targetId) return 'target';
+  if (id === view.hoverId) return 'hover';
+  return null;
+}
+
+function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean) {
   const ring = node.ring.material as THREE.MeshBasicMaterial;
-  ring.color.set(selected ? 0xf2d48a : token.color);
-  node.ring.scale.setScalar(selected ? 1.08 : 1);
+  if (mark === 'control') ring.color.set(0xf2d48a);
+  else if (mark === 'target') ring.color.set(0xd27b66);
+  else if (mark === 'hover') ring.color.set(0xf2e2b0);
+  else ring.color.set(token.color);
+  node.ring.scale.setScalar(mark === 'hover' ? 1.26 : mark === 'target' ? 1.18 : mark === 'control' ? 1.12 : 1);
   const disc = node.disc.material as THREE.MeshLambertMaterial;
   disc.opacity = token.hidden ? 0.45 : 1;
   disc.transparent = token.hidden;

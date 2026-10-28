@@ -11,6 +11,7 @@ import type { Character } from './net/bindings/Character.ts';
 import type { ClientMsg } from './net/bindings/ClientMsg.ts';
 import type { DieMesh } from './net/bindings/DieMesh.ts';
 import type { DoorView } from './net/bindings/DoorView.ts';
+import type { Figure } from './net/bindings/Figure.ts';
 import type { FogView } from './net/bindings/FogView.ts';
 import type { PlayerInfo } from './net/bindings/PlayerInfo.ts';
 import type { Role } from './net/bindings/Role.ts';
@@ -54,6 +55,11 @@ class TableStore {
   landedRollId = $state<string | null>(null);
   concealedNotice = $state<string | null>(null);
   selectedTokenId = $state<string | null>(null);
+  targetTokenId = $state<string | null>(null);
+  hoverTokenId = $state<string | null>(null);
+  menu = $state<{ tokenId: string; x: number; y: number } | null>(null);
+  fear = $state(0);
+  figures = $state<Figure[]>([]);
   tool = $state<Tool>('select');
   viewId = $state('');
   clock = new ClockSync();
@@ -92,8 +98,19 @@ class TableStore {
         this.characters = message.characters;
         this.viewAs = message.viewAs;
         this.role = message.you.role;
+        this.fear = message.fear;
+        this.figures = message.figures;
         if (this.selectedTokenId && !message.tokens.some((token) => token.id === this.selectedTokenId)) {
           this.selectedTokenId = null;
+        }
+        if (this.targetTokenId && !message.tokens.some((token) => token.id === this.targetTokenId)) {
+          this.targetTokenId = null;
+        }
+        if (this.hoverTokenId && !message.tokens.some((token) => token.id === this.hoverTokenId)) {
+          this.hoverTokenId = null;
+        }
+        if (this.menu && !message.tokens.some((token) => token.id === this.menu.tokenId)) {
+          this.menu = null;
         }
         break;
       case 'roll':
@@ -176,6 +193,11 @@ class TableStore {
     this.landedRollId = null;
     this.concealedNotice = null;
     this.selectedTokenId = null;
+    this.targetTokenId = null;
+    this.hoverTokenId = null;
+    this.menu = null;
+    this.fear = 0;
+    this.figures = [];
     this.viewId = '';
     this.framedScene = '';
     this.queue = [];

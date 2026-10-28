@@ -2,6 +2,7 @@
 import type { Campaign } from "./Campaign.ts";
 import type { Character } from "./Character.ts";
 import type { DoorView } from "./DoorView.ts";
+import type { Figure } from "./Figure.ts";
 import type { FogView } from "./FogView.ts";
 import type { Listing } from "./Listing.ts";
 import type { PlayerInfo } from "./PlayerInfo.ts";
@@ -13,4 +14,4 @@ export type Snapshot = { you: PlayerInfo, players: Array<PlayerInfo>, scene: Sce
 /**
  * Other campaigns and this campaign's scenes. Empty for a player.
  */
-campaigns: Array<Listing>, scenes: Array<Listing>, };
+campaigns: Array<Listing>, scenes: Array<Listing>, fear: number, figures: Array<Figure>, };
