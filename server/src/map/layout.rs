@@ -14,6 +14,7 @@ pub const MAX_SIDE: u32 = 200;
 const MAX_PIECES: usize = 4_000;
 const MAX_PROPS: usize = 2_000;
 const MAX_DECALS: usize = 8_000;
+const MAX_LIGHTS: usize = 400;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +75,18 @@ fn one() -> f32 {
     1.0
 }
 
+/// A light the GM placed on a built map. The marker is the source;
+/// sight still comes from tokens.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct PlacedLight {
+    pub x: f32,
+    pub y: f32,
+    pub range: f32,
+    pub color: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
@@ -88,6 +101,8 @@ pub struct MapLayout {
     pub props: Vec<PlacedProp>,
     #[serde(default)]
     pub decals: Vec<PlacedDecal>,
+    #[serde(default)]
+    pub lights: Vec<PlacedLight>,
 }
 
 impl MapLayout {
@@ -101,6 +116,7 @@ impl MapLayout {
             pieces: Vec::new(),
             props: Vec::new(),
             decals: Vec::new(),
+            lights: Vec::new(),
         }
     }
 
@@ -119,7 +135,7 @@ impl MapLayout {
         if bytes.iter().any(|index| *index as usize >= self.terrains.len()) {
             return Err("a cell names a terrain that is not on this map".into());
         }
-        if self.pieces.len() > MAX_PIECES || self.props.len() > MAX_PROPS || self.decals.len() > MAX_DECALS {
+        if self.pieces.len() > MAX_PIECES || self.props.len() > MAX_PROPS || self.decals.len() > MAX_DECALS || self.lights.len() > MAX_LIGHTS {
             return Err("this map has more pieces than the table will store".into());
         }
         for piece in &self.pieces {
@@ -141,6 +157,17 @@ impl MapLayout {
                 return Err(format!("a decal at {},{} is off the map", decal.x, decal.y));
             }
         }
+        for light in &self.lights {
+            if !on_map(light.x, light.y, self.width, self.height) {
+                return Err(format!("a light at {},{} is off the map", light.x, light.y));
+            }
+            if !light.range.is_finite() || !(0.5..=40.0).contains(&light.range) {
+                return Err("a light reaches between half a square and 40".into());
+            }
+            if light.color.is_empty() || light.color.chars().count() > 32 {
+                return Err("a light needs a color".into());
+            }
+        }
         Ok(())
     }
 }
@@ -155,4 +182,18 @@ pub fn decode_cells(text: &str) -> Result<Vec<u8>, String> {
 
 pub fn encode_cells(bytes: &[u8]) -> String {
     STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_old_layout_without_lights_still_loads() {
+        let mut value = serde_json::to_value(MapLayout::blank(5, 5, "core/grass")).unwrap();
+        value.as_object_mut().unwrap().remove("lights");
+        let layout: MapLayout = serde_json::from_value(value).unwrap();
+        assert!(layout.lights.is_empty());
+        layout.validate().unwrap();
+    }
 }

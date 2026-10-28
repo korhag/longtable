@@ -1,10 +1,12 @@
 <script lang="ts">
   import { send } from '../net/socket';
+  import { openCreation, overlaysFor } from '../../systems';
   import { table, type Tool } from '../table.svelte';
 
   let tokenName = $state('Hero');
 
   const players = $derived(table.players.filter((player) => player.role === 'player'));
+  const guided = $derived(overlaysFor(table.campaign.systemId) != null);
   const colors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
 
   function tool(next: Tool) {
@@ -25,6 +27,24 @@
       color: colors[table.tokens.length % colors.length] ?? '#d4a656',
       characterId: null,
     });
+  }
+
+  function place(character: (typeof table.characters)[number]) {
+    const scene = table.scene;
+    const index = table.tokens.length;
+    send({
+      type: 'createToken',
+      name: character.name,
+      x: (scene ? scene.width / 2 : 2.5) + (index % 5) - 2,
+      y: (scene ? scene.height / 2 : 2.5) + Math.floor(index / 5),
+      ownerId: character.ownerId,
+      hidden: character.kind !== 'pc',
+      visionRadius: character.kind === 'pc' ? 12 : 8,
+      grantsVision: character.kind === 'pc',
+      color: character.kind === 'adversary' ? '#c45c4a' : (colors[index % colors.length] ?? '#d4a656'),
+      characterId: character.id,
+    });
+    table.tool = 'select';
   }
 </script>
 
@@ -56,7 +76,29 @@
     </select>
   </label>
 
-  <p class="mt-3 text-xs text-[var(--color-parchment)]/55">Import a map or start a blank one from the Map tool. Click a door on the map to open it.</p>
+  <p class="mt-3 text-xs text-[var(--color-parchment)]/55">Move is on. Drag a player or an adversary. The range band shows while you drag. Build walls and lights in Map, then put that map on the table.</p>
+
+  {#if guided}
+    <div class="mt-3 flex gap-1.5">
+      <button class="btn flex-1 text-xs" type="button" onclick={() => openCreation('pc')}>Character</button>
+      <button class="btn quiet flex-1 text-xs" type="button" onclick={() => openCreation('adversary')}>Adversary</button>
+    </div>
+  {/if}
+
+  {#if table.characters.length > 0}
+    <p class="mt-3 text-[10px] tracking-wide text-[var(--color-gold)]/70 uppercase">Cast</p>
+    {#each table.characters as character (character.id)}
+      {@const token = table.tokens.find((item) => item.characterId === character.id)}
+      <div class="mt-1 flex items-center gap-1">
+        <button
+          class="btn quiet min-w-0 flex-1 truncate text-left text-xs"
+          type="button"
+          onclick={() => { if (token) table.selectedTokenId = token.id; table.tool = 'select'; }}
+        >{character.name}</button>
+        <button class="btn quiet px-2 text-xs" type="button" onclick={() => place(character)}>{token ? 'Again' : 'Place'}</button>
+      </div>
+    {/each}
+  {/if}
 
   <div class="mt-3 flex gap-1.5">
     <input class="field" bind:value={tokenName} maxlength="24" placeholder="Token name" />

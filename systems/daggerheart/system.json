@@ -48,7 +48,23 @@
     { "id": "experiences", "name": "Experiences", "kind": "text", "textDefault": "" },
     { "id": "notes", "name": "Notes", "kind": "text", "textDefault": "" },
     { "id": "motives", "name": "Motives", "kind": "text", "textDefault": "" },
-    { "id": "features", "name": "Features", "kind": "text", "textDefault": "" }
+    { "id": "features", "name": "Features", "kind": "text", "textDefault": "" },
+    { "id": "subclass", "name": "Subclass", "kind": "text", "textDefault": "" },
+    { "id": "pronouns", "name": "Pronouns", "kind": "text", "textDefault": "" },
+    { "id": "description", "name": "Description", "kind": "text", "textDefault": "" },
+    { "id": "domains", "name": "Domains", "kind": "text", "textDefault": "" },
+    { "id": "feature", "name": "Class feature", "kind": "text", "textDefault": "" },
+    { "id": "primary", "name": "Primary weapon", "kind": "text", "textDefault": "" },
+    { "id": "secondary", "name": "Secondary weapon", "kind": "text", "textDefault": "" },
+    { "id": "armorname", "name": "Armor", "kind": "text", "textDefault": "" },
+    { "id": "inventory", "name": "Inventory", "kind": "text", "textDefault": "" },
+    { "id": "background", "name": "Background", "kind": "text", "textDefault": "" },
+    { "id": "connections", "name": "Connections", "kind": "text", "textDefault": "" },
+    { "id": "cards", "name": "Domain cards", "kind": "text", "textDefault": "" },
+    { "id": "gold", "name": "Handfuls", "kind": "number", "min": 0, "max": 99, "default": 1 },
+    { "id": "attackname", "name": "Attack name", "kind": "text", "textDefault": "" },
+    { "id": "attackrange", "name": "Attack range", "kind": "text", "textDefault": "Melee" },
+    { "id": "advexp", "name": "Experience", "kind": "text", "textDefault": "" }
   ],
   "dieTags": [
     { "letter": "h", "id": "hope", "name": "Hope", "body": "#d4a656", "ink": "#1c140e" },
@@ -66,13 +82,13 @@
   "sheets": {
     "pc": {
       "sections": [
-        { "title": "Identity", "columns": 2, "fields": ["ancestry", "community", "class", "level"] },
+        { "title": "Identity", "columns": 2, "fields": ["class", "subclass", "ancestry", "community", "pronouns", "level"] },
         { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
-        { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "hpmax"] },
+        { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "hpmax", "stressmax"] },
         { "title": "Thresholds", "columns": 1, "fields": ["thresholds"] },
-        { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope", "armor"] },
-        { "title": "Damage", "columns": 1, "fields": ["damage"] },
-        { "title": "Notes", "columns": 1, "fields": ["experiences", "notes"] }
+        { "title": "Resources", "columns": 2, "fields": ["hp", "stress", "hope", "armor", "gold"] },
+        { "title": "Gear", "columns": 1, "fields": ["damage", "primary", "secondary", "armorname", "inventory"] },
+        { "title": "Story", "columns": 1, "fields": ["description", "domains", "feature", "experiences", "background", "connections", "cards", "notes"] }
       ],
       "toolbar": {
         "resources": ["hp", "stress", "hope", "armor"],
@@ -94,11 +110,13 @@
     },
     "adversary": {
       "sections": [
-        { "title": "Rank", "columns": 2, "fields": ["advtype", "tier", "difficulty"] },
-        { "title": "Attack", "columns": 2, "fields": ["attack", "atkdamage"] },
-        { "title": "Thresholds", "columns": 1, "fields": ["thresholds"] },
+        { "title": "Rank", "columns": 2, "fields": ["advtype", "tier", "description"] },
+        { "title": "Motives", "columns": 1, "fields": ["motives"] },
+        { "title": "Line", "columns": 2, "fields": ["difficulty", "thresholds"] },
         { "title": "Resources", "columns": 2, "fields": ["hpmax", "hp", "stressmax", "stress"] },
-        { "title": "Notes", "columns": 1, "fields": ["motives", "features"] }
+        { "title": "Attack", "columns": 2, "fields": ["attack", "attackname", "attackrange", "atkdamage"] },
+        { "title": "Experience", "columns": 1, "fields": ["advexp"] },
+        { "title": "Features", "columns": 1, "fields": ["features"] }
       ],
       "toolbar": {
         "resources": ["hp", "stress"],

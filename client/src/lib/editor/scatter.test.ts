@@ -13,6 +13,7 @@ function empty(width: number, height: number): MapLayout {
     pieces: [],
     props: [],
     decals: [],
+    lights: [],
   };
 }
 

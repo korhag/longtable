@@ -795,7 +795,7 @@ impl Table {
             image_file: None,
             walls: compiled.walls,
             doors: compiled.doors,
-            lights: Vec::new(),
+            lights: compiled.lights,
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
             presentation: None,
@@ -1621,10 +1621,10 @@ mod tests {
         let mut table = Table::new();
         let layout = MapLayout::blank(8, 8, "core/grass");
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
-        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new() });
+        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() });
         assert!(err.is_err());
         table
-            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new() })
+            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() })
             .unwrap();
         assert_eq!(table.scene.as_ref().unwrap().name, "Glade");
         assert!(table.scene.as_ref().unwrap().layout.is_some());

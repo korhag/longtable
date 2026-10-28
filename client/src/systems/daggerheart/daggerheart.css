@@ -1,0 +1,260 @@
+.dh-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-menu);
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  background:
+    radial-gradient(ellipse at top, rgba(212, 166, 86, 0.12), transparent 42%),
+    #100e0c;
+  color: var(--color-parchment);
+}
+
+.dh-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 1.25rem 0.9rem;
+  border-right: 1px solid rgba(212, 166, 86, 0.22);
+  background: rgba(12, 9, 7, 0.72);
+  overflow: auto;
+}
+
+.dh-rail button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.55rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 0.7rem;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+
+.dh-rail button.on {
+  background: rgba(212, 166, 86, 0.16);
+}
+
+.dh-rail .kicker {
+  grid-column: 2;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(242, 212, 138, 0.7);
+}
+
+.dh-rail .mark {
+  grid-row: span 2;
+  align-self: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 166, 86, 0.45);
+  font-size: 11px;
+  line-height: 1.35rem;
+  text-align: center;
+}
+
+.dh-rail button.done .mark {
+  background: #6e9a72;
+  border-color: #6e9a72;
+  color: #102016;
+}
+
+.dh-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.dh-main header,
+.dh-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1.4rem;
+}
+
+.dh-main header {
+  border-bottom: 1px solid rgba(212, 166, 86, 0.18);
+}
+
+.dh-foot {
+  border-top: 1px solid rgba(212, 166, 86, 0.18);
+  background: rgba(8, 6, 4, 0.45);
+}
+
+.dh-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 1.2rem 1.4rem 2rem;
+}
+
+.dh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.dh-card {
+  min-height: 7.5rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(212, 166, 86, 0.28);
+  background: linear-gradient(180deg, rgba(48, 34, 22, 0.92), rgba(22, 16, 12, 0.94));
+  text-align: left;
+  color: inherit;
+}
+
+.dh-card.on,
+.dh-chip.on {
+  border-color: #f2d48a;
+  box-shadow: inset 0 0 0 1px rgba(242, 212, 138, 0.45);
+}
+
+.dh-card small,
+.dh-muted {
+  color: rgba(244, 236, 223, 0.62);
+}
+
+.dh-chip {
+  min-height: 2rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 166, 86, 0.3);
+  background: rgba(20, 14, 10, 0.55);
+  color: inherit;
+}
+
+.dh-shield {
+  display: flex;
+  min-width: 4.4rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.3rem 0.7rem;
+  border: 1px solid rgba(212, 166, 86, 0.5);
+  border-radius: 46% 46% 42% 42% / 22% 22% 58% 58%;
+  background: linear-gradient(180deg, #3a2c20, #16110d);
+  text-align: center;
+}
+
+.dh-shield b {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.dh-shield span {
+  margin-top: 0.15rem;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(242, 212, 138, 0.8);
+}
+
+.dh-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(212, 166, 86, 0.4);
+  background:
+    linear-gradient(180deg, rgba(244, 236, 223, 0.05), transparent 28%),
+    #1a140f;
+}
+
+.dh-banner {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid rgba(212, 166, 86, 0.28);
+}
+
+.dh-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 0.8rem;
+}
+
+.dh-block {
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(212, 166, 86, 0.18);
+  background: rgba(8, 6, 4, 0.28);
+}
+
+.dh-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+}
+
+.dh-boxes button {
+  width: 0.95rem;
+  height: 0.95rem;
+  padding: 0;
+  border-radius: 0.2rem;
+  border: 1px solid rgba(212, 166, 86, 0.55);
+  background: transparent;
+}
+
+.dh-boxes button.on {
+  background: #d4a656;
+}
+
+.dh-pips button {
+  width: 0.85rem;
+  height: 1.15rem;
+  border-radius: 40% 40% 50% 50%;
+}
+
+.dh-adv {
+  padding: 0.9rem 1rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(212, 166, 86, 0.55);
+  background: linear-gradient(180deg, #2a2118, #16110c 28%);
+}
+
+.dh-adv h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dh-stat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  margin: 0.45rem 0;
+  padding: 0.4rem 0;
+  border-top: 1px solid rgba(212, 166, 86, 0.28);
+  border-bottom: 1px solid rgba(212, 166, 86, 0.28);
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .dh-overlay {
+    grid-template-columns: 1fr;
+  }
+
+  .dh-rail {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid rgba(212, 166, 86, 0.22);
+  }
+
+  .dh-columns {
+    grid-template-columns: 1fr;
+  }
+}

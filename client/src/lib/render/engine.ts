@@ -316,12 +316,19 @@ export class TableEngine {
     clearGroup(this.lightGroup);
     if (this.view.role !== 'gm') return;
     for (const light of this.view.scene?.lights ?? []) {
+      const pool = new THREE.Mesh(
+        new THREE.CircleGeometry(Math.max(0.4, light.range), 40),
+        new THREE.MeshBasicMaterial({ color: light.color, transparent: true, opacity: 0.16, depthWrite: false }),
+      );
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(light.x, 0.04, light.y);
+      this.lightGroup.add(pool);
       const mesh = new THREE.Mesh(
         new THREE.CircleGeometry(0.18, 16),
-        new THREE.MeshBasicMaterial({ color: light.color, transparent: true, opacity: 0.85 }),
+        new THREE.MeshBasicMaterial({ color: light.color, transparent: true, opacity: 0.9 }),
       );
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(light.x, 0.06, light.y);
+      mesh.position.set(light.x, 0.07, light.y);
       this.lightGroup.add(mesh);
     }
   }

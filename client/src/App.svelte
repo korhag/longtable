@@ -16,6 +16,7 @@
   import { TableEngine } from './lib/render/engine';
   import { measure } from './lib/systems/measure';
   import { systems } from './lib/systems/store.svelte';
+  import { overlaysFor } from './systems';
   import { table } from './lib/table.svelte';
   import CharacterBar from './lib/ui/CharacterBar.svelte';
   import DiceBar from './lib/ui/DiceBar.svelte';
@@ -41,7 +42,12 @@
         height: editor.draft.layout.height,
         imageUrl: null,
         walls: [],
-        lights: [],
+        lights: (editor.draft.layout.lights ?? []).map((light) => ({
+          x: light.x,
+          y: light.y,
+          range: light.range,
+          color: light.color,
+        })),
         layout: editor.draft.layout,
         presentation: null,
       }
@@ -134,6 +140,8 @@
     const timer = window.setTimeout(() => table.clearNotice(), 4200);
     return () => window.clearTimeout(timer);
   });
+  const Overlays = $derived(overlaysFor(table.campaign.systemId));
+
   function mine() {
     const characterId = systems.chosen?.id;
     return table.tokens.find((token) => characterId && token.characterId === characterId)
@@ -198,6 +206,10 @@
     </div>
 
     <DiceStage />
+
+    {#if Overlays}
+      <Overlays />
+    {/if}
 
     {#if measureLabel}
       <p class="pointer-events-none fixed z-[var(--z-float)] rounded-full bg-[#1c140e]/90 px-2 py-1 text-xs text-[var(--color-gold-bright)]" style={`left:${measureAt.x + 14}px;top:${measureAt.y + 14}px`}>

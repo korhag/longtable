@@ -35,8 +35,16 @@
     { id: 'door', name: 'Doors' },
     { id: 'prop', name: 'Props' },
     { id: 'decal', name: 'Decals' },
+    { id: 'light', name: 'Lights' },
     { id: 'erase', name: 'Erase' },
   ];
+
+  const lightRanges = [
+    { range: 3, name: '3' },
+    { range: 6, name: '6' },
+    { range: 12, name: '12' },
+  ];
+  const lightColors = ['#e8a04a', '#f2e2b0', '#d45a3c', '#7eb6e0', '#9d7ad6'];
 
   const themes = $derived(editor.packs.flatMap((pack) => pack.themes.map((theme) => ({ id: `${pack.id}/${theme.id}`, name: theme.name }))));
   const terrains = $derived(editor.packs.flatMap((pack) => pack.terrains.map((terrain) => ({ id: `${pack.id}/${terrain.id}`, name: terrain.name, swatch: terrain.swatch }))));
@@ -60,7 +68,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex flex-col gap-1 text-xs">
-  <p class="text-xs text-[var(--color-parchment)]/65">Brush a theme, then put the map on the table. Middle-drag pans. R or right-click mirrors a prop.</p>
+  <p class="text-xs text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. R or right-click mirrors a prop. Erase lifts a wall, a prop, or a light.</p>
   <div class="mt-2 flex gap-1.5">
     <button class="btn quiet flex-1" type="button" onclick={() => fileInput.click()}>Import map</button>
     <input
@@ -149,6 +157,24 @@
     <div class="mt-3 flex flex-col gap-1">
       {#each decals as decal (decal.id)}
         <button class="btn quiet text-left text-xs" class:active={editor.decalId === decal.id} type="button" onclick={() => (editor.decalId = decal.id)}>{decal.name}</button>
+      {/each}
+    </div>
+  {:else if editor.tool === 'light'}
+    <p class="mt-3 text-[11px] text-[var(--color-parchment)]/60">Click a square. The pool is how far the marker reaches, in squares. A second click on the same square updates it.</p>
+    <div class="mt-2 flex gap-1.5">
+      {#each lightRanges as item (item.range)}
+        <button class="btn quiet flex-1 text-xs" class:active={editor.lightRange === item.range} type="button" onclick={() => (editor.lightRange = item.range)}>{item.name}</button>
+      {/each}
+    </div>
+    <div class="mt-2 flex gap-1.5">
+      {#each lightColors as color (color)}
+        <button
+          class="h-8 flex-1 rounded-md"
+          style={`background:${color}; outline:${editor.lightColor === color ? '2px solid #f2d48a' : '1px solid transparent'}; outline-offset:2px`}
+          type="button"
+          aria-label={`Light color ${color}`}
+          onclick={() => (editor.lightColor = color)}
+        ></button>
       {/each}
     </div>
   {/if}

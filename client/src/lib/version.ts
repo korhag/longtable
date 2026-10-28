@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.5.0';
-export const VERSION_NOTE = 'Import an angled Dungeon Alchemist scene and turn it, day or night.';
+export const VERSION = '0.6.1';
+export const VERSION_NOTE = 'A light or a wall you click onto a map stays there.';

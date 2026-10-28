@@ -1,6 +1,7 @@
 <script lang="ts">
   import { send } from '../net/socket';
   import { systems } from '../systems/store.svelte';
+  import { openCreation, overlaysFor } from '../../systems';
   import { table } from '../table.svelte';
   import type { Character } from '../net/bindings/Character.ts';
   import type { CharacterKind } from '../net/bindings/CharacterKind.ts';
@@ -10,6 +11,8 @@
   let sceneName = $state('New scene');
   let sceneWidth = $state(30);
   let sceneHeight = $state(20);
+
+  const guided = $derived(overlaysFor(table.campaign.systemId) != null);
 
   const groups: { kind: CharacterKind; title: string; one: string }[] = [
     { kind: 'pc', title: 'PCs', one: 'PC' },
@@ -120,7 +123,11 @@
       <div class="mt-3">
         <div class="flex items-center justify-between">
           <p>{group.title}</p>
-          <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'createCharacter', name: `New ${group.one}`, kind: group.kind })}>New</button>
+          {#if guided && (group.kind === 'pc' || group.kind === 'adversary')}
+            <button class="btn quiet px-2" type="button" onclick={() => openCreation(group.kind === 'pc' ? 'pc' : 'adversary')}>Create</button>
+          {:else}
+            <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'createCharacter', name: `New ${group.one}`, kind: group.kind })}>New</button>
+          {/if}
         </div>
         {#each table.characters.filter((character) => character.kind === group.kind) as character (character.id)}
           <div class="mt-1 rounded-lg border border-white/10 p-2">

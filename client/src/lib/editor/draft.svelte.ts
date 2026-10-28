@@ -13,7 +13,7 @@ import { brushCells, nearestEdge, type BrushSize, type Cell } from './brush';
 import { decodeCells, encodeCells } from './cells';
 import { blocksDoor, fillTheme, footprintsOverlap, type ScatterEntry } from './scatter';
 
-export type BuildTool = 'theme' | 'terrain' | 'wall' | 'door' | 'prop' | 'decal' | 'erase';
+export type BuildTool = 'theme' | 'terrain' | 'wall' | 'door' | 'prop' | 'decal' | 'light' | 'erase';
 
 export interface DraftSummary {
   id: string;
@@ -40,6 +40,8 @@ class EditorStore {
   doorId = $state('core/hedge-gate');
   propId = $state('core/oak');
   decalId = $state('core/tuft');
+  lightRange = $state(6);
+  lightColor = $state('#e8a04a');
   mirror = $state(false);
   packs = $state<Pack[]>([]);
   summaries = $state<DraftSummary[]>([]);
@@ -82,7 +84,7 @@ class EditorStore {
       this.note = await response.text();
       return;
     }
-    this.draft = (await response.json()) as Draft;
+    this.draft = normalize((await response.json()) as Draft);
     this.past = [];
     this.future = [];
     await this.refresh();
@@ -98,14 +100,14 @@ class EditorStore {
       this.note = await response.text();
       return;
     }
-    this.draft = (await response.json()) as Draft;
+    this.draft = normalize((await response.json()) as Draft);
     await this.refresh();
   }
 
   async load(id: string) {
     const response = await fetch(`/api/drafts/${id}`, { headers: this.headers() });
     if (!response.ok) return;
-    this.draft = (await response.json()) as Draft;
+    this.draft = normalize((await response.json()) as Draft);
     this.past = [];
     this.future = [];
     this.ghost = [];
@@ -127,14 +129,14 @@ class EditorStore {
 
   undo() {
     if (!this.draft || this.past.length === 0 || this.painting) return;
-    this.future.push(structuredClone(this.draft.layout));
+    this.future.push(cloneLayout(this.draft.layout));
     this.draft.layout = this.past.pop() ?? this.draft.layout;
     this.schedule();
   }
 
   redo() {
     if (!this.draft || this.future.length === 0 || this.painting) return;
-    this.past.push(structuredClone(this.draft.layout));
+    this.past.push(cloneLayout(this.draft.layout));
     this.draft.layout = this.future.pop() ?? this.draft.layout;
     this.schedule();
   }
@@ -153,7 +155,9 @@ class EditorStore {
     const current = this.draft?.layout;
     if (!current) return;
     if (phase === 'hover') {
-      this.ghost = this.paints() ? brushCells(point.x, point.y, this.brush, current.width, current.height) : [];
+      if (this.paints()) this.ghost = brushCells(point.x, point.y, this.brush, current.width, current.height);
+      else if (this.tool === 'light') this.ghost = lightCell(point.x, point.y, current.width, current.height);
+      else this.ghost = [];
       return;
     }
     if (button === 2) {
@@ -162,7 +166,7 @@ class EditorStore {
     }
     if (button !== 0) return;
     if (phase === 'down') {
-      this.base = structuredClone(current);
+      this.base = cloneLayout(current);
       this.stroke = [];
       this.painting = true;
       this.step(point);
@@ -206,6 +210,8 @@ class EditorStore {
       this.draft.layout = addProp(layout, Math.floor(point.x), Math.floor(point.y), this.propId, this.mirror, this.packs);
     } else if (this.tool === 'decal') {
       this.draft.layout = addDecal(layout, point.x, point.y, this.decalId, this.packs);
+    } else if (this.tool === 'light') {
+      this.draft.layout = addLight(layout, point.x, point.y, this.lightRange, this.lightColor);
     }
   }
 
@@ -249,8 +255,13 @@ class EditorStore {
   }
 }
 
+// A Svelte state proxy cannot be structuredClone'd. The layout is plain data.
+function cloneLayout(layout: MapLayout): MapLayout {
+  return JSON.parse(JSON.stringify(layout)) as MapLayout;
+}
+
 function paintTerrain(base: MapLayout, cells: Cell[], terrain: string): MapLayout {
-  const next = structuredClone(base);
+  const next = cloneLayout(base);
   let index = next.terrains.indexOf(terrain);
   if (index < 0) {
     next.terrains.push(terrain);
@@ -266,7 +277,7 @@ function paintTerrain(base: MapLayout, cells: Cell[], terrain: string): MapLayou
 }
 
 function addPiece(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | 'v' }, kind: 'wall' | 'door', asset: string): MapLayout {
-  const next = structuredClone(layout);
+  const next = cloneLayout(layout);
   const index = next.pieces.findIndex((piece) => piece.x === edge.x && piece.y === edge.y && piece.axis === edge.axis);
   if (index >= 0) {
     const existing = next.pieces[index];
@@ -302,7 +313,7 @@ function addDecal(layout: MapLayout, x: number, y: number, asset: string, packs:
 }
 
 function erase(base: MapLayout, cells: Cell[], packs: Pack[]): MapLayout {
-  const next = structuredClone(base);
+  const next = cloneLayout(base);
   const touches = (x: number, y: number) => cells.some((cell) => cell.x === x && cell.y === y);
   next.props = next.props.filter((prop) => {
     const { w, d } = sizeOf(packs, prop.asset);
@@ -313,7 +324,33 @@ function erase(base: MapLayout, cells: Cell[], packs: Pack[]): MapLayout {
     if (piece.axis === 'h') return !touches(piece.x, piece.y) && !touches(piece.x, piece.y - 1);
     return !touches(piece.x, piece.y) && !touches(piece.x - 1, piece.y);
   });
+  next.lights = (next.lights ?? []).filter((light) => !touches(Math.floor(light.x), Math.floor(light.y)));
   return next;
+}
+
+function addLight(layout: MapLayout, x: number, y: number, range: number, color: string): MapLayout {
+  const cellX = Math.floor(x);
+  const cellY = Math.floor(y);
+  if (cellX < 0 || cellY < 0 || cellX >= layout.width || cellY >= layout.height) return layout;
+  const next = cloneLayout(layout);
+  const lights = next.lights ?? [];
+  const light = { x: cellX + 0.5, y: cellY + 0.5, range, color };
+  const index = lights.findIndex((item) => Math.floor(item.x) === cellX && Math.floor(item.y) === cellY);
+  if (index >= 0) lights[index] = light;
+  else lights.push(light);
+  next.lights = lights;
+  return next;
+}
+
+function lightCell(x: number, y: number, width: number, height: number): Cell[] {
+  const cell = { x: Math.floor(x), y: Math.floor(y) };
+  if (cell.x < 0 || cell.y < 0 || cell.x >= width || cell.y >= height) return [];
+  return [cell];
+}
+
+function normalize(draft: Draft): Draft {
+  draft.layout.lights ??= [];
+  return draft;
 }
 
 function entriesFor(packs: Pack[], themeId: string): ScatterEntry[] {

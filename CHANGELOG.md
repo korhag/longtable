@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1 — 2026-10-28
+
+- A light or a wall you click onto a map stays there.
+
+## 0.6.0 — 2026-10-28
+
+- Build a Daggerheart character step by step, and place lights on a scene.
+- The character sheet and the adversary card follow the table layout, with basic stats until the class rules arrive.
+- The GM can place those characters and drag them, players and adversaries alike.
+
 ## 0.5.0 — 2026-10-26
 
 - Import an angled Dungeon Alchemist scene and turn it, day or night.

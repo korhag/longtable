@@ -8,6 +8,7 @@
   import Panel from '../layout/Panel.svelte';
   import { ceiling } from '../systems/fields';
   import { systems } from '../systems/store.svelte';
+  import { openCreation, overlaysFor, sheetFor } from '../../systems';
   import { table } from '../table.svelte';
   import CharacterSheet from './CharacterSheet.svelte';
 
@@ -25,6 +26,21 @@
   function adjust(field: string, delta: number) {
     if (preview || !character) return;
     send({ type: 'adjustResource', characterId: character.id, field, delta });
+  }
+
+  const Fancy = $derived(character && system ? sheetFor(system.id, character.kind) : null);
+  const guided = $derived(overlaysFor(table.campaign.systemId) != null);
+
+  function openSheet() {
+    systems.sheetOpen = !systems.sheetOpen;
+    if (!systems.sheetOpen) return;
+    const place = layout.place('sheet');
+    layout.patch('sheet', {
+      floating: true,
+      collapsed: false,
+      w: Math.max(place.w, Fancy ? 760 : place.w),
+      h: Math.max(place.h, Fancy ? 680 : place.h),
+    });
   }
 
   function roll(actionId: string) {
@@ -54,15 +70,16 @@
             <option value={item.id}>{item.name}</option>
           {/each}
         </select>
-        <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
+        {#if guided}
+          <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => openCreation('pc')}>Create</button>
+        {:else}
+          <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
+        {/if}
       {:else if character}
         <p class="display text-base">{character.name}</p>
       {/if}
       {#if character && !preview}
-        <button class="btn quiet ml-auto px-2 py-1 text-[12px]" type="button" onclick={() => {
-          systems.sheetOpen = !systems.sheetOpen;
-          if (systems.sheetOpen) layout.patch('sheet', { floating: true, collapsed: false });
-        }}>Sheet</button>
+        <button class="btn quiet ml-auto px-2 py-1 text-[12px]" type="button" onclick={openSheet}>Sheet</button>
       {/if}
     </div>
 
@@ -94,6 +111,10 @@
 
 {#if !preview && systems.sheetOpen && character && system}
   <Panel id="sheet" title={character.name} onclose={() => (systems.sheetOpen = false)}>
-    <CharacterSheet {character} {system} />
+    {#if Fancy}
+      <Fancy {character} />
+    {:else}
+      <CharacterSheet {character} {system} />
+    {/if}
   </Panel>
 {/if}

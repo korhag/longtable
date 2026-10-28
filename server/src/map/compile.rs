@@ -9,18 +9,20 @@
 
 use crate::assets::{Blocks, Catalog};
 use crate::map::layout::{EdgeAxis, MapLayout, PieceKind};
-use crate::map::{Door, Segment, Vec2};
+use crate::map::{Door, Light, Segment, Vec2};
 
 pub struct Compiled {
     pub walls: Vec<Segment>,
     pub doors: Vec<Door>,
     pub move_blockers: Vec<Segment>,
+    pub lights: Vec<Light>,
 }
 
 pub fn compile(layout: &MapLayout, catalog: &Catalog) -> Compiled {
     let mut walls = Vec::new();
     let mut doors = Vec::new();
     let mut move_blockers = Vec::new();
+    let mut lights = Vec::new();
 
     for piece in &layout.pieces {
         let (a, b) = edge(piece.x, piece.y, piece.axis);
@@ -47,7 +49,16 @@ pub fn compile(layout: &MapLayout, catalog: &Catalog) -> Compiled {
         }
     }
 
-    Compiled { walls, doors, move_blockers }
+    for light in &layout.lights {
+        lights.push(Light {
+            x: light.x,
+            y: light.y,
+            range: light.range,
+            color: light.color.clone(),
+        });
+    }
+
+    Compiled { walls, doors, move_blockers, lights }
 }
 
 fn edge(x: u32, y: u32, axis: EdgeAxis) -> (Vec2, Vec2) {
@@ -115,6 +126,12 @@ mod tests {
             ],
             props: vec![PlacedProp { id: "p".into(), asset: "core/table".into(), x: 4.0, y: 5.0, mirror: false }],
             decals: Vec::new(),
+            lights: vec![crate::map::layout::PlacedLight {
+                x: 2.5,
+                y: 3.5,
+                range: 6.0,
+                color: "#e8a04a".into(),
+            }],
         }
     }
 
@@ -129,6 +146,9 @@ mod tests {
         assert!((compiled.doors[0].b.y - 2.0).abs() < 0.01);
         assert!(compiled.walls.iter().all(|wall| (wall.a.y - 5.0).abs() > 0.1 || (wall.a.x - 4.0).abs() > 0.1));
         assert_eq!(compiled.move_blockers.len(), 4);
+        assert_eq!(compiled.lights.len(), 1);
+        assert_eq!(compiled.lights[0].color, "#e8a04a");
+        assert!((compiled.lights[0].range - 6.0).abs() < 0.01);
         let north = compiled.move_blockers.iter().find(|seg| (seg.a.y - 5.0).abs() < 0.01 && (seg.b.y - 5.0).abs() < 0.01);
         let north = north.expect("the table's near edge");
         assert!((north.b.x - north.a.x).abs() - 2.0 < 0.01);
