@@ -14,9 +14,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::dice::{parse_formula, RollFormula, KEYFRAME_DT};
 use crate::map::compile::Compiled;
-use crate::map::{MapLayout, Scene, Segment, Vec2};
+use crate::map::{MapLayout, Scene, Segment, Vec2, DIMETRIC_PROFILE};
 use crate::net::protocol::{
-    Blow, ClientMsg, ConcealedRoll, Contest, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg,
+    Blow, ClientMsg, ConcealedRoll, Contest, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg, TalkLine,
 };
 use crate::systems::{
     apply_modifiers, field_ceiling, fill_formula, threshold_blow, threshold_marks, Character, CharacterKind, FieldDef, FieldKind,
@@ -174,10 +174,34 @@ pub struct Table {
     pub fear: u8,
     pub strike: Option<PendingStrike>,
     pub undo: Option<UndoStep>,
+    pub talk: Vec<TalkLine>,
+    pub catalog_revision: u64,
+    voices: HashMap<String, String>,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
     epoch: u64,
     next_color: usize,
+}
+
+fn roll_speech(roll: &RollEvent) -> String {
+    if let Some(contest) = &roll.contest {
+        if let Some(verdict) = &contest.verdict {
+            let word = if verdict == "hit" { "Hit" } else { "Miss" };
+            return format!(
+                "attacks {} — {} ({} vs {} {})",
+                contest.target_name, word, roll.total, contest.defense_name, contest.defense
+            );
+        }
+        if let Some(blow) = &contest.blow {
+            if blow.marks > 0 {
+                return format!("damages {} — {} · {} HP", contest.target_name, blow.step, blow.marks);
+            }
+            return format!("damages {} — no mark", contest.target_name);
+        }
+    }
+    let what = roll.label.clone().filter(|label| !label.is_empty()).unwrap_or_else(|| roll.formula.clone());
+    let tone = roll.outcome.as_ref().map(|outcome| format!(" {}", outcome.label)).unwrap_or_default();
+    format!("{what} {}{tone}", roll.total)
 }
 
 impl Table {
@@ -202,6 +226,9 @@ impl Table {
             fear: 0,
             strike: None,
             undo: None,
+            talk: Vec::new(),
+            catalog_revision: 0,
+            voices: HashMap::new(),
             clients: Vec::new(),
             sessions: HashMap::new(),
             epoch: 0,
@@ -486,6 +513,14 @@ impl Table {
                 self.undo_mark(viewer)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::Voice { character_id } => {
+                self.set_voice(viewer, character_id)?;
+                Ok(CommandEffect::Quiet)
+            }
+            ClientMsg::Say { text } => {
+                self.say(viewer, text)?;
+                Ok(CommandEffect::Refresh)
+            }
             ClientMsg::CreateCampaign { name, system_id } => {
                 self.create_campaign(viewer, name, system_id)?;
                 Ok(CommandEffect::Refresh)
@@ -588,6 +623,83 @@ impl Table {
             && roll.outcome.as_ref().is_some_and(|outcome| outcome.tone == "fear")
         {
             self.fear = self.fear.saturating_add(1).min(FEAR_CAP);
+        }
+        if roll.visibility == RollVisibility::Public {
+            let speaker = roll
+                .contest
+                .as_ref()
+                .map(|contest| contest.attacker_name.clone())
+                .unwrap_or_else(|| self.speaker_for(&roll.roller_id));
+            self.push_talk(speaker, roll_speech(roll));
+        }
+    }
+
+    pub fn set_voice(&mut self, viewer: &Viewer, character_id: Option<String>) -> Result<(), String> {
+        let Some(character_id) = character_id.filter(|id| !id.is_empty()) else {
+            self.voices.remove(&viewer.player_id);
+            return Ok(());
+        };
+        let character = self
+            .characters
+            .iter()
+            .find(|character| character.id == character_id)
+            .ok_or_else(|| "that character is not at the table".to_string())?;
+        let gm = viewer.role == crate::net::protocol::Role::Gm;
+        if !gm && character.owner_id.as_deref() != Some(viewer.player_id.as_str()) {
+            return Err("you can only speak as your own character".into());
+        }
+        self.voices.insert(viewer.player_id.clone(), character_id);
+        Ok(())
+    }
+
+    pub fn say(&mut self, viewer: &Viewer, text: String) -> Result<(), String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("say something first".into());
+        }
+        let body: String = text.chars().take(280).collect();
+        self.push_talk(self.speaker_for(&viewer.player_id), body);
+        Ok(())
+    }
+
+    fn speaker_for(&self, player_id: &str) -> String {
+        if let Some(character_id) = self.voices.get(player_id) {
+            if let Some(character) = self.characters.iter().find(|character| &character.id == character_id) {
+                return character.name.clone();
+            }
+        }
+        self.players
+            .iter()
+            .find(|player| player.id == player_id)
+            .map(|player| player.name.clone())
+            .unwrap_or_else(|| "Someone".into())
+    }
+
+    fn push_talk(&mut self, speaker: String, body: String) {
+        self.talk.push(TalkLine {
+            id: Uuid::new_v4().to_string(),
+            speaker,
+            body,
+            at: now_ms(),
+        });
+        if self.talk.len() > 80 {
+            let extra = self.talk.len() - 80;
+            self.talk.drain(0..extra);
+        }
+    }
+
+    /// Drop every socket. Used when the open table changes.
+    pub fn vacate(&mut self) {
+        let notice = ServerMsg::Kicked {
+            message: "The table changed. Sit down again.".into(),
+        };
+        for client in &self.clients {
+            let _ = client.out.send(notice.clone());
+        }
+        self.clients.clear();
+        self.sessions.clear();
+        for player in &mut self.players {
+            player.connected = false;
         }
     }
 
@@ -855,6 +967,8 @@ impl Table {
             layout: None,
             move_blockers: Vec::new(),
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         Ok(())
     }
@@ -879,6 +993,8 @@ impl Table {
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         Ok(())
     }
@@ -1204,6 +1320,8 @@ impl Table {
             layout: None,
             move_blockers: Vec::new(),
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         Ok(())
     }
@@ -1922,6 +2040,8 @@ mod tests {
             layout: None,
             move_blockers: Vec::new(),
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -1965,6 +2085,8 @@ mod tests {
             layout: None,
             move_blockers: Vec::new(),
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -2012,6 +2134,8 @@ mod tests {
                 Segment { a: Vec2::new(1.0, 6.0), b: Vec2::new(1.0, 5.0) },
             ],
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -2261,6 +2385,8 @@ mod tests {
             layout: None,
             move_blockers: Vec::new(),
             presentation: None,
+            schema_version: 1,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         table.tokens.push(Token {
             id: "hero".into(),
@@ -2412,6 +2538,8 @@ mod tests {
                 },
                 warnings: vec!["Furniture does not block movement.".into()],
             }),
+            schema_version: 1,
+            visual_profile: String::new(),
         });
         table.tokens.push(Token {
             id: "ada".into(),

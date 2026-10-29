@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "id": "demo",
+  "name": "Demo",
+  "visualProfile": "dimetric-30-v1",
+  "pixelsPerCell": 128,
+  "filtering": "linear",
+  "tiles": [
+    {
+      "id": "floor",
+      "name": "Floor",
+      "kind": "ground",
+      "sourceSizePx": [128, 128],
+      "coverageCells": [1, 1],
+      "files": ["tiles/floor.png"],
+      "transitionPolicy": "none"
+    }
+  ],
+  "objects": [
+    {
+      "id": "barrel",
+      "name": "Barrel",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [1, 1],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/barrel.png",
+          "sizePx": [32, 48],
+          "pivotPx": [16, 46]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": false,
+      "occludesVisually": true
+    }
+  ],
+  "cast": [
+    {
+      "id": "bandit",
+      "name": "Bandit",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [1, 1],
+      "views": {
+        "north": { "file": "cast/bandit/north.png", "sizePx": [32, 64], "pivotPx": [16, 60] },
+        "east": { "file": "cast/bandit/east.png", "sizePx": [32, 64], "pivotPx": [16, 60] },
+        "south": { "file": "cast/bandit/south.png", "sizePx": [32, 64], "pivotPx": [16, 60] },
+        "west": { "file": "cast/bandit/west.png", "sizePx": [32, 64], "pivotPx": [16, 60] }
+      }
+    }
+  ]
+}

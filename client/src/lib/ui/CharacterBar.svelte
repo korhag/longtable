@@ -11,6 +11,7 @@
   import { openCreation, overlaysFor, sheetFor } from '../../systems';
   import { table } from '../table.svelte';
   import CharacterSheet from './CharacterSheet.svelte';
+  import Glyph from './Glyph.svelte';
 
   let { preview = null }: { preview?: { character: Character; system: SystemDef } | null } = $props();
 
@@ -63,6 +64,15 @@
     return '+0';
   }
 
+  const traitShort: Record<string, string> = {
+    agility: 'Agi',
+    strength: 'Str',
+    finesse: 'Fin',
+    instinct: 'Ins',
+    presence: 'Pre',
+    knowledge: 'Kno',
+  };
+
   function actionLabel(id: string, fallback: string) {
     if (!character) return fallback;
     if (id === 'damage') {
@@ -101,25 +111,22 @@
     });
   }
 
-  const recent = $derived(
-    character
-      ? table.rolls
-          .filter((entry) => entry.contest?.verdict && (entry.contest.attackerId === character.id || entry.contest.targetId === character.id))
-          .slice(-3)
-          .reverse()
-      : [],
-  );
+  const voiceId = $derived(preview ? null : character?.id ?? null);
+
+  $effect(() => {
+    if (!voiceId) return;
+    send({ type: 'voice', characterId: voiceId });
+  });
+
+  function setPool(id: string, next: number) {
+    if (!character) return;
+    adjust(id, next - (character.numbers[id] ?? 0));
+  }
 
   const strikeReady = $derived(
     Boolean(table.strike) && (!table.activeRoll || (table.landedRollId === table.activeRoll.id && table.activeRoll.contest?.blow)),
   );
 
-  function recentLine(attackerId: string, attackerName: string, targetName: string, verdict: string) {
-    const hit = verdict === 'hit' ? 'Hit' : 'Miss';
-    if (!character) return hit;
-    if (attackerId === character.id) return `You → ${targetName} · ${hit}`;
-    return `${attackerName} → you · ${hit}`;
-  }
 </script>
 
 {#if system && (character || gm)}
@@ -162,36 +169,74 @@
     </div>
 
     {#if character && sheet}
-      <div class="mt-2 flex flex-wrap items-center gap-2">
+      <div class="mt-2 flex flex-wrap items-center gap-3">
         {#each sheet.toolbar.resources as id (id)}
           {@const field = fieldOf(id)}
           {#if field && (field.kind === 'pool' || field.kind === 'number')}
-            <div class="flex items-center gap-1 rounded-lg border border-[rgba(212,166,86,0.3)] px-1.5 py-1 text-sm">
-              <span>{field.name}</span>
-              <button type="button" aria-label={`Decrease ${field.name}`} onclick={() => adjust(id, -1)}>−</button>
-              <span class="display text-sm">{character.numbers[id] ?? 0}</span>
-              {#if field.kind === 'pool'}<span class="text-[var(--color-parchment)]/45">/ {ceiling(field, character.numbers)}</span>{/if}
-              <button type="button" aria-label={`Increase ${field.name}`} onclick={() => adjust(id, 1)}>+</button>
-            </div>
+            {@const value = character.numbers[id] ?? 0}
+            {@const max = field.kind === 'pool' ? ceiling(field, character.numbers) : 0}
+            {#if id === 'hp'}
+              <div class="flex items-center gap-1 text-sm">
+                <span title={field.name}><Glyph name="heart" /></span>
+                <button type="button" aria-label="Decrease HP" onclick={() => adjust(id, -1)}>−</button>
+                <span class="display">{value}{field.kind === 'pool' ? ` / ${max}` : ''}</span>
+                <button type="button" aria-label="Increase HP" onclick={() => adjust(id, 1)}>+</button>
+              </div>
+            {:else if id === 'hope'}
+              <div class="flex items-center gap-1 text-sm" aria-label="Hope">
+                <span title={field.name}><Glyph name="hope" /></span>
+                {#each Array.from({ length: Math.min(max, 12) }, (_, index) => index) as index (index)}
+                  <button
+                    class="slot pip"
+                    class:on={index < value}
+                    type="button"
+                    aria-label={`Hope ${index + 1}`}
+                    onclick={() => setPool(id, value === index + 1 ? index : index + 1)}
+                  ></button>
+                {/each}
+              </div>
+            {:else if id === 'stress' || id === 'armor'}
+              <div class="flex items-center gap-1 text-sm" aria-label={field.name}>
+                <span title={field.name}><Glyph name={id === 'armor' ? 'shield' : 'stress'} /></span>
+                {#each Array.from({ length: Math.min(max, 12) }, (_, index) => index) as index (index)}
+                  <button
+                    class="slot box"
+                    class:on={index < value}
+                    type="button"
+                    aria-label={`${field.name} ${index + 1}`}
+                    onclick={() => setPool(id, value === index + 1 ? index : index + 1)}
+                  ></button>
+                {/each}
+              </div>
+            {:else}
+              <div class="flex items-center gap-1 text-sm">
+                <span>{field.name}</span>
+                <button type="button" aria-label={`Decrease ${field.name}`} onclick={() => adjust(id, -1)}>−</button>
+                <span class="display">{value}{field.kind === 'pool' ? ` / ${max}` : ''}</span>
+                <button type="button" aria-label={`Increase ${field.name}`} onclick={() => adjust(id, 1)}>+</button>
+              </div>
+            {/if}
           {/if}
         {/each}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
         {#each sheet.toolbar.actions as id (id)}
           {@const action = system.actions.find((item) => item.id === id)}
           {@const dice = system.fields.find((item) => item.id === id && item.kind === 'dice')}
           {#if action || dice}
-            <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => press(id)}>{actionLabel(id, action?.name ?? dice?.name ?? id)}</button>
+            {@const full = action?.name ?? dice?.name ?? id}
+            {@const short = traitShort[id]}
+            <button class="btn quiet inline-flex items-center gap-1 px-2 py-1 text-sm" type="button" title={short ? full : undefined} onclick={() => press(id)}>
+              {#if short}
+                <Glyph name={id} />
+                {short}
+              {:else}
+                {actionLabel(id, full)}
+              {/if}
+            </button>
           {/if}
         {/each}
       </div>
-      {#if recent.length > 0}
-        <p class="mt-2 text-sm text-[var(--color-parchment)]/75">
-          {#each recent as entry (entry.id)}
-            {#if entry.contest?.verdict}
-              <span class="mr-3">{recentLine(entry.contest.attackerId, entry.contest.attackerName, entry.contest.targetName, entry.contest.verdict)}</span>
-            {/if}
-          {/each}
-        </p>
-      {/if}
     {/if}
   </section>
 {/if}

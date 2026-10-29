@@ -154,14 +154,126 @@ pub struct Pack {
     pub themes: Vec<ThemeDef>,
     #[serde(default)]
     pub tray: TrayDef,
+    /// 0 is a legacy pack. 2 is the dimetric contract.
+    #[serde(default)]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub visual_profile: String,
+    #[serde(default)]
+    pub tiles: Vec<TileDef>,
+    #[serde(default)]
+    pub objects: Vec<ObjectDef>,
+    #[serde(default)]
+    pub cast: Vec<CastDef>,
     /// Filled in when the pack is served, so the client can join file paths.
     #[serde(default)]
     pub base_url: String,
+    #[serde(default)]
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TileDef {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub source_size_px: [u32; 2],
+    pub coverage_cells: [u32; 2],
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub transition_policy: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectLayer {
+    pub kind: String,
+    pub file: String,
+    pub size_px: [u32; 2],
+    pub pivot_px: [u32; 2],
+    #[serde(default)]
+    pub root_offset_world: [f32; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VisionVolume {
+    pub polygon: Vec<[f32; 2]>,
+    pub base_height: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectDef {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub placement: String,
+    pub footprint_cells: [u32; 2],
+    #[serde(default)]
+    pub origin_cells: [f32; 2],
+    #[serde(default = "default_pixels")]
+    pub pixels_per_world_unit: u32,
+    #[serde(default)]
+    pub render_layers: Vec<ObjectLayer>,
+    #[serde(default)]
+    pub blocks_movement: bool,
+    #[serde(default)]
+    pub blocks_vision: bool,
+    #[serde(default)]
+    pub occludes_visually: bool,
+    #[serde(default)]
+    pub collision_polygon: Vec<[f32; 2]>,
+    #[serde(default)]
+    pub vision_volumes: Vec<VisionVolume>,
+}
+
+fn default_pixels() -> u32 {
+    128
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastFrame {
+    pub file: String,
+    pub size_px: [u32; 2],
+    pub pivot_px: [u32; 2],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastViews {
+    pub north: CastFrame,
+    pub east: CastFrame,
+    pub south: CastFrame,
+    pub west: CastFrame,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastDef {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_pixels")]
+    pub pixels_per_world_unit: u32,
+    #[serde(default = "one_cell")]
+    pub suggested_footprint_cells: [u32; 2],
+    pub views: CastViews,
+    #[serde(default)]
+    pub portrait: Option<String>,
+}
+
+fn one_cell() -> [u32; 2] {
+    [1, 1]
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Catalog {
+    pub revision: u64,
     pub packs: Vec<Pack>,
+    pub warnings: Vec<String>,
 }
 
 impl Catalog {
@@ -189,6 +301,7 @@ pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
         return Ok(Catalog::default());
     }
     let mut packs = Vec::new();
+    let mut warnings = Vec::new();
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&packs_dir)
         .map_err(|err| format!("could not read {}: {err}", packs_dir.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -202,23 +315,44 @@ pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
         }
         let text = std::fs::read_to_string(&manifest)
             .map_err(|err| format!("could not read {}: {err}", manifest.display()))?;
-        let mut pack = parse_pack(&text)?;
-        let folder = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        if pack.id != folder {
-            return Err(format!(
-                "pack {} is in a folder named {folder}",
-                pack.id
-            ));
+        match load_pack_dir(&dir, &text) {
+            Ok(pack) => packs.push(pack),
+            Err(err) => {
+                let folder = dir.file_name().and_then(|name| name.to_str()).unwrap_or("pack");
+                let message = format!("pack {folder}: {err}");
+                tracing::warn!("{message}");
+                warnings.push(message);
+            }
         }
-        pack.base_url = format!("/packs/{}", pack.id);
-        packs.push(pack);
     }
-    Ok(Catalog { packs })
+    let revision = crate::asset_import::revision_of(&packs);
+    Ok(Catalog { revision, packs, warnings })
+}
+
+fn load_pack_dir(dir: &Path, text: &str) -> Result<Pack, String> {
+    let mut pack = parse_pack(text)?;
+    let folder = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    if pack.id != folder {
+        return Err(format!("pack {} is in a folder named {folder}", pack.id));
+    }
+    if pack.schema_version == 2 {
+        let files = crate::asset_import::read_tree(dir)?;
+        crate::asset_import::validate_v2_files(&pack, &files)?;
+        pack.content_hash = crate::asset_import::content_hash(text, &files);
+    }
+    pack.base_url = format!("/packs/{}", pack.id);
+    Ok(pack)
 }
 
 pub fn parse_pack(text: &str) -> Result<Pack, String> {
     let pack: Pack = serde_json::from_str(text).map_err(|err| format!("the pack manifest is not valid JSON: {err}"))?;
-    validate_pack(&pack)?;
+    if pack.schema_version == 2 {
+        crate::asset_import::validate_v2_shape(&pack)?;
+    } else if pack.schema_version == 0 {
+        validate_pack(&pack)?;
+    } else {
+        return Err(format!("pack {} uses schema {}, which this table does not read", pack.id, pack.schema_version));
+    }
     Ok(pack)
 }
 

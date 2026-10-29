@@ -7,6 +7,7 @@
   import { impacts, playBounces, playRollSettle } from '../dice/sound';
   import { sound } from '../dice/sound.svelte';
   import { systems } from '../systems/store.svelte';
+  import { prefs } from '../prefs.svelte';
   import { table } from '../table.svelte';
 
   let canvas: HTMLCanvasElement;
@@ -72,7 +73,7 @@
   }
 </script>
 
-<div class="dice-overlay" class:away={!showing}>
+<div class="dice-overlay" class:away={!showing} class:quarter={prefs.diceTray !== 'cover'} class:corner-top-left={prefs.diceCorner === 'top-left'} class:corner-top-right={prefs.diceCorner === 'top-right'} class:corner-bottom-left={prefs.diceCorner === 'bottom-left'} class:corner-bottom-right={prefs.diceCorner === 'bottom-right'}>
   <button class="dice-dim" type="button" aria-label="Dismiss the roll" onclick={dismiss}></button>
   <div class="dice-tray">
     <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" onclick={dismiss}></canvas>

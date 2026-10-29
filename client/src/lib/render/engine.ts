@@ -18,10 +18,10 @@ import { bitAt, decodeBits } from '../fog/bits';
 import type { Tool } from '../table.svelte';
 import { DecalLayer } from './decals';
 import { PrerenderedLayer } from './prerendered';
-import { basis, panGround } from './projection';
+import { framedDistance, pan, projectedSpan, sceneBasis } from './cameraProfile';
+import { ringPaint, type CastPaint, type RingMark } from './rings';
 import { StandeeLayer } from './standees';
 import { TerrainLayer } from './terrain';
-import { ELEVATION_COS, ELEVATION_SIN, GROUND_DEPTH, HEIGHT_SCALE } from './view';
 
 export interface EngineHooks {
   onMove: (tokenId: string, x: number, y: number) => void;
@@ -51,6 +51,7 @@ interface View {
   ghost: { x: number; y: number }[];
   buildMode: boolean;
   viewId: string;
+  cast: Record<string, CastPaint>;
 }
 
 interface TokenNode {
@@ -58,6 +59,8 @@ interface TokenNode {
   group: THREE.Group;
   disc: THREE.Mesh;
   ring: THREE.Mesh;
+  halo: THREE.Mesh;
+  ticks: THREE.Group;
   label: THREE.Sprite;
   card: THREE.Mesh;
   imageUrl: string | null;
@@ -88,12 +91,14 @@ export class TableEngine {
     ghost: [],
     buildMode: false,
     viewId: '',
+    cast: {},
   };
   private mapMesh: THREE.Mesh | null = null;
   private fogMesh: THREE.Mesh | null = null;
   private grid: THREE.LineSegments | null = null;
   private gridStyle: 'off' | 'faint' | 'strong' = 'faint';
   private insets = { left: 0, right: 0, top: 0, bottom: 0 };
+  private legacyNotice = '';
   private hoverCell: THREE.LineLoop | null = null;
   private dragLine: THREE.Line | null = null;
   private dragOrigin: { x: number; y: number } | null = null;
@@ -184,7 +189,7 @@ export class TableEngine {
 
   sync(view: View) {
     this.view = view;
-    this.standing = this.activePresentation() != null;
+    this.standing = false;
     this.ensureMap();
     this.syncFog();
     this.syncWalls();
@@ -393,7 +398,7 @@ export class TableEngine {
       }
       const dragging = this.dragging?.id === token.id;
       if (!dragging) node.group.position.set(token.x, 0, token.y);
-      paintToken(node, token, ringMark(token.id, this.view), this.standing);
+      paintToken(node, token, ringMark(token.id, this.view), this.standing, this.view);
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;
@@ -408,25 +413,18 @@ export class TableEngine {
   }
 
   fitMap() {
-    const framed = this.activePresentation();
     const { width, height } = this.bounds();
-    if (framed) this.focus.set(framed.target[0], framed.target[1], framed.target[2]);
-    else this.focus.set(width / 2, 0, height / 2);
+    this.focus.set(width / 2, 0, height / 2);
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
-    const visW = Math.max(1, canvasW - this.insets.left - this.insets.right);
-    const visH = Math.max(1, canvasH - this.insets.top - this.insets.bottom);
-    const aspect = visW / visH;
-    const needH = framed ? framed.orthoHalfHeight * 2 * 1.08 : height * GROUND_DEPTH * 1.25;
-    const needW = framed ? framed.orthoHalfWidth * 2 * 1.08 : width * 1.25;
-    const full = Math.max(needH, needW / aspect, framed ? 1 : 8) * (canvasH / visH);
-    this.distance = full;
+    const span = projectedSpan(width, height, 0);
+    this.distance = Math.max(framedDistance(span.width, span.height, canvasW, canvasH, this.insets), 8);
     this.placeCamera();
   }
 
   centerOn(x: number, y: number) {
-    this.focus.set(x, this.activePresentation()?.target[1] ?? 0, y);
+    this.focus.set(x, 0, y);
     this.placeCamera();
   }
 
@@ -446,7 +444,7 @@ export class TableEngine {
 
   zoomBy(factor: number, event?: { clientX: number; clientY: number }) {
     const before = event ? this.hitMap(event) : null;
-    const [min, max] = this.activePresentation() ? [2, 400] : [6, 140];
+    const [min, max] = [6, 140];
     this.distance = THREE.MathUtils.clamp(this.distance * factor, min, max);
     this.placeCamera();
     if (!before || !event) return;
@@ -478,33 +476,22 @@ export class TableEngine {
   }
 
   private placeCamera() {
-    const framed = this.activePresentation();
     const { width, height } = this.bounds();
     this.focus.x = THREE.MathUtils.clamp(this.focus.x, 0, width);
     this.focus.z = THREE.MathUtils.clamp(this.focus.z, 0, height);
+    this.focus.y = 0;
     this.distance = this.snap(this.distance);
-    if (framed) {
-      const { forward, up } = basis(framed.azimuthDeg, framed.elevationDeg);
-      this.focus.y = framed.target[1];
-      const pull = framed.pull;
-      this.camera.position.set(
-        this.focus.x - forward.x * pull,
-        this.focus.y - forward.y * pull,
-        this.focus.z - forward.z * pull,
-      );
-      this.camera.up.set(up.x, up.y, up.z);
-      this.camera.lookAt(this.focus);
-      this.camera.near = 0.05;
-      this.camera.far = 8000;
-    } else {
-      this.focus.y = 0;
-      const pull = 48;
-      this.camera.position.set(this.focus.x, ELEVATION_SIN * pull, this.focus.z + ELEVATION_COS * pull);
-      this.camera.up.set(0, HEIGHT_SCALE, -GROUND_DEPTH);
-      this.camera.lookAt(this.focus.x, 0, this.focus.z);
-      this.camera.near = 0.1;
-      this.camera.far = 400;
-    }
+    const { forward, up } = sceneBasis();
+    const pull = 48;
+    this.camera.position.set(
+      this.focus.x - forward.x * pull,
+      this.focus.y - forward.y * pull,
+      this.focus.z - forward.z * pull,
+    );
+    this.camera.up.set(up.x, up.y, up.z);
+    this.camera.lookAt(this.focus);
+    this.camera.near = 0.05;
+    this.camera.far = 400;
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
@@ -540,36 +527,20 @@ export class TableEngine {
     this.placeCamera();
   };
 
-  private activePresentation() {
-    const presentation = this.view.scene?.presentation;
-    if (!presentation) return null;
-    const id = this.view.viewId || presentation.defaultView;
-    return presentation.views.find((view) => view.id === id)
-      ?? presentation.views.find((view) => view.id === presentation.defaultView)
-      ?? presentation.views[0]
-      ?? null;
-  }
-
   private applyPresentation() {
-    const presentation = this.standing ? this.view.scene?.presentation : null;
-    if (this.mapMesh) this.mapMesh.visible = !presentation && !this.view.scene?.layout;
-    if (this.board) this.board.visible = !presentation;
-    if (this.fogMesh) this.fogMesh.visible = !presentation;
-    if (!presentation) {
-      this.prerendered.hide();
+    const scene = this.view.scene;
+    const presentation = scene?.presentation ?? null;
+    if (this.mapMesh) this.mapMesh.visible = !scene?.layout;
+    if (this.board) this.board.visible = true;
+    if (this.fogMesh) this.fogMesh.visible = true;
+    this.prerendered.hide();
+    if (!presentation || !scene) {
+      this.legacyNotice = '';
       return;
     }
-    const { width, height } = this.bounds();
-    this.prerendered.sync({
-      presentation,
-      viewId: this.view.viewId || presentation.defaultView,
-      doors: this.view.doors,
-      fog: this.fogTexture,
-      mapWidth: width,
-      mapHeight: height,
-      maxTextureSize: this.renderer.capabilities.maxTextureSize,
-      onWarning: (message) => this.hooks.onWarning?.(message),
-    });
+    if (this.legacyNotice === scene.id) return;
+    this.legacyNotice = scene.id;
+    this.hooks.onWarning?.('This scene still has an angled picture. The table keeps that picture filed away and draws the fixed view.');
   }
 
   private hitMap(event: { clientX: number; clientY: number }): THREE.Vector3 | null {
@@ -735,16 +706,9 @@ export class TableEngine {
   private pan(event: PointerEvent) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const scale = this.distance / Math.max(1, rect.height);
-    const framed = this.activePresentation();
-    if (framed) {
-      const { right, up } = basis(framed.azimuthDeg, framed.elevationDeg);
-      const shift = panGround(right, up, event.movementX, event.movementY, scale);
-      this.focus.x += shift.x;
-      this.focus.z += shift.z;
-    } else {
-      this.focus.x -= event.movementX * scale;
-      this.focus.z -= (event.movementY * scale) / GROUND_DEPTH;
-    }
+    const shift = pan(event.movementX, event.movementY, scale);
+    this.focus.x += shift.x;
+    this.focus.z += shift.z;
     this.placeCamera();
   }
 
@@ -877,6 +841,15 @@ function createToken(token: TokenView): TokenNode {
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.045;
   ring.userData.tokenId = token.id;
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(0.52, 0.6, 40),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }),
+  );
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = 0.05;
+  halo.visible = false;
+  halo.userData.tokenId = token.id;
+  const ticks = tickRing();
   const label = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: labelTexture(token.name), transparent: true, depthWrite: false }),
   );
@@ -891,12 +864,24 @@ function createToken(token: TokenView): TokenNode {
   card.visible = false;
   card.renderOrder = 2;
   card.userData.tokenId = token.id;
-  group.add(disc, ring, label, card);
+  group.add(disc, ring, halo, ticks, label, card);
   group.position.set(token.x, 0, token.y);
-  return { id: token.id, group, disc, ring, label, card, imageUrl: '' };
+  return { id: token.id, group, disc, ring, halo, ticks, label, card, imageUrl: '' };
 }
 
-type RingMark = 'control' | 'target' | 'hover' | null;
+function tickRing(): THREE.Group {
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({ color: 0xe23b32, side: THREE.DoubleSide });
+  for (let index = 0; index < 8; index += 1) {
+    const tick = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.05), material);
+    const angle = (index / 8) * Math.PI * 2;
+    tick.position.set(Math.cos(angle) * 0.66, 0.055, Math.sin(angle) * 0.66);
+    tick.rotation.y = -angle;
+    group.add(tick);
+  }
+  group.visible = false;
+  return group;
+}
 
 function ringMark(id: string, view: View): RingMark {
   if (id === view.selectedId) return 'control';
@@ -905,13 +890,17 @@ function ringMark(id: string, view: View): RingMark {
   return null;
 }
 
-function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean) {
+function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean, view: View) {
+  const cast = view.cast[token.id] ?? { tone: 'other' as const, color: token.color };
+  const paint = ringPaint(cast.tone, cast.color, mark, view.role === 'gm');
   const ring = node.ring.material as THREE.MeshBasicMaterial;
-  if (mark === 'control') ring.color.set(0xf2d48a);
-  else if (mark === 'target') ring.color.set(0xd27b66);
-  else if (mark === 'hover') ring.color.set(0xf2e2b0);
-  else ring.color.set(token.color);
-  node.ring.scale.setScalar(mark === 'hover' ? 1.26 : mark === 'target' ? 1.18 : mark === 'control' ? 1.12 : 1);
+  ring.color.set(paint.color);
+  node.ring.scale.setScalar(paint.scale);
+  const halo = node.halo.material as THREE.MeshBasicMaterial;
+  node.halo.visible = paint.halo != null;
+  if (paint.halo) halo.color.set(paint.halo);
+  node.halo.scale.setScalar(Math.max(paint.scale, 1.08));
+  node.ticks.visible = paint.ticks;
   const disc = node.disc.material as THREE.MeshLambertMaterial;
   disc.opacity = token.hidden ? 0.45 : 1;
   disc.transparent = token.hidden;

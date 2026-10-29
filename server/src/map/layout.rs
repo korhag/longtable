@@ -103,6 +103,10 @@ pub struct MapLayout {
     pub decals: Vec<PlacedDecal>,
     #[serde(default)]
     pub lights: Vec<PlacedLight>,
+    /// One height byte per cell, base64. Absent or empty means every cell is tier 0.
+    #[serde(default)]
+    #[ts(optional)]
+    pub levels: Option<String>,
 }
 
 impl MapLayout {
@@ -117,6 +121,7 @@ impl MapLayout {
             props: Vec::new(),
             decals: Vec::new(),
             lights: Vec::new(),
+            levels: None,
         }
     }
 

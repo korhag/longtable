@@ -12,17 +12,19 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::assets::{load_catalog, Catalog};
 use crate::config::Config;
+use crate::house::House;
 use crate::session::Table;
 use crate::storage;
 use crate::systems::{load_systems, SystemCatalog};
 
 pub struct App {
     pub table: Mutex<Table>,
+    pub house: Mutex<House>,
     pub data_dir: PathBuf,
     pub static_dir: PathBuf,
     pub assets_dir: PathBuf,
     pub systems_dir: PathBuf,
-    pub catalog: Catalog,
+    pub catalog: Mutex<Catalog>,
     pub systems: Mutex<SystemCatalog>,
     save_tx: mpsc::UnboundedSender<()>,
 }
@@ -34,6 +36,7 @@ impl App {
         let systems_dir = PathBuf::from(&config.systems_dir);
         let _ = std::fs::create_dir_all(data_dir.join("maps"));
         let _ = std::fs::create_dir_all(data_dir.join("tokens"));
+        let _ = std::fs::create_dir_all(data_dir.join("tables"));
         let _ = std::fs::create_dir_all(&systems_dir);
         let catalog = load_catalog(&assets_dir).unwrap_or_else(|err| {
             tracing::error!("asset packs were not loaded: {err}");
@@ -47,14 +50,35 @@ impl App {
         table.gm_key = config.gm_key.clone();
         table.sync_fog_size();
 
+        let (house, fresh) = House::load(&data_dir, &config.table_passphrase, &table.campaign.name);
+        if fresh {
+            if let Some(id) = house.open_id() {
+                let path = data_dir.join("tables").join(format!("{id}.json"));
+                if let Err(err) = storage::write_to(&table, &path) {
+                    tracing::warn!("could not keep the first table: {err}");
+                }
+            }
+        } else if let Some(id) = house.open_id() {
+            let path = data_dir.join("tables").join(format!("{id}.json"));
+            if path.is_file() {
+                storage::load_file(&mut table, &path);
+                table.passphrase = config.table_passphrase.clone();
+                table.gm_key = config.gm_key.clone();
+            } else if let Err(err) = storage::write_to(&table, &path) {
+                tracing::warn!("could not keep the open table: {err}");
+            }
+        }
+
+        table.catalog_revision = catalog.revision;
         let (save_tx, save_rx) = mpsc::unbounded_channel();
         let app = Arc::new(Self {
             table: Mutex::new(table),
+            house: Mutex::new(house),
             data_dir,
             static_dir: PathBuf::from(config.static_dir),
             assets_dir,
             systems_dir,
-            catalog,
+            catalog: Mutex::new(catalog),
             systems: Mutex::new(systems),
             save_tx,
         });
@@ -67,9 +91,16 @@ impl App {
     }
 
     pub async fn save_now(&self) {
+        let open_id = self.house.lock().await.open_id();
         let table = self.table.lock().await;
         if let Err(err) = storage::write(&table, &self.data_dir) {
             tracing::warn!("could not save the table: {err}");
+        }
+        if let Some(id) = open_id {
+            let path = self.data_dir.join("tables").join(format!("{id}.json"));
+            if let Err(err) = storage::write_to(&table, &path) {
+                tracing::warn!("could not save the open table: {err}");
+            }
         }
     }
 }

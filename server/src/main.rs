@@ -5,7 +5,9 @@
 // ------------------------------------------------------------
 
 mod app;
+mod asset_import;
 mod assets;
+mod house;
 mod config;
 mod dice;
 mod map;

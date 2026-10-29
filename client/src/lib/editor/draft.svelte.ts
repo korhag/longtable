@@ -55,6 +55,10 @@ class EditorStore {
   private base: MapLayout | null = null;
   private painting = false;
 
+  async reloadPacks() {
+    this.packs = await loadCatalog();
+  }
+
   async enter() {
     this.active = true;
     this.packs = await loadCatalog();

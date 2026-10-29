@@ -1,5 +1,9 @@
 # How to draw assets for the table
 
+The live scene camera is `dimetric-30-v1`: orthographic, 30° above the ground, azimuth 45° in the table's existing basis, which looks from the south-west. Pan and zoom do not turn it. The 53.13° north-facing notes below are the previous pack contract and are not the camera the table draws now.
+
+A new pack uses `schemaVersion` 2 and `visualProfile` `dimetric-30-v1`. The GM imports a zip from Assets. An example manifest is `docs/schemas/pack-v2.example.json`. Ground tiles are 128 by 128 pixels covering one cell. A bad archive installs nothing, and one bad pack does not hide the others.
+
 This is the contract for every picture the map uses. A person or an image model can follow it. The editor does not care whether a picture is painted or pixel art. The pack says which, and the engine follows the pack.
 
 Nothing here has to be pretty yet. A pack with only colors still builds a map. Pictures replace those colors when the files appear.

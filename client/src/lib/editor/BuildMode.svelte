@@ -2,6 +2,7 @@
   import { send } from '../net/socket';
   import { table } from '../table.svelte';
   import { BRUSH_SIZES } from './brush';
+  import AssetLibrary from './AssetLibrary.svelte';
   import { editor, type BuildTool } from './draft.svelte';
 
   let width = $state(30);
@@ -68,6 +69,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex flex-col gap-1 text-sm">
+  <AssetLibrary />
   <p class="text-sm text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. R or right-click mirrors a prop. Erase lifts a wall, a prop, or a light.</p>
   <div class="mt-2 flex gap-1.5">
     <button class="btn quiet flex-1" type="button" onclick={() => fileInput.click()}>Import map</button>

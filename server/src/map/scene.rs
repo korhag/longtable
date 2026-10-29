@@ -81,6 +81,12 @@ pub struct Light {
     pub color: String,
 }
 
+pub const DIMETRIC_PROFILE: &str = "dimetric-30-v1";
+
+fn schema_one() -> u32 {
+    1
+}
+
 /// One imported or blank battle map.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Scene {
@@ -102,6 +108,12 @@ pub struct Scene {
     /// Angled pictures of this same grid. Absent on older saves.
     #[serde(default)]
     pub presentation: Option<Prerendered>,
+    /// 1 is the save shape this process writes. Older files omit it.
+    #[serde(default = "schema_one")]
+    pub schema_version: u32,
+    /// Empty until a scene is marked as the fixed dimetric view.
+    #[serde(default)]
+    pub visual_profile: String,
 }
 
 #[cfg(test)]
@@ -114,5 +126,7 @@ mod tests {
         let scene: Scene = serde_json::from_str(old).unwrap();
         assert!(scene.layout.is_none());
         assert!(scene.move_blockers.is_empty());
+        assert_eq!(scene.schema_version, 1);
+        assert!(scene.visual_profile.is_empty());
     }
 }

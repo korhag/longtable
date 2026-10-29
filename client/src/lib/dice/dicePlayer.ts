@@ -585,7 +585,7 @@ function disposeMaterial(material: THREE.Material | THREE.Material[]) {
   const materials = Array.isArray(material) ? material : [material];
   for (const item of materials) {
     const mapped = item as THREE.Material & { map?: THREE.Texture | null };
-    if (mapped.map && ![...numberTextures.values()].includes(mapped.map)) mapped.map.dispose();
+    if (mapped.map && ![...numberTextures.values()].includes(mapped.map as THREE.CanvasTexture)) mapped.map.dispose();
     item.dispose();
   }
 }

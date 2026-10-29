@@ -10,6 +10,8 @@ futures-util = "0.3.34"
 rand = "0.10.3"
 rapier3d = "0.36.1"
 serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.10.8"
+image = { version = "0.25.8", default-features = false, features = ["png"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["full"] }
@@ -23,3 +25,4 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["macros", "rt"] }
+tower = { version = "0.5.3", features = ["util"] }

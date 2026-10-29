@@ -146,6 +146,8 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
             },
             layout: scene.layout.clone(),
             presentation: scene.presentation.as_ref().map(|presentation| present(scene.id.as_str(), &viewer.session_token, presentation)),
+            schema_version: scene.schema_version,
+            visual_profile: scene.visual_profile.clone(),
         }),
         tokens: table
             .tokens
@@ -255,6 +257,8 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         figures: faces(table, &sight, &polygons),
         can_undo: table.undo.is_some(),
         strike: strike_offer(table, viewer),
+        talk: table.talk.clone(),
+        catalog_revision: table.catalog_revision,
     }
 }
 

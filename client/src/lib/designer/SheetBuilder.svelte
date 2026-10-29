@@ -107,7 +107,7 @@
               {@const field = designer.draft.fields.find((item) => item.id === id)}
               {#if field}
                 <div
-                  class="flex flex-wrap items-center gap-1 rounded-lg border border-white/10 p-1"
+                  class="flex flex-nowrap items-center gap-1 rounded-lg border border-white/10 p-1"
                   role="group"
                   aria-label={field.name}
                   ondragover={(event) => event.preventDefault()}
@@ -117,13 +117,14 @@
                     class="btn quiet px-2"
                     type="button"
                     draggable="true"
+                    title="Drag to another place"
                     aria-label={`Drag ${field.name}`}
                     ondragstart={(event) => { dragging = id; event.dataTransfer?.setData('text/plain', id); }}
-                  >Drag</button>
+                  >⠿</button>
                   <span class="min-w-0 flex-1 truncate text-sm">{field.name}</span>
-                  <button class="btn quiet px-2" type="button" onclick={() => shift(sectionIndex, fieldIndex, -1)}>Up</button>
-                  <button class="btn quiet px-2" type="button" onclick={() => shift(sectionIndex, fieldIndex, 1)}>Down</button>
-                  <button class="btn quiet px-2" type="button" onclick={() => designer.unplace(kind, id)}>Remove</button>
+                  <button class="btn quiet px-2" type="button" title="Move up" aria-label={`Move ${field.name} up`} onclick={() => shift(sectionIndex, fieldIndex, -1)}>↑</button>
+                  <button class="btn quiet px-2" type="button" title="Move down" aria-label={`Move ${field.name} down`} onclick={() => shift(sectionIndex, fieldIndex, 1)}>↓</button>
+                  <button class="btn quiet px-2" type="button" title="Take off this section" aria-label={`Remove ${field.name}`} onclick={() => designer.unplace(kind, id)}>×</button>
                 </div>
               {/if}
             {/each}

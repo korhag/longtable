@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Multipart, Path, Query, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, FromRequest, Multipart, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -28,18 +28,28 @@ use crate::systems::{rules_for, save_system};
 use crate::map::compile::compile;
 use crate::map::drafts::{safe_id, Draft, DraftStore};
 use crate::map::layout::MapLayout;
-use crate::map::Scene;
+use crate::map::{Scene, DIMETRIC_PROFILE};
 use crate::net::protocol::{dice_meshes, ClientMsg, Keyframe, PlayedDie, RollEvent, ServerMsg};
 use crate::session::state::{now_ms, CommandEffect};
 
 pub fn router(app: Arc<App>) -> Router {
     let import = Router::new()
         .route("/api/maps/import", post(import_map))
+        .route("/api/packs/import", post(import_pack))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .with_state(app.clone());
     let mut router = Router::new()
         .route("/api/health", get(health))
         .route("/api/host", get(host_info))
+        .route("/api/register", post(crate::net::accounts::register))
+        .route("/api/login", post(crate::net::accounts::login))
+        .route("/api/me", get(crate::net::accounts::me).patch(crate::net::accounts::update_me))
+        .route("/api/tables", post(crate::net::accounts::create_table))
+        .route("/api/tables/{id}/open", post(crate::net::accounts::open_table))
+        .route("/api/tables/{id}/request", post(crate::net::accounts::request_seat))
+        .route("/api/tables/{id}/approve", post(crate::net::accounts::approve))
+        .route("/api/friends", post(crate::net::accounts::friend_request))
+        .route("/api/friends/{id}/accept", post(crate::net::accounts::accept_friend))
         .route("/api/maps/{id}/image", get(map_image))
         .route("/api/maps/{id}/assets/{*path}", get(map_asset))
         .route("/api/tokens/{id}/image", post(upload_token_image).get(token_image))
@@ -88,7 +98,39 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 async fn packs(State(app): State<Arc<App>>) -> Json<crate::assets::Catalog> {
-    Json(app.catalog.clone())
+    Json(app.catalog.lock().await.clone())
+}
+
+async fn import_pack(State(app): State<Arc<App>>, request: Request) -> Result<Json<crate::assets::Catalog>, ApiError> {
+    require_gm(&app, request.headers()).await?;
+    let mut multipart = Multipart::from_request(request, &())
+        .await
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let mut bytes = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?
+    {
+        if field.name() == Some("pack") {
+            bytes = Some(field.bytes().await.map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?);
+        }
+    }
+    let bytes = bytes.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "choose a pack archive".into()))?;
+    let pack = crate::asset_import::import_bytes(&bytes, &app.assets_dir).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    let mut catalog = crate::assets::load_catalog(&app.assets_dir).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    if !catalog.packs.iter().any(|item| item.id == pack.id) {
+        catalog.packs.push(pack);
+        catalog.revision = crate::asset_import::revision_of(&catalog.packs);
+    }
+    let revision = catalog.revision;
+    *app.catalog.lock().await = catalog.clone();
+    {
+        let mut table = app.table.lock().await;
+        table.catalog_revision = revision;
+        table.broadcast_state();
+    }
+    Ok(Json(catalog))
 }
 
 async fn require_gm(app: &App, headers: &HeaderMap) -> Result<String, ApiError> {
@@ -191,7 +233,8 @@ async fn publish_draft(State(app): State<Arc<App>>, Path(id): Path<String>, head
     let draft = DraftStore::new(&app.data_dir)
         .get(&id)
         .map_err(|err| ApiError(StatusCode::NOT_FOUND, err))?;
-    let compiled = compile(&draft.layout, &app.catalog);
+    let catalog = app.catalog.lock().await.clone();
+    let compiled = compile(&draft.layout, &catalog);
     let mut table = app.table.lock().await;
     let viewer = table
         .viewer_for_session(&token)
@@ -217,6 +260,69 @@ async fn host_info(ConnectInfo(peer): ConnectInfo<SocketAddr>, State(app): State
     })))
 }
 
+async fn account_seat(
+    app: &Arc<App>,
+    token: &str,
+    table_id: Option<&str>,
+    resume_id: Option<&str>,
+) -> Result<crate::session::Seat, String> {
+    let table_id = table_id.filter(|id| !id.is_empty()).ok_or_else(|| "pick a table".to_string())?;
+    let (account, door) = {
+        let house = app.house.lock().await;
+        let account = house.account(token).ok_or_else(|| "sign in again".to_string())?;
+        if house.open_id().as_deref() != Some(table_id) {
+            return Err("that table is not open".into());
+        }
+        let door = house.door(&account.id, table_id);
+        (account, door)
+    };
+    let (as_gm, resume, consume) = match door {
+        crate::house::Door::Owner { seat } => (true, seat.or_else(|| clean_resume(resume_id)), false),
+        crate::house::Door::Always { seat } => (false, seat.or_else(|| clean_resume(resume_id)), false),
+        crate::house::Door::Once { seat } => (false, seat, true),
+        crate::house::Door::Spent { seat } => {
+            let client = clean_resume(resume_id);
+            if client.is_some() && client == seat {
+                (false, client, false)
+            } else {
+                return Err("ask the GM before you sit again".into());
+            }
+        }
+        crate::house::Door::Closed => return Err("ask the GM before you sit".into()),
+    };
+    if !as_gm {
+        let table = app.table.lock().await;
+        let gm_here = table.players.iter().any(|player| player.role == crate::net::protocol::Role::Gm && player.connected);
+        if !gm_here {
+            return Err("the GM is not at the table".into());
+        }
+    }
+    let seat = {
+        let mut table = app.table.lock().await;
+        let passphrase = table.passphrase.clone();
+        let gm_key = table.gm_key.clone();
+        let seated = if as_gm {
+            table.take_seat(&account.username, &passphrase, true, Some(gm_key.as_str()), resume.as_deref())?
+        } else {
+            table.take_seat(&account.username, &passphrase, false, None, resume.as_deref())?
+        };
+        if let Some(player) = table.players.iter_mut().find(|player| player.id == seated.player_id) {
+            player.name = account.username.clone();
+            player.color = account.color.clone();
+        }
+        seated
+    };
+    {
+        let mut house = app.house.lock().await;
+        house.remember_seat(table_id, &account.id, &seat.player_id, consume);
+    }
+    Ok(seat)
+}
+
+fn clean_resume(resume_id: Option<&str>) -> Option<String> {
+    resume_id.filter(|id| !id.is_empty()).map(|id| id.to_string())
+}
+
 async fn websocket(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, app))
 }
@@ -229,9 +335,13 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     };
 
     let join = match serde_json::from_str::<ClientMsg>(&first) {
-        Ok(ClientMsg::Join { name, passphrase, as_gm, gm_key, resume_id }) => {
-            let mut table = app.table.lock().await;
-            table.take_seat(&name, &passphrase, as_gm, gm_key.as_deref(), resume_id.as_deref())
+        Ok(ClientMsg::Join { name, passphrase, as_gm, gm_key, resume_id, account_token, table_id }) => {
+            if let Some(token) = account_token.filter(|token| !token.is_empty()) {
+                account_seat(&app, &token, table_id.as_deref(), resume_id.as_deref()).await
+            } else {
+                let mut table = app.table.lock().await;
+                table.take_seat(&name, &passphrase, as_gm, gm_key.as_deref(), resume_id.as_deref())
+            }
         }
         Ok(_) => Err("say who you are before anything else".into()),
         Err(_) => Err("could not read that message".into()),
@@ -660,6 +770,8 @@ async fn import_map(
         layout: None,
         move_blockers: Vec::new(),
         presentation: None,
+        schema_version: 1,
+        visual_profile: DIMETRIC_PROFILE.to_string(),
     };
 
     let mut table = app.table.lock().await;
@@ -706,6 +818,8 @@ async fn import_package(app: Arc<App>, token: &str, name: &str, bytes: &[u8]) ->
         layout: None,
         move_blockers: Vec::new(),
         presentation: Some(loaded.presentation),
+        schema_version: 1,
+        visual_profile: String::new(),
     };
     let warnings = scene.presentation.as_ref().map(|item| item.warnings.clone()).unwrap_or_default();
     let mut table = app.table.lock().await;
@@ -889,5 +1003,72 @@ fn sniff(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
         Some(("webp", "image/webp"))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use tower::ServiceExt;
+
+    use crate::config::Config;
+
+    fn isolated() -> (std::path::PathBuf, Arc<App>) {
+        let dir = std::env::temp_dir().join(format!(
+            "longtable-import-http-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("assets").join("packs")).unwrap();
+        let config = Config {
+            bind: "127.0.0.1:0".into(),
+            gm_key: "testkey".into(),
+            table_passphrase: "table".into(),
+            data_dir: dir.join("data").display().to_string(),
+            static_dir: dir.join("none").display().to_string(),
+            assets_dir: dir.join("assets").display().to_string(),
+            systems_dir: dir.join("systems").display().to_string(),
+        };
+        (dir, App::boot(config))
+    }
+
+    async fn session(app: &App, as_gm: bool) -> String {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut table = app.table.lock().await;
+        let seat = table.take_seat("Ada", "table", as_gm, Some("testkey"), None).unwrap();
+        table.attach(&seat.player_id, tx).unwrap().1
+    }
+
+    #[tokio::test]
+    async fn an_unsigned_pack_import_is_refused() {
+        let (dir, app) = isolated();
+        let response = router(app)
+            .oneshot(HttpRequest::builder().method("POST").uri("/api/packs/import").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_player_cannot_import_a_pack() {
+        let (dir, app) = isolated();
+        let token = session(&app, false).await;
+        let response = router(app)
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/packs/import")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

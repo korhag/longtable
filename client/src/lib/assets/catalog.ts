@@ -67,6 +67,51 @@ export interface ThemeDef {
   scatter: ScatterDef[];
 }
 
+export interface TileDef {
+  id: string;
+  name: string;
+  kind: string;
+  sourceSizePx: [number, number];
+  coverageCells: [number, number];
+  files: string[];
+  transitionPolicy?: string;
+}
+
+export interface ObjectLayer {
+  kind: string;
+  file: string;
+  sizePx: [number, number];
+  pivotPx: [number, number];
+}
+
+export interface ObjectDef {
+  id: string;
+  name: string;
+  kind: string;
+  placement: string;
+  footprintCells: [number, number];
+  pixelsPerWorldUnit?: number;
+  renderLayers: ObjectLayer[];
+  blocksMovement?: boolean;
+  blocksVision?: boolean;
+  occludesVisually?: boolean;
+}
+
+export interface CastFrame {
+  file: string;
+  sizePx: [number, number];
+  pivotPx: [number, number];
+}
+
+export interface CastDef {
+  id: string;
+  name: string;
+  pixelsPerWorldUnit?: number;
+  suggestedFootprintCells?: [number, number];
+  views: { north: CastFrame; east: CastFrame; south: CastFrame; west: CastFrame };
+  portrait?: string | null;
+}
+
 export interface Pack {
   id: string;
   name: string;
@@ -78,6 +123,12 @@ export interface Pack {
   doors: DoorDef[];
   props: PropDef[];
   themes: ThemeDef[];
+  tiles?: TileDef[];
+  objects?: ObjectDef[];
+  cast?: CastDef[];
+  schemaVersion?: number;
+  visualProfile?: string;
+  contentHash?: string;
   tray?: { felt?: string | null; wood?: string | null };
   baseUrl: string;
 }
@@ -90,13 +141,24 @@ export interface AssetRef<T> {
 
 const textures = new Map<string, Promise<THREE.Texture | null>>();
 let loading: Promise<Pack[]> | null = null;
+let seenRevision = -1;
 
 export function loadCatalog(): Promise<Pack[]> {
   loading ??= fetch('/api/packs')
     .then((response) => (response.ok ? response.json() : { packs: [] }))
-    .then((body: { packs?: Pack[] }) => body.packs ?? [])
+    .then((body: { packs?: Pack[]; revision?: number }) => {
+      if (typeof body.revision === 'number') seenRevision = body.revision;
+      return body.packs ?? [];
+    })
     .catch(() => []);
   return loading;
+}
+
+export function noteCatalogRevision(revision: number): boolean {
+  if (revision === seenRevision) return false;
+  seenRevision = revision;
+  loading = null;
+  return true;
 }
 
 export function splitAsset(asset: string): { pack: string; local: string } | null {

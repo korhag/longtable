@@ -4,4 +4,8 @@ import type { PlacedDecal } from "./PlacedDecal.ts";
 import type { PlacedLight } from "./PlacedLight.ts";
 import type { PlacedProp } from "./PlacedProp.ts";
 
-export type MapLayout = { width: number, height: number, terrains: Array<string>, cells: string, pieces: Array<EdgePiece>, props: Array<PlacedProp>, decals: Array<PlacedDecal>, lights: Array<PlacedLight>, };
+export type MapLayout = { width: number, height: number, terrains: Array<string>, cells: string, pieces: Array<EdgePiece>, props: Array<PlacedProp>, decals: Array<PlacedDecal>, lights: Array<PlacedLight>, 
+/**
+ * One height byte per cell, base64. Absent or empty means every cell is tier 0.
+ */
+levels?: string, };

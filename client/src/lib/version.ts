@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.12.2';
-export const VERSION_NOTE = 'The rules book lays out equipment lists as tables.';
+export const VERSION = '1.2.0';
+export const VERSION_NOTE = 'The GM can import an asset pack and browse its tiles, objects, and cast.';

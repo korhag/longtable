@@ -12,12 +12,14 @@ import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
+import { COS_ELEVATION, sceneBasis } from './cameraProfile';
 import { seen } from './seen';
-import { SCREEN_UP, standeeWorldSize, uprightPixels } from './view';
+import { standeeWorldSize, uprightPixels } from './view';
 
-const RIGHT = new THREE.Vector3(1, 0, 0);
-const UP = new THREE.Vector3(SCREEN_UP.x, SCREEN_UP.y, SCREEN_UP.z);
-const TOWARD = new THREE.Vector3(0, 0.8, 0.6);
+const { right } = sceneBasis();
+const RIGHT = new THREE.Vector3(right.x, right.y, right.z);
+const UP = new THREE.Vector3(0, 1, 0);
+const TOWARD = new THREE.Vector3().crossVectors(RIGHT, UP).normalize();
 
 export class StandeeLayer {
   private group = new THREE.Group();
@@ -135,7 +137,7 @@ export class StandeeLayer {
     const size = standeeWorldSize(imageWidth, imageHeight, pixels);
     const point = anchorPx ?? [0, imageHeight];
     const geometry = new THREE.PlaneGeometry(size.width, size.height);
-    geometry.translate((size.width / 2) - point[0] / pixels, point[1] / pixels - size.height / 2, 0);
+    geometry.translate((size.width / 2) - point[0] / pixels, point[1] / (pixels * COS_ELEVATION) - size.height / 2, 0);
     const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.35, depthWrite: true });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(RIGHT, UP, TOWARD));

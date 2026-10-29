@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "players": [
+    {"id": "host", "name": "Host", "role": "gm", "color": "#d4a656", "connected": false}
+  ],
+  "scene": {
+    "id": "hall",
+    "name": "Hall",
+    "width": 8.0,
+    "height": 6.0,
+    "image_file": "missing-map.png",
+    "walls": [{"a": {"x": 0.0, "y": 3.0}, "b": {"x": 8.0, "y": 3.0}}],
+    "doors": [{"id": "door-1", "a": {"x": 3.0, "y": 3.0}, "b": {"x": 4.0, "y": 3.0}, "open": false}],
+    "lights": []
+  },
+  "tokens": [
+    {"id": "hero", "name": "Ada", "x": 1.5, "y": 1.5, "image_file": null, "color": "#7eb8a2", "owner_id": "host", "hidden": false, "vision_radius": 6.0, "grants_vision": true, "character_id": "ada"},
+    {"id": "extra", "name": "Marker", "x": 4.5, "y": 2.5, "image_file": "missing-portrait.png", "color": "#d27b66", "owner_id": null, "hidden": true, "vision_radius": 0.0, "grants_vision": false}
+  ],
+  "explored": {"width": 1, "height": 1, "bits": "AA=="},
+  "rolls": [],
+  "campaign": {"id": "camp", "name": "Fixture", "system_id": "daggerheart"},
+  "characters": [
+    {"id": "ada", "name": "Ada", "kind": "pc", "ownerId": "host", "systemId": "daggerheart"}
+  ],
+  "scenes": [
+    {
+      "id": "cellar",
+      "name": "Cellar",
+      "scene": {
+        "id": "cellar",
+        "name": "Cellar",
+        "width": 5.0,
+        "height": 5.0,
+        "image_file": null,
+        "walls": [],
+        "doors": [],
+        "lights": []
+      },
+      "tokens": [],
+      "explored": {"width": 1, "height": 1, "bits": "AA=="}
+    }
+  ],
+  "shelved": [
+    {
+      "campaign": {"id": "other", "name": "Other", "system_id": null},
+      "scene": null,
+      "tokens": [],
+      "explored": {"width": 1, "height": 1, "bits": "AA=="},
+      "characters": [
+        {"id": "guide", "name": "Guide", "kind": "npc"}
+      ],
+      "scenes": []
+    }
+  ],
+  "fear": 3
+}

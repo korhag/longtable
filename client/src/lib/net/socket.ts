@@ -32,6 +32,7 @@ export function joinTable(next: SeatRequest) {
 
 export function leaveTable() {
   allowReconnect = false;
+  skipAutoJoin = true;
   seat = null;
   closeSocket();
   forgetSeat();

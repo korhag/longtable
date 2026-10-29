@@ -13,7 +13,11 @@
   import TopBar from './lib/layout/TopBar.svelte';
   import type { SceneView } from './lib/net/bindings/SceneView.ts';
   import { send } from './lib/net/socket';
+  import { account } from './lib/account.svelte';
+  import { chrome } from './lib/chrome.svelte';
+  import { PROFILE_ID } from './lib/render/cameraProfile';
   import { TableEngine } from './lib/render/engine';
+  import { castFor } from './lib/render/rings';
   import { measure } from './lib/systems/measure';
   import { systems } from './lib/systems/store.svelte';
   import { overlaysFor, playChromeFor } from './systems';
@@ -24,6 +28,8 @@
   import GmToolbar from './lib/ui/GmToolbar.svelte';
   import Lobby from './lib/ui/Lobby.svelte';
   import RollLog from './lib/ui/RollLog.svelte';
+  import SettingsPanel from './lib/ui/SettingsPanel.svelte';
+  import TalkPanel from './lib/ui/TalkPanel.svelte';
   import TokenPanel from './lib/ui/TokenPanel.svelte';
 
   let host: HTMLDivElement;
@@ -51,6 +57,8 @@
         })),
         layout: editor.draft.layout,
         presentation: null,
+        schemaVersion: 1,
+        visualProfile: PROFILE_ID,
       }
     : table.scene);
 
@@ -123,7 +131,16 @@
       ghost: editor.ghost,
       buildMode: editor.active,
       viewId: editor.active ? '' : table.viewId,
+      cast: Object.fromEntries(table.tokens.map((token) => [token.id, castFor(token, table.characters, table.players)])),
     });
+  });
+
+  $effect(() => {
+    if (!table.joined || !account.token) return;
+    const timer = window.setInterval(() => {
+      void account.refresh();
+    }, 8000);
+    return () => window.clearInterval(timer);
   });
 
   $effect(() => {
@@ -243,6 +260,17 @@
     </div>
 
     <DiceStage />
+
+    {#if chrome.settings}
+      <Panel id="settings" title="Settings" onclose={() => (chrome.settings = false)}>
+        <SettingsPanel />
+      </Panel>
+    {/if}
+    {#if chrome.talk}
+      <Panel id="talk" title="Talk" onclose={() => (chrome.talk = false)}>
+        <TalkPanel />
+      </Panel>
+    {/if}
 
     {#if Overlays}
       <Overlays />

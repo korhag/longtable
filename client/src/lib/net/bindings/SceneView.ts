@@ -17,4 +17,4 @@ layout: MapLayout | null,
 /**
  * Angled pictures of this grid. Missing on an ordinary battle map.
  */
-presentation: Presentation | null, };
+presentation: Presentation | null, schemaVersion: number, visualProfile: string, };

@@ -7,6 +7,8 @@
   import ViewControls from '../ui/ViewControls.svelte';
   import type { Anchor } from '../ui/portal';
   import { VERSION, VERSION_NOTE } from '../version';
+  import { account } from '../account.svelte';
+  import { chrome } from '../chrome.svelte';
   import { layout } from './layout.svelte';
   import { appMode, modes, type AppMode, type TableMode } from './modes.svelte';
   import SeatMenu from './SeatMenu.svelte';
@@ -63,6 +65,22 @@
       name: player.name,
       anchor: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
+  }
+
+  function openPanel(id: 'talk' | 'settings') {
+    const open = id === 'talk' ? chrome.talk : chrome.settings;
+    if (id === 'talk') chrome.talk = !open;
+    else chrome.settings = !open;
+    if (open) return;
+    const place = layout.place(id);
+    layout.patch(id, {
+      floating: true,
+      collapsed: false,
+      x: id === 'talk' ? 24 : Math.max(24, window.innerWidth - 460),
+      y: 72,
+      w: Math.max(place.w, id === 'talk' ? 360 : 420),
+      h: Math.max(place.h, 480),
+    });
   }
 
   function kick(playerId: string) {
@@ -125,6 +143,11 @@
         onclose={() => (seatMenu = null)}
       />
     {/if}
+    <button class="btn quiet px-2" type="button" onclick={() => openPanel('talk')}>Talk</button>
+    {#if account.lobby && account.lobby.requests.length > 0}
+      <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>{account.lobby.requests.length} waiting</button>
+    {/if}
+    <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>Settings</button>
     <span class="shrink-0 text-sm tracking-wide text-[var(--color-parchment)]/55" title={VERSION_NOTE}>v{VERSION}</span>
     <button class="btn quiet px-2" type="button" onclick={() => layout.reset()}>Reset</button>
     <button class="btn quiet px-2" type="button" onclick={() => leaveTable()}>Leave</button>

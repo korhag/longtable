@@ -95,7 +95,7 @@ mod tests {
                 {"id":"pillar","name":"Pillar","footprint":[1,1],"blocks":"sight","height":2}
             ]
         }"#;
-        Catalog { packs: vec![parse_pack(text).unwrap()] }
+        Catalog { packs: vec![parse_pack(text).unwrap()], ..Catalog::default() }
     }
 
     fn layout() -> MapLayout {
@@ -132,6 +132,7 @@ mod tests {
                 range: 6.0,
                 color: "#e8a04a".into(),
             }],
+            levels: None,
         }
     }
 

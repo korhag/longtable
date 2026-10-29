@@ -19,6 +19,7 @@ import type { RollEvent } from './net/bindings/RollEvent.ts';
 import type { RollLogEntry } from './net/bindings/RollLogEntry.ts';
 import type { SceneView } from './net/bindings/SceneView.ts';
 import type { StrikeOffer } from './net/bindings/StrikeOffer.ts';
+import type { TalkLine } from './net/bindings/TalkLine.ts';
 import type { ServerMsg } from './net/bindings/ServerMsg.ts';
 import type { SystemDef } from './net/bindings/SystemDef.ts';
 import type { TokenView } from './net/bindings/TokenView.ts';
@@ -30,6 +31,8 @@ export interface SeatRequest {
   passphrase: string;
   asGm: boolean;
   gmKey: string;
+  accountToken?: string;
+  tableId?: string;
 }
 
 class TableStore {
@@ -60,9 +63,11 @@ class TableStore {
   hoverTokenId = $state<string | null>(null);
   menu = $state<{ tokenId: string; x: number; y: number } | null>(null);
   fear = $state(0);
+  catalogRevision = $state(-1);
   figures = $state<Figure[]>([]);
   canUndo = $state(false);
   strike = $state<StrikeOffer | null>(null);
+  talk = $state<TalkLine[]>([]);
   tool = $state<Tool>('select');
   viewId = $state('');
   clock = new ClockSync();
@@ -105,6 +110,8 @@ class TableStore {
         this.figures = message.figures;
         this.canUndo = message.canUndo;
         this.strike = message.strike;
+        this.talk = message.talk;
+        this.catalogRevision = message.catalogRevision ?? 0;
         if (this.selectedTokenId && !message.tokens.some((token) => token.id === this.selectedTokenId)) {
           this.selectedTokenId = null;
         }
@@ -155,13 +162,8 @@ class TableStore {
     this.concealedNotice = null;
   }
 
-  turnView(step: number) {
-    const order = this.scene?.presentation?.viewOrder ?? [];
-    if (order.length < 2) return;
-    const index = order.indexOf(this.viewId);
-    const start = index < 0 ? 0 : index;
-    const count = order.length;
-    this.viewId = order[((start + step) % count + count) % count] ?? order[0] ?? '';
+  turnView(_step: number) {
+    return;
   }
 
   private rememberView(scene: SceneView | null) {
@@ -203,9 +205,11 @@ class TableStore {
     this.hoverTokenId = null;
     this.menu = null;
     this.fear = 0;
+    this.catalogRevision = -1;
     this.figures = [];
     this.canUndo = false;
     this.strike = null;
+    this.talk = [];
     this.viewId = '';
     this.framedScene = '';
     this.queue = [];
@@ -220,6 +224,8 @@ class TableStore {
       asGm: seat.asGm,
       gmKey: seat.asGm ? seat.gmKey : null,
       resumeId,
+      accountToken: seat.accountToken || null,
+      tableId: seat.tableId || null,
     };
   }
 }
@@ -237,7 +243,7 @@ export function loadSeat(): SeatRequest | null {
   if (!raw) return null;
   try {
     const seat = JSON.parse(raw) as SeatRequest;
-    if (!seat.name || !seat.passphrase) return null;
+    if (!seat.name || (!seat.passphrase && !seat.accountToken)) return null;
     return seat;
   } catch {
     return null;

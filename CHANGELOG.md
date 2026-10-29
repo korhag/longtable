@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.2.0 — 2026-10-29
+
+- The GM can import an asset pack and browse its tiles, objects, and cast.
+
+## 1.1.0 — 2026-10-29
+
+- The map is a fixed view. You can pan and zoom, and the picture does not turn.
+
+## 1.0.3 — 2026-10-29
+
+- The GM sees a chosen figure in white and a target in red. A player sees the GM’s cast in gray until it is targeted.
+
+## 1.0.2 — 2026-10-29
+
+- The character bar names each mark, and the traits use a short name.
+
+## 1.0.1 — 2026-10-29
+
+- Sheet controls are arrows and a drag grip, with a tip on each one.
+
+## 1.0.0 — 2026-10-29
+
+- You sign in to a table, and your color, dice tray, and talk stay with you.
+- Token rings use each player's color. Other figures are red, and the GM sees them in gray until they are chosen.
+- The character bar marks armor, stress, and hope the way a sheet does.
+
 ## 0.12.2 — 2026-10-29
 
 - The rules book lays out equipment lists as tables.

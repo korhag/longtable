@@ -4,6 +4,7 @@
 //          protocol module is the source of the TypeScript types.
 // ------------------------------------------------------------
 
+mod accounts;
 pub(crate) mod protocol;
 mod ws;
 

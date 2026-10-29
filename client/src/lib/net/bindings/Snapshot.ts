@@ -9,6 +9,7 @@ import type { PlayerInfo } from "./PlayerInfo.ts";
 import type { RollLogEntry } from "./RollLogEntry.ts";
 import type { SceneView } from "./SceneView.ts";
 import type { StrikeOffer } from "./StrikeOffer.ts";
+import type { TalkLine } from "./TalkLine.ts";
 import type { TokenView } from "./TokenView.ts";
 
 export type Snapshot = { you: PlayerInfo, players: Array<PlayerInfo>, scene: SceneView | null, tokens: Array<TokenView>, doors: Array<DoorView>, fog: FogView, rolls: Array<RollLogEntry>, viewAs: string | null, campaign: Campaign, characters: Array<Character>, 
@@ -23,4 +24,12 @@ fear: number, figures: Array<Figure>, canUndo: boolean,
 /**
  * The armor question, when this viewer is allowed to answer it.
  */
-strike: StrikeOffer | null, };
+strike: StrikeOffer | null, 
+/**
+ * What has been said at this table, including public rolls.
+ */
+talk: Array<TalkLine>, 
+/**
+ * Changes when a pack is imported, so every seat can reload the library.
+ */
+catalogRevision: number, };

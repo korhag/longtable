@@ -303,6 +303,14 @@ pub struct SceneView {
     /// Angled pictures of this grid. Missing on an ordinary battle map.
     #[serde(default)]
     pub presentation: Option<Presentation>,
+    #[serde(default = "schema_one")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub visual_profile: String,
+}
+
+fn schema_one() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -420,6 +428,23 @@ pub struct Snapshot {
     /// The armor question, when this viewer is allowed to answer it.
     #[serde(default)]
     pub strike: Option<StrikeOffer>,
+    /// What has been said at this table, including public rolls.
+    #[serde(default)]
+    pub talk: Vec<TalkLine>,
+    /// Changes when a pack is imported, so every seat can reload the library.
+    #[serde(default)]
+    pub catalog_revision: u64,
+}
+
+/// One line in the talk panel. The speaker is the character, when one is chosen.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct TalkLine {
+    pub id: String,
+    pub speaker: String,
+    pub body: String,
+    pub at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -435,6 +460,18 @@ pub enum ClientMsg {
         gm_key: Option<String>,
         #[serde(default)]
         resume_id: Option<String>,
+        #[serde(default)]
+        account_token: Option<String>,
+        #[serde(default)]
+        table_id: Option<String>,
+    },
+    /// The character this seat is speaking and rolling as.
+    Voice {
+        #[serde(default)]
+        character_id: Option<String>,
+    },
+    Say {
+        text: String,
     },
     Ping {
         client_time: u64,

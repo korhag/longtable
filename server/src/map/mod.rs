@@ -17,7 +17,7 @@ pub use drafts::{Draft, DraftStore};
 #[allow(unused_imports)]
 pub use layout::MapLayout;
 #[allow(unused_imports)]
-pub use scene::{Door, Light, Scene, Segment, Vec2};
+pub use scene::{Door, Light, Scene, Segment, Vec2, DIMETRIC_PROFILE};
 #[allow(unused_imports)]
 pub use package::{read_package, safe_relative, LoadedPackage, PackageError};
 #[allow(unused_imports)]

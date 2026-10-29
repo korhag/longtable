@@ -20,8 +20,8 @@ export function uprightPixels(width: number, depth: number, height: number, pixe
   };
 }
 
-/** A camera-facing card shows the file at one pixel per P at the native zoom. */
+/** World size of a camera-matched cutout. Height is stretched by 1/cos(30°). */
 export function standeeWorldSize(imageWidth: number, imageHeight: number, pixelsPerCell: number) {
   const scale = Math.max(1, pixelsPerCell);
-  return { width: imageWidth / scale, height: imageHeight / scale };
+  return { width: imageWidth / scale, height: imageHeight / (scale * Math.cos((30 * Math.PI) / 180)) };
 }
