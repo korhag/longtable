@@ -16,10 +16,12 @@ use crate::dice::{parse_formula, RollFormula, KEYFRAME_DT};
 use crate::map::compile::Compiled;
 use crate::map::{MapLayout, Scene, Segment, Vec2};
 use crate::net::protocol::{
-    ClientMsg, ConcealedRoll, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg,
+    Blow, ClientMsg, ConcealedRoll, Contest, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg,
 };
 use crate::systems::{
-    apply_modifiers, field_ceiling, fill_formula, threshold_marks, Character, CharacterKind, FieldKind, SystemDef, Campaign,
+    apply_modifiers, field_ceiling, fill_formula, threshold_blow, threshold_marks, Character, CharacterKind, FieldDef, FieldKind,
+    SystemDef,
+    Campaign,
 };
 use crate::vision::{cells_for, path_blocked, visibility_polygon, Explored, CELLS_PER_SQUARE};
 
@@ -70,6 +72,37 @@ pub struct StoredRoll {
     pub created_at: u64,
     #[serde(default)]
     pub outcome: Option<crate::systems::RollOutcome>,
+    #[serde(default)]
+    pub contest: Option<Contest>,
+}
+
+/// Damage that is waiting for an armor answer.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PendingStrike {
+    pub target_id: String,
+    pub step: String,
+    pub marks: i32,
+}
+
+/// One number, as it was before the last mark.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum MarkSlot {
+    Field { character_id: String, field: String, before: i32 },
+    Fear { before: u8 },
+}
+
+/// The last mark. One step, not a history.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct UndoStep {
+    pub changes: Vec<MarkSlot>,
+}
+
+/// A targeted roll the socket is about to throw.
+pub struct AttackPlan {
+    pub formula: String,
+    pub label: String,
+    pub contest: Contest,
+    pub damage: bool,
 }
 
 /// Who is asking, and whose eyes the map should use.
@@ -139,6 +172,8 @@ pub struct Table {
     pub shelved: Vec<CampaignShelf>,
     pub characters: Vec<Character>,
     pub fear: u8,
+    pub strike: Option<PendingStrike>,
+    pub undo: Option<UndoStep>,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
     epoch: u64,
@@ -165,6 +200,8 @@ impl Table {
             shelved: Vec::new(),
             characters: Vec::new(),
             fear: 0,
+            strike: None,
+            undo: None,
             clients: Vec::new(),
             sessions: HashMap::new(),
             epoch: 0,
@@ -340,7 +377,9 @@ impl Table {
                     Ok(CommandEffect::Quiet)
                 }
             }
-            ClientMsg::Roll { .. } => Err("rolls are started by the socket, not the table".into()),
+            ClientMsg::Roll { .. } | ClientMsg::Attack { .. } | ClientMsg::Strike { .. } => {
+                Err("rolls are started by the socket, not the table".into())
+            }
             ClientMsg::SetDoor { door_id, open } => {
                 self.set_door(viewer, &door_id, open)?;
                 Ok(CommandEffect::Refresh)
@@ -439,6 +478,14 @@ impl Table {
                 self.apply_damage(viewer, &character_id, &field_id, amount, system)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::AnswerStrike { use_armor } => {
+                self.answer_strike(viewer, use_armor, system)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::Undo => {
+                self.undo_mark(viewer)?;
+                Ok(CommandEffect::Refresh)
+            }
             ClientMsg::CreateCampaign { name, system_id } => {
                 self.create_campaign(viewer, name, system_id)?;
                 Ok(CommandEffect::Refresh)
@@ -530,6 +577,7 @@ impl Table {
                 .collect(),
             created_at: now_ms(),
             outcome: roll.outcome.clone(),
+            contest: roll.contest.clone(),
         });
         if self.rolls.len() > ROLL_LOG_LIMIT {
             let extra = self.rolls.len() - ROLL_LOG_LIMIT;
@@ -545,8 +593,12 @@ impl Table {
 
     fn adjust_fear(&mut self, viewer: &Viewer, delta: i32) -> Result<(), String> {
         self.require_gm(viewer)?;
+        let before = self.fear;
         let next = self.fear as i32 + delta;
         self.fear = next.clamp(0, FEAR_CAP as i32) as u8;
+        if self.fear != before {
+            self.remember(vec![MarkSlot::Fear { before }]);
+        }
         Ok(())
     }
 
@@ -1039,6 +1091,8 @@ impl Table {
         self.explored = shelf.explored;
         self.characters = shelf.characters;
         self.scenes = shelf.scenes;
+        self.strike = None;
+        self.undo = None;
         self.ensure_campaign();
         self.sync_fog_size();
         self.reveal_from_tokens();
@@ -1049,6 +1103,8 @@ impl Table {
         self.tokens.clear();
         self.characters.clear();
         self.scenes.clear();
+        self.strike = None;
+        self.undo = None;
         let (width, height) = cells_for(DEFAULT_WIDTH, DEFAULT_HEIGHT);
         self.explored = Explored::new(width, height);
     }
@@ -1106,7 +1162,17 @@ impl Table {
     fn delete_campaign(&mut self, viewer: &Viewer, campaign_id: &str) -> Result<(), String> {
         self.require_gm(viewer)?;
         if self.campaign.id == campaign_id {
-            return Err("that campaign is the one being played".into());
+            if let Some(next) = self.shelved.pop() {
+                self.restore_campaign(next);
+            } else {
+                self.campaign = Campaign {
+                    id: Uuid::new_v4().to_string(),
+                    name: "Campaign".into(),
+                    system_id: None,
+                };
+                self.clear_table();
+            }
+            return Ok(());
         }
         let before = self.shelved.len();
         self.shelved.retain(|item| item.campaign.id != campaign_id);
@@ -1359,9 +1425,23 @@ impl Table {
             self.require_character(viewer, character)?;
             field_ceiling(field, &character.numbers)
         };
-        let character = self.characters.iter_mut().find(|character| character.id == character_id).unwrap();
-        let current = character.numbers.get(field_id).copied().unwrap_or(0);
-        character.numbers.insert(field_id.to_string(), (current + delta).clamp(0, ceiling));
+        let current = self
+            .characters
+            .iter()
+            .find(|character| character.id == character_id)
+            .and_then(|character| character.numbers.get(field_id).copied())
+            .unwrap_or(0);
+        let next = (current + delta).clamp(0, ceiling);
+        if let Some(character) = self.characters.iter_mut().find(|character| character.id == character_id) {
+            character.numbers.insert(field_id.to_string(), next);
+        }
+        if next != current {
+            self.remember(vec![MarkSlot::Field {
+                character_id: character_id.to_string(),
+                field: field_id.to_string(),
+                before: current,
+            }]);
+        }
         Ok(())
     }
 
@@ -1405,9 +1485,269 @@ impl Table {
             let current = character.numbers.get(&pool_id).copied().unwrap_or(0);
             (marks, ceiling, current)
         };
-        let character = self.characters.iter_mut().find(|character| character.id == character_id).unwrap();
-        character.numbers.insert(pool_id, (current + marks).clamp(0, ceiling));
+        let next = (current + marks).clamp(0, ceiling);
+        if let Some(character) = self.characters.iter_mut().find(|character| character.id == character_id) {
+            character.numbers.insert(pool_id.clone(), next);
+        }
+        if next != current {
+            self.remember(vec![MarkSlot::Field { character_id: character_id.to_string(), field: pool_id, before: current }]);
+        }
         Ok(())
+    }
+
+    pub fn prepare_attack(
+        &self,
+        viewer: &Viewer,
+        attacker_id: &str,
+        target_id: &str,
+        plus: i32,
+        minus: i32,
+    ) -> Result<AttackPlan, String> {
+        self.engagement(viewer, attacker_id, target_id, plus, minus, false)
+    }
+
+    pub fn prepare_strike(
+        &self,
+        viewer: &Viewer,
+        attacker_id: &str,
+        target_id: &str,
+        plus: i32,
+        minus: i32,
+    ) -> Result<AttackPlan, String> {
+        if self.strike.is_some() {
+            return Err("answer the last blow first".into());
+        }
+        self.engagement(viewer, attacker_id, target_id, plus, minus, true)
+    }
+
+    fn engagement(
+        &self,
+        viewer: &Viewer,
+        attacker_id: &str,
+        target_id: &str,
+        plus: i32,
+        minus: i32,
+        damage: bool,
+    ) -> Result<AttackPlan, String> {
+        let attacker = self
+            .characters
+            .iter()
+            .find(|character| character.id == attacker_id)
+            .ok_or_else(|| "that character is not at the table".to_string())?;
+        self.require_character(viewer, attacker)?;
+        let target = self
+            .characters
+            .iter()
+            .find(|character| character.id == target_id)
+            .ok_or_else(|| "that target is not at the table".to_string())?;
+        let (defense_name, defense) = crate::systems::daggerheart::defense_of(target);
+        let raw = if damage {
+            crate::systems::daggerheart::damage_formula(attacker)
+        } else {
+            crate::systems::daggerheart::attack_formula(attacker)
+        };
+        let filled = fill_formula(&raw, &attacker.numbers)?;
+        let verb = if damage { "damages" } else { "attacks" };
+        Ok(AttackPlan {
+            formula: apply_modifiers(&filled, plus, minus),
+            label: format!("{} {} {}", attacker.name, verb, target.name),
+            contest: Contest {
+                attacker_id: attacker.id.clone(),
+                attacker_name: attacker.name.clone(),
+                target_id: target.id.clone(),
+                target_name: target.name.clone(),
+                defense_name: defense_name.into(),
+                defense,
+                verdict: None,
+                blow: None,
+            },
+            damage,
+        })
+    }
+
+    /// Compare a damage total with the target's thresholds. Armor, when a slot is free, waits for an answer.
+    pub fn receive_blow(&mut self, target_id: &str, amount: i32, system: &SystemDef) -> Result<Blow, String> {
+        if self.strike.is_some() {
+            return Err("answer the last blow first".into());
+        }
+        let field = system
+            .fields
+            .iter()
+            .find(|field| field.kind == FieldKind::Thresholds)
+            .ok_or_else(|| "this system has no damage thresholds".to_string())?;
+        let (step, marks, open) = {
+            let character = self
+                .characters
+                .iter()
+                .find(|character| character.id == target_id)
+                .ok_or_else(|| "that target is not at the table".to_string())?;
+            let (step, marks) = threshold_blow(field, amount, &character.numbers).unwrap_or_else(|| ("None".into(), 0));
+            (step, marks, armor_open(character))
+        };
+        let blow = Blow { step: step.clone(), marks };
+        if marks <= 0 {
+            return Ok(blow);
+        }
+        if open > 0 {
+            self.strike = Some(PendingStrike { target_id: target_id.to_string(), step, marks });
+            return Ok(blow);
+        }
+        if let Some(slot) = self.add_pool(target_id, field, marks, system)? {
+            self.remember(vec![slot]);
+        }
+        Ok(blow)
+    }
+
+    fn answer_strike(&mut self, viewer: &Viewer, use_armor: bool, system: Option<&SystemDef>) -> Result<(), String> {
+        let pending = self.strike.clone().ok_or_else(|| "there is no blow waiting".to_string())?;
+        let system = system.ok_or_else(|| "this table has no system".to_string())?;
+        let field = system
+            .fields
+            .iter()
+            .find(|field| field.kind == FieldKind::Thresholds)
+            .ok_or_else(|| "this system has no damage thresholds".to_string())?
+            .clone();
+        let (open, hp_before, armor_before) = {
+            let character = self
+                .characters
+                .iter()
+                .find(|character| character.id == pending.target_id)
+                .ok_or_else(|| "that target is not at the table".to_string())?;
+            let gm = viewer.role == crate::net::protocol::Role::Gm;
+            let owner = character.owner_id.as_deref() == Some(viewer.player_id.as_str());
+            if !gm && !owner {
+                return Err("that character is not yours".into());
+            }
+            (
+                armor_open(character),
+                character.numbers.get("hp").copied().unwrap_or(0),
+                character.numbers.get("armor").copied().unwrap_or(0),
+            )
+        };
+        let spend = use_armor && open > 0 && pending.marks > 0;
+        let hp_marks = if spend { (pending.marks - 1).max(0) } else { pending.marks };
+        let mut changes = Vec::new();
+        if hp_marks > 0 {
+            if let Some(slot) = self.add_pool(&pending.target_id, &field, hp_marks, system)? {
+                changes.push(slot);
+            } else {
+                changes.push(MarkSlot::Field { character_id: pending.target_id.clone(), field: "hp".into(), before: hp_before });
+            }
+        }
+        if spend {
+            if let Some(slot) = self.add_number(&pending.target_id, "armor", 1, system)? {
+                changes.push(slot);
+            } else {
+                changes.push(MarkSlot::Field {
+                    character_id: pending.target_id.clone(),
+                    field: "armor".into(),
+                    before: armor_before,
+                });
+            }
+        }
+        self.strike = None;
+        self.remember(changes);
+        Ok(())
+    }
+
+    fn add_pool(
+        &mut self,
+        character_id: &str,
+        field: &FieldDef,
+        marks: i32,
+        system: &SystemDef,
+    ) -> Result<Option<MarkSlot>, String> {
+        let pool_id = field.pool.clone().ok_or_else(|| "those thresholds are not linked to a pool".to_string())?;
+        let pool = system
+            .fields
+            .iter()
+            .find(|item| item.id == pool_id && item.kind == FieldKind::Pool)
+            .ok_or_else(|| "those thresholds are not linked to a pool".to_string())?;
+        let (ceiling, current) = {
+            let character = self
+                .characters
+                .iter()
+                .find(|character| character.id == character_id)
+                .ok_or_else(|| "that character is not at the table".to_string())?;
+            (field_ceiling(pool, &character.numbers), character.numbers.get(&pool_id).copied().unwrap_or(0))
+        };
+        let next = (current + marks).clamp(0, ceiling);
+        if let Some(character) = self.characters.iter_mut().find(|character| character.id == character_id) {
+            character.numbers.insert(pool_id.clone(), next);
+        }
+        if next != current {
+            return Ok(Some(MarkSlot::Field { character_id: character_id.to_string(), field: pool_id, before: current }));
+        }
+        Ok(None)
+    }
+
+    fn add_number(&mut self, character_id: &str, field_id: &str, delta: i32, system: &SystemDef) -> Result<Option<MarkSlot>, String> {
+        let field = system
+            .fields
+            .iter()
+            .find(|field| field.id == field_id)
+            .ok_or_else(|| "that is not a field on this system".to_string())?;
+        let (ceiling, current) = {
+            let character = self
+                .characters
+                .iter()
+                .find(|character| character.id == character_id)
+                .ok_or_else(|| "that character is not at the table".to_string())?;
+            (field_ceiling(field, &character.numbers), character.numbers.get(field_id).copied().unwrap_or(0))
+        };
+        let next = (current + delta).clamp(0, ceiling);
+        if let Some(character) = self.characters.iter_mut().find(|character| character.id == character_id) {
+            character.numbers.insert(field_id.to_string(), next);
+        }
+        if next != current {
+            return Ok(Some(MarkSlot::Field {
+                character_id: character_id.to_string(),
+                field: field_id.to_string(),
+                before: current,
+            }));
+        }
+        Ok(None)
+    }
+
+    fn undo_mark(&mut self, viewer: &Viewer) -> Result<(), String> {
+        let step = self.undo.clone().ok_or_else(|| "nothing to undo".to_string())?;
+        let gm = viewer.role == crate::net::protocol::Role::Gm;
+        for change in &step.changes {
+            match change {
+                MarkSlot::Fear { .. } if !gm => return Err("only the GM can undo that".into()),
+                MarkSlot::Field { character_id, .. } => {
+                    let character = self
+                        .characters
+                        .iter()
+                        .find(|character| &character.id == character_id)
+                        .ok_or_else(|| "that character is not at the table".to_string())?;
+                    let owner = character.owner_id.as_deref() == Some(viewer.player_id.as_str());
+                    if !gm && !owner {
+                        return Err("that character is not yours".into());
+                    }
+                }
+                MarkSlot::Fear { .. } => {}
+            }
+        }
+        for change in &step.changes {
+            match change {
+                MarkSlot::Fear { before } => self.fear = *before,
+                MarkSlot::Field { character_id, field, before } => {
+                    if let Some(character) = self.characters.iter_mut().find(|character| &character.id == character_id) {
+                        character.numbers.insert(field.clone(), *before);
+                    }
+                }
+            }
+        }
+        self.undo = None;
+        Ok(())
+    }
+
+    fn remember(&mut self, changes: Vec<MarkSlot>) {
+        if changes.is_empty() {
+            return;
+        }
+        self.undo = Some(UndoStep { changes });
     }
 
     fn require_character(&self, viewer: &Viewer, character: &Character) -> Result<(), String> {
@@ -1417,6 +1757,12 @@ impl Table {
             Err("that character is not yours".into())
         }
     }
+}
+
+fn armor_open(character: &Character) -> i32 {
+    let score = character.numbers.get("armorscore").copied().unwrap_or(0);
+    let marked = character.numbers.get("armor").copied().unwrap_or(0);
+    (score - marked).max(0)
 }
 
 pub enum CommandEffect {
@@ -1454,7 +1800,7 @@ fn title(name: &str) -> Result<String, String> {
 }
 
 fn clean_name(name: &str) -> String {
-    let cleaned: String = name.chars().filter(|ch| !ch.is_control()).take(24).collect();
+    let cleaned: String = name.chars().filter(|ch| !ch.is_control()).take(48).collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() { "Guest".into() } else { cleaned.to_string() }
 }
@@ -1842,6 +2188,64 @@ mod tests {
     }
 
     #[test]
+    fn armor_softens_one_step_and_undo_puts_both_back() {
+        use crate::net::protocol::ClientMsg;
+        use crate::systems::{load_systems, CharacterKind};
+        let catalog = load_systems(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems").as_path());
+        let system = catalog.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Ada".into(), kind: CharacterKind::Pc }, Some(system))
+            .unwrap();
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Bandit".into(), kind: CharacterKind::Adversary }, Some(system))
+            .unwrap();
+        let ada = table.characters[0].id.clone();
+        let bandit = table.characters[1].id.clone();
+        table.characters[0].numbers.insert("evasion".into(), 10);
+        table.characters[0].numbers.insert("hp".into(), 0);
+        table.characters[0].numbers.insert("armorscore".into(), 2);
+        table.characters[0].numbers.insert("armor".into(), 0);
+        table.characters[0].numbers.insert("major".into(), 7);
+        table.characters[0].numbers.insert("severe".into(), 13);
+        table.characters[1].numbers.insert("attack".into(), 1);
+        table.characters[1].texts.insert("atkdamage".into(), "1d8".into());
+
+        let attack = table.prepare_attack(&gm(), &bandit, &ada, 2, 0).unwrap();
+        assert_eq!(attack.formula, "1d20+1+2");
+        assert_eq!(attack.label, "Bandit attacks Ada");
+        assert_eq!(attack.contest.defense_name, "Evasion");
+        assert_eq!(attack.contest.defense, 10);
+        assert!(!attack.damage);
+
+        let blow = table.receive_blow(&ada, 12, system).unwrap();
+        assert_eq!(blow.step, "Major");
+        assert_eq!(blow.marks, 2);
+        assert!(table.strike.is_some());
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+
+        table
+            .command(&gm(), ClientMsg::AnswerStrike { use_armor: true }, Some(system))
+            .unwrap();
+        assert!(table.strike.is_none());
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(1));
+        assert_eq!(table.characters[0].numbers.get("armor").copied(), Some(1));
+
+        table.command(&gm(), ClientMsg::Undo, Some(system)).unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+        assert_eq!(table.characters[0].numbers.get("armor").copied(), Some(0));
+        assert!(table.undo.is_none());
+
+        table.characters[0].numbers.insert("armorscore".into(), 0);
+        let bare = table.receive_blow(&ada, 7, system).unwrap();
+        assert_eq!(bare.marks, 2);
+        assert!(table.strike.is_none());
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(2));
+        table.command(&gm(), ClientMsg::Undo, Some(system)).unwrap();
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+    }
+
+    #[test]
     fn switching_scene_or_campaign_keeps_tokens_and_fog() {
         use crate::net::protocol::ClientMsg;
         let mut table = Table::new();
@@ -1892,6 +2296,59 @@ mod tests {
         assert_eq!(table.campaign.name, "Campaign");
         assert_eq!(table.tokens[0].id, "hero");
         assert!(table.explored.get(0, 0));
+    }
+
+    #[test]
+    fn deleting_the_open_campaign_drops_its_scenes_and_cast() {
+        use crate::net::protocol::ClientMsg;
+        let mut table = Table::new();
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Ada".into(), kind: CharacterKind::Pc }, None)
+            .unwrap();
+        table
+            .command(&gm(), ClientMsg::CreateScene { name: "Hall".into(), width: 12, height: 12 }, None)
+            .unwrap();
+        let open = table.campaign.id.clone();
+        table
+            .command(&gm(), ClientMsg::CreateCampaign { name: "Next".into(), system_id: None }, None)
+            .unwrap();
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Marker".into(),
+                    x: 1.0,
+                    y: 1.0,
+                    owner_id: None,
+                    hidden: false,
+                    vision_radius: 0.0,
+                    grants_vision: false,
+                    color: "#d4a656".into(),
+                    character_id: None,
+                },
+                None,
+            )
+            .unwrap();
+        table.command(&gm(), ClientMsg::SwitchCampaign { campaign_id: open.clone() }, None).unwrap();
+        assert_eq!(table.characters.len(), 1);
+        assert_eq!(table.scene.as_ref().unwrap().name, "Hall");
+
+        table.command(&gm(), ClientMsg::DeleteCampaign { campaign_id: open.clone() }, None).unwrap();
+        assert_eq!(table.campaign.name, "Next");
+        assert_eq!(table.tokens.len(), 1);
+        assert!(table.characters.is_empty());
+        assert!(table.scene.is_none());
+        assert!(table.shelved.iter().all(|item| item.campaign.id != open));
+
+        let only = table.campaign.id.clone();
+        table.command(&gm(), ClientMsg::DeleteCampaign { campaign_id: only.clone() }, None).unwrap();
+        assert_ne!(table.campaign.id, only);
+        assert_eq!(table.campaign.name, "Campaign");
+        assert!(table.campaign.system_id.is_none());
+        assert!(table.shelved.is_empty());
+        assert!(table.characters.is_empty());
+        assert!(table.scene.is_none());
+        assert!(table.tokens.is_empty());
     }
 
     #[test]

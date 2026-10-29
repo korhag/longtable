@@ -29,10 +29,13 @@ pub struct SimFrame {
 
 pub const KEYFRAME_DT: f32 = 1.0 / 30.0;
 const STEP_DT: f32 = 1.0 / 60.0;
-const MAX_STEPS: usize = 60 * 7;
+const MAX_STEPS: usize = 60 * 3;
 const FLAT_ALIGNMENT: f32 = 0.82;
 
 pub fn simulate(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<ThrownDie> {
+    if formula.dice().is_empty() {
+        return Vec::new();
+    }
     let mut last = Vec::new();
     for _attempt in 0..3 {
         last = throw_once(formula, rng);
@@ -95,9 +98,9 @@ fn throw_once(formula: &RollFormula, rng: &mut impl rand::RngExt) -> Vec<ThrownD
                 rng.random_range(-9.0..9.0),
                 rng.random_range(-9.0..9.0),
             ))
-            .linear_damping(0.18)
-            .angular_damping(0.22)
-            .ccd_enabled(true)
+            .linear_damping(0.32)
+            .angular_damping(0.4)
+            .ccd_enabled(false)
             .can_sleep(true)
             .build();
         let handle = bodies.insert(body);

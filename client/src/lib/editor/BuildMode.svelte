@@ -67,8 +67,8 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="flex flex-col gap-1 text-xs">
-  <p class="text-xs text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. R or right-click mirrors a prop. Erase lifts a wall, a prop, or a light.</p>
+<div class="flex flex-col gap-1 text-sm">
+  <p class="text-sm text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. R or right-click mirrors a prop. Erase lifts a wall, a prop, or a light.</p>
   <div class="mt-2 flex gap-1.5">
     <button class="btn quiet flex-1" type="button" onclick={() => fileInput.click()}>Import map</button>
     <input
@@ -98,25 +98,25 @@
   <div class="mt-2 flex gap-1.5">
     <input class="field w-16" type="number" min="5" max="200" bind:value={width} aria-label="Width" />
     <input class="field w-16" type="number" min="5" max="200" bind:value={height} aria-label="Height" />
-    <button class="btn quiet text-xs" type="button" onclick={() => void editor.create(Math.round(width), Math.round(height), name)}>New</button>
+    <button class="btn quiet text-sm" type="button" onclick={() => void editor.create(Math.round(width), Math.round(height), name)}>New</button>
   </div>
   <input class="field mt-2" bind:value={name} maxlength="48" aria-label="Draft name" />
   <div class="mt-2 flex gap-1.5">
-    <button class="btn quiet flex-1 text-xs" type="button" onclick={() => editor.undo()}>Undo</button>
-    <button class="btn quiet flex-1 text-xs" type="button" onclick={() => editor.redo()}>Redo</button>
-    <button class="btn quiet flex-1 text-xs" type="button" disabled={!editor.draft} onclick={() => void editor.remove()}>Delete</button>
+    <button class="btn quiet flex-1 text-sm" type="button" onclick={() => editor.undo()}>Undo</button>
+    <button class="btn quiet flex-1 text-sm" type="button" onclick={() => editor.redo()}>Redo</button>
+    <button class="btn quiet flex-1 text-sm" type="button" disabled={!editor.draft} onclick={() => void editor.remove()}>Delete</button>
   </div>
 
   <div class="mt-3 grid grid-cols-4 gap-1.5">
     {#each tools as item (item.id)}
-      <button class="btn quiet text-xs" class:active={editor.tool === item.id} type="button" onclick={() => (editor.tool = item.id)}>{item.name}</button>
+      <button class="btn quiet text-sm" class:active={editor.tool === item.id} type="button" onclick={() => (editor.tool = item.id)}>{item.name}</button>
     {/each}
   </div>
 
   {#if editor.tool === 'theme' || editor.tool === 'terrain' || editor.tool === 'erase'}
     <div class="mt-3 flex gap-1.5">
       {#each BRUSH_SIZES as size (size)}
-        <button class="btn quiet flex-1 text-xs" class:active={editor.brush === size} type="button" onclick={() => (editor.brush = size)}>{size}</button>
+        <button class="btn quiet flex-1 text-sm" class:active={editor.brush === size} type="button" onclick={() => (editor.brush = size)}>{size}</button>
       {/each}
     </div>
   {/if}
@@ -124,13 +124,13 @@
   {#if editor.tool === 'theme'}
     <div class="mt-3 flex flex-col gap-1">
       {#each themes as theme (theme.id)}
-        <button class="btn quiet text-left text-xs" class:active={editor.themeId === theme.id} type="button" onclick={() => editor.chooseTheme(theme.id)}>{theme.name}</button>
+        <button class="btn quiet text-left text-sm" class:active={editor.themeId === theme.id} type="button" onclick={() => editor.chooseTheme(theme.id)}>{theme.name}</button>
       {/each}
     </div>
   {:else if editor.tool === 'terrain'}
     <div class="mt-3 flex flex-col gap-1">
       {#each terrains as terrain (terrain.id)}
-        <button class="btn quiet flex items-center gap-2 text-left text-xs" class:active={editor.terrainId === terrain.id} type="button" onclick={() => (editor.terrainId = terrain.id)}>
+        <button class="btn quiet flex items-center gap-2 text-left text-sm" class:active={editor.terrainId === terrain.id} type="button" onclick={() => (editor.terrainId = terrain.id)}>
           <span class="inline-block h-3 w-3 rounded-full" style={`background:${terrain.swatch}`}></span>{terrain.name}
         </button>
       {/each}
@@ -138,32 +138,32 @@
   {:else if editor.tool === 'wall'}
     <div class="mt-3 flex flex-col gap-1">
       {#each walls as wall (wall.id)}
-        <button class="btn quiet text-left text-xs" class:active={editor.wallId === wall.id} type="button" onclick={() => (editor.wallId = wall.id)}>{wall.name}</button>
+        <button class="btn quiet text-left text-sm" class:active={editor.wallId === wall.id} type="button" onclick={() => (editor.wallId = wall.id)}>{wall.name}</button>
       {/each}
     </div>
   {:else if editor.tool === 'door'}
     <div class="mt-3 flex flex-col gap-1">
       {#each doors as door (door.id)}
-        <button class="btn quiet text-left text-xs" class:active={editor.doorId === door.id} type="button" onclick={() => (editor.doorId = door.id)}>{door.name}</button>
+        <button class="btn quiet text-left text-sm" class:active={editor.doorId === door.id} type="button" onclick={() => (editor.doorId = door.id)}>{door.name}</button>
       {/each}
     </div>
   {:else if editor.tool === 'prop'}
     <div class="mt-3 flex flex-col gap-1">
       {#each props as prop (prop.id)}
-        <button class="btn quiet text-left text-xs" class:active={editor.propId === prop.id} type="button" onclick={() => (editor.propId = prop.id)}>{prop.name}</button>
+        <button class="btn quiet text-left text-sm" class:active={editor.propId === prop.id} type="button" onclick={() => (editor.propId = prop.id)}>{prop.name}</button>
       {/each}
     </div>
   {:else if editor.tool === 'decal'}
     <div class="mt-3 flex flex-col gap-1">
       {#each decals as decal (decal.id)}
-        <button class="btn quiet text-left text-xs" class:active={editor.decalId === decal.id} type="button" onclick={() => (editor.decalId = decal.id)}>{decal.name}</button>
+        <button class="btn quiet text-left text-sm" class:active={editor.decalId === decal.id} type="button" onclick={() => (editor.decalId = decal.id)}>{decal.name}</button>
       {/each}
     </div>
   {:else if editor.tool === 'light'}
-    <p class="mt-3 text-[11px] text-[var(--color-parchment)]/60">Click a square. The pool is how far the marker reaches, in squares. A second click on the same square updates it.</p>
+    <p class="mt-3 text-sm text-[var(--color-parchment)]/60">Click a square. The pool is how far the marker reaches, in squares. A second click on the same square updates it.</p>
     <div class="mt-2 flex gap-1.5">
       {#each lightRanges as item (item.range)}
-        <button class="btn quiet flex-1 text-xs" class:active={editor.lightRange === item.range} type="button" onclick={() => (editor.lightRange = item.range)}>{item.name}</button>
+        <button class="btn quiet flex-1 text-sm" class:active={editor.lightRange === item.range} type="button" onclick={() => (editor.lightRange = item.range)}>{item.name}</button>
       {/each}
     </div>
     <div class="mt-2 flex gap-1.5">
@@ -181,9 +181,9 @@
 
   <button class="btn mt-3 w-full" type="button" disabled={!editor.draft} onclick={() => void editor.publish()}>Put on the table</button>
   {#if table.scene?.layout}
-    <button class="btn quiet mt-1.5 w-full text-xs" type="button" onclick={() => void editor.copyLive()}>Copy the table</button>
+    <button class="btn quiet mt-1.5 w-full text-sm" type="button" onclick={() => void editor.copyLive()}>Copy the table</button>
   {/if}
   {#if editor.note}
-    <p class="mt-2 text-[11px] text-[var(--color-parchment)]/70">{editor.note}</p>
+    <p class="mt-2 text-sm text-[var(--color-parchment)]/70">{editor.note}</p>
   {/if}
 </div>

@@ -1,0 +1,15 @@
+---
+description: Keep on-screen text at a readable size
+alwaysApply: true
+---
+
+# Type size
+
+Text a person reads in the app is at least 14px (`text-sm`, `0.875rem`). That includes labels, notes, kickers, and buttons.
+
+- Use `text-sm` or larger. `text-base` is the comfortable size for a sentence.
+- Do not use `text-xs`, `text-[13px]` or anything smaller, or a `font-size` under `0.875rem`.
+- Do not use the `<small>` element. It shrinks the line under the size you set.
+- The panel size is `--text` in `client/src/app.css`. Leave it at `0.875rem` or larger.
+
+Glyphs drawn on the map or on a die face can stay sized for that drawing. They are not UI copy.

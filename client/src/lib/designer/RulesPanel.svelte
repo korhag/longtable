@@ -27,7 +27,7 @@
   }
 </script>
 
-<div class="flex min-h-full flex-col gap-3 text-[12px]">
+<div class="flex min-h-full flex-col gap-3 text-sm">
   <div class="flex flex-col gap-2">
     {#if designer.draft}
       <p class="tracking-[0.14em] text-[var(--color-gold)] uppercase">{designer.creating ? 'Creating' : 'Editing'}</p>

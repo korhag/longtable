@@ -77,7 +77,7 @@
     border: 1px solid rgba(255, 236, 210, 0.2);
     background: #1c140e;
     font-family: var(--font-display);
-    font-size: 0.72rem;
+    font-size: 0.875rem;
     color: #f6efe4;
     white-space: nowrap;
   }

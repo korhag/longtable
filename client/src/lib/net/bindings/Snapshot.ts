@@ -8,10 +8,19 @@ import type { Listing } from "./Listing.ts";
 import type { PlayerInfo } from "./PlayerInfo.ts";
 import type { RollLogEntry } from "./RollLogEntry.ts";
 import type { SceneView } from "./SceneView.ts";
+import type { StrikeOffer } from "./StrikeOffer.ts";
 import type { TokenView } from "./TokenView.ts";
 
 export type Snapshot = { you: PlayerInfo, players: Array<PlayerInfo>, scene: SceneView | null, tokens: Array<TokenView>, doors: Array<DoorView>, fog: FogView, rolls: Array<RollLogEntry>, viewAs: string | null, campaign: Campaign, characters: Array<Character>, 
 /**
  * Other campaigns and this campaign's scenes. Empty for a player.
  */
-campaigns: Array<Listing>, scenes: Array<Listing>, fear: number, figures: Array<Figure>, };
+campaigns: Array<Listing>, scenes: Array<Listing>, 
+/**
+ * Daggerheart Fear. Zero on any other system, and on a save from before it existed.
+ */
+fear: number, figures: Array<Figure>, canUndo: boolean, 
+/**
+ * The armor question, when this viewer is allowed to answer it.
+ */
+strike: StrikeOffer | null, };

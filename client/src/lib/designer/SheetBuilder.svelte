@@ -84,7 +84,7 @@
 {#if designer.draft && sheet && sample}
   <div class="grid min-h-0 grid-cols-1 gap-3 xl:grid-cols-2">
     <div class="flex min-h-0 flex-col gap-2">
-      <p class="text-[12px] text-[var(--color-parchment)]/60">
+      <p class="text-sm text-[var(--color-parchment)]/60">
         {kind === 'adversary' ? 'Arrange the adversary card.' : `Arrange the ${kind === 'pc' ? 'PC' : 'NPC'} sheet.`}
         Drag a thing, or add one to a section.
       </p>
@@ -146,7 +146,7 @@
       <button class="btn quiet" type="button" onclick={addSection}>Add a section</button>
 
       <div class="rounded-lg border border-[rgba(212,166,86,0.3)] p-2">
-        <p class="text-[12px] tracking-[0.14em] text-[var(--color-gold)] uppercase">Character bar</p>
+        <p class="text-sm tracking-[0.14em] text-[var(--color-gold)] uppercase">Character bar</p>
         <p class="mt-1 text-[var(--color-parchment)]/60">These show on the bar while this kind of character is selected.</p>
         <p class="mt-2">Resources</p>
         {#each designer.draft.fields.filter((field) => (field.kind === 'pool' || field.kind === 'number') && sheet.sections.some((section) => section.fields.includes(field.id))) as field (field.id)}
@@ -172,7 +172,7 @@
     </div>
 
     <div class="min-h-0 overflow-auto rounded-xl border border-[rgba(212,166,86,0.3)] p-3">
-      <p class="mb-2 text-[12px] tracking-[0.14em] text-[var(--color-gold)] uppercase">How it looks</p>
+      <p class="mb-2 text-sm tracking-[0.14em] text-[var(--color-gold)] uppercase">How it looks</p>
       <CharacterSheet character={sample} system={designer.draft} preview onpreview={preview} />
     </div>
   </div>

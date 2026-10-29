@@ -62,7 +62,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-1 text-[12px]">
+<div class="flex flex-col gap-1 text-sm">
   <span class="text-[var(--color-parchment)]/70">{field.name}</span>
   {#if field.kind === 'text'}
     <textarea class="field min-h-16" value={character.texts[field.id] ?? ''} onchange={(event) => ontext(field.id, event.currentTarget.value)}></textarea>

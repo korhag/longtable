@@ -116,6 +116,46 @@ pub struct RollEvent {
     pub dice: Vec<PlayedDie>,
     #[serde(default)]
     pub outcome: Option<RollOutcome>,
+    /// Who this roll was against, when it was an attack or the damage that followed.
+    #[serde(default)]
+    pub contest: Option<Contest>,
+}
+
+/// An attack, or the damage roll that followed a hit.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct Contest {
+    pub attacker_id: String,
+    pub attacker_name: String,
+    pub target_id: String,
+    pub target_name: String,
+    pub defense_name: String,
+    pub defense: i32,
+    /// `hit` or `miss` on an attack. Empty on a damage roll.
+    pub verdict: Option<String>,
+    pub blow: Option<Blow>,
+}
+
+/// What a damage total does to the target before armor.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct Blow {
+    pub step: String,
+    pub marks: i32,
+}
+
+/// The armor question waiting on the defender, or the GM when nobody owns them.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct StrikeOffer {
+    pub target_id: String,
+    pub target_name: String,
+    pub step: String,
+    pub marks: i32,
+    pub with_armor: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -312,6 +352,8 @@ pub struct RollLogEntry {
     pub created_at: u64,
     #[serde(default)]
     pub outcome: Option<RollOutcome>,
+    #[serde(default)]
+    pub contest: Option<Contest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -373,6 +415,11 @@ pub struct Snapshot {
     pub fear: u8,
     #[serde(default)]
     pub figures: Vec<Figure>,
+    #[serde(default)]
+    pub can_undo: bool,
+    /// The armor question, when this viewer is allowed to answer it.
+    #[serde(default)]
+    pub strike: Option<StrikeOffer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -513,6 +560,26 @@ pub enum ClientMsg {
         #[serde(default)]
         minus: i32,
     },
+    Attack {
+        attacker_id: String,
+        target_id: String,
+        #[serde(default)]
+        plus: i32,
+        #[serde(default)]
+        minus: i32,
+    },
+    Strike {
+        attacker_id: String,
+        target_id: String,
+        #[serde(default)]
+        plus: i32,
+        #[serde(default)]
+        minus: i32,
+    },
+    AnswerStrike {
+        use_armor: bool,
+    },
+    Undo,
     CreateCampaign {
         name: String,
         system_id: Option<String>,

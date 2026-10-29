@@ -21,12 +21,12 @@
 {#if token}
   <section class="glass pointer-events-auto w-full rounded-2xl p-3">
     <p class="display text-lg">{token.name}</p>
-    <p class="text-[11px] text-[var(--color-parchment)]/60">
+    <p class="text-sm text-[var(--color-parchment)]/60">
       {token.hidden ? 'Hidden from players' : 'On the table'} · sight {token.visionRadius}
     </p>
 
     {#if gm}
-      <label class="mt-3 block text-[10px] tracking-wide text-[var(--color-gold)]/70 uppercase">Name
+      <label class="mt-3 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Name
         <input
           class="field mt-1"
           value={token.name}
@@ -47,7 +47,7 @@
             })}
         />
       </label>
-      <label class="mt-2 block text-[10px] tracking-wide text-[var(--color-gold)]/70 uppercase">Owner
+      <label class="mt-2 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Owner
         <select
           class="field mt-1"
           value={token.ownerId ?? ''}
@@ -74,7 +74,7 @@
           {/each}
         </select>
       </label>
-      <label class="mt-2 block text-[10px] tracking-wide text-[var(--color-gold)]/70 uppercase">Character
+      <label class="mt-2 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Character
         <select
           class="field mt-1"
           value={token.characterId ?? ''}
@@ -101,7 +101,7 @@
           {/each}
         </select>
       </label>
-      <label class="mt-2 block text-[10px] tracking-wide text-[var(--color-gold)]/70 uppercase">Vision, in squares
+      <label class="mt-2 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Vision, in squares
         <input
           class="field mt-1"
           type="number"
@@ -148,7 +148,7 @@
           ></button>
         {/each}
       </div>
-      <div class="mt-3 flex flex-wrap gap-2 text-xs">
+      <div class="mt-3 flex flex-wrap gap-2 text-sm">
         <button
           class="btn quiet"
           type="button"
@@ -190,7 +190,7 @@
     {/if}
 
     {#if gm || token.ownerId === table.playerId}
-      <label class="btn quiet mt-3 block text-center text-xs">
+      <label class="btn quiet mt-3 block text-center text-sm">
         Portrait
         <input
           class="hidden"

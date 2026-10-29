@@ -18,6 +18,7 @@ import type { Role } from './net/bindings/Role.ts';
 import type { RollEvent } from './net/bindings/RollEvent.ts';
 import type { RollLogEntry } from './net/bindings/RollLogEntry.ts';
 import type { SceneView } from './net/bindings/SceneView.ts';
+import type { StrikeOffer } from './net/bindings/StrikeOffer.ts';
 import type { ServerMsg } from './net/bindings/ServerMsg.ts';
 import type { SystemDef } from './net/bindings/SystemDef.ts';
 import type { TokenView } from './net/bindings/TokenView.ts';
@@ -60,6 +61,8 @@ class TableStore {
   menu = $state<{ tokenId: string; x: number; y: number } | null>(null);
   fear = $state(0);
   figures = $state<Figure[]>([]);
+  canUndo = $state(false);
+  strike = $state<StrikeOffer | null>(null);
   tool = $state<Tool>('select');
   viewId = $state('');
   clock = new ClockSync();
@@ -100,6 +103,8 @@ class TableStore {
         this.role = message.you.role;
         this.fear = message.fear;
         this.figures = message.figures;
+        this.canUndo = message.canUndo;
+        this.strike = message.strike;
         if (this.selectedTokenId && !message.tokens.some((token) => token.id === this.selectedTokenId)) {
           this.selectedTokenId = null;
         }
@@ -109,7 +114,8 @@ class TableStore {
         if (this.hoverTokenId && !message.tokens.some((token) => token.id === this.hoverTokenId)) {
           this.hoverTokenId = null;
         }
-        if (this.menu && !message.tokens.some((token) => token.id === this.menu.tokenId)) {
+        const menu = this.menu;
+        if (menu && !message.tokens.some((token) => token.id === menu.tokenId)) {
           this.menu = null;
         }
         break;
@@ -198,6 +204,8 @@ class TableStore {
     this.menu = null;
     this.fear = 0;
     this.figures = [];
+    this.canUndo = false;
+    this.strike = null;
     this.viewId = '';
     this.framedScene = '';
     this.queue = [];

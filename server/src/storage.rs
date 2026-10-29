@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::map::Scene;
-use crate::session::state::{CampaignShelf, Player, SceneShelf, StoredRoll, Table, Token};
+use crate::session::state::{CampaignShelf, PendingStrike, Player, SceneShelf, StoredRoll, Table, Token, UndoStep};
 use crate::systems::{Campaign, Character};
 use crate::vision::Explored;
 
@@ -34,6 +34,10 @@ struct SaveFile {
     shelved: Vec<CampaignShelf>,
     #[serde(default)]
     fear: u8,
+    #[serde(default)]
+    strike: Option<PendingStrike>,
+    #[serde(default)]
+    undo: Option<UndoStep>,
 }
 
 pub fn load_into(table: &mut Table, data_dir: &Path) {
@@ -65,6 +69,8 @@ pub fn load_into(table: &mut Table, data_dir: &Path) {
             table.scenes = save.scenes;
             table.shelved = save.shelved;
             table.fear = save.fear;
+            table.strike = save.strike;
+            table.undo = save.undo;
             table.ensure_campaign();
             table.sync_fog_size();
             tracing::info!("restored {}", path.display());
@@ -93,6 +99,8 @@ pub fn write(table: &Table, data_dir: &Path) -> std::io::Result<()> {
         scenes: table.scenes.clone(),
         shelved: table.shelved.clone(),
         fear: table.fear,
+        strike: table.strike.clone(),
+        undo: table.undo.clone(),
     };
     std::fs::create_dir_all(data_dir)?;
     let path = data_dir.join("state.json");

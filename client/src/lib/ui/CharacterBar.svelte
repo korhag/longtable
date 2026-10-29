@@ -54,10 +54,85 @@
       minus: rollSetup.minus,
     });
   }
+
+  const targetToken = $derived(table.tokens.find((token) => token.id === table.targetTokenId) ?? null);
+
+  function signed(value: number) {
+    if (value > 0) return `+${value}`;
+    if (value < 0) return `${value}`;
+    return '+0';
+  }
+
+  function actionLabel(id: string, fallback: string) {
+    if (!character) return fallback;
+    if (id === 'damage') {
+      const name = (character.texts.primary ?? '').split('·')[0]?.trim();
+      const dice = (character.texts.damage ?? '').replace(/^flat:/, '').trim();
+      if (name && dice) return `${name} · ${dice}`;
+      if (dice) return dice;
+    }
+    if (id === 'atkdamage') {
+      const name = (character.texts.attackname ?? '').trim() || 'Damage';
+      const dice = (character.texts.atkdamage ?? '').replace(/^flat:/, '').trim();
+      return dice ? `${name} · ${dice}` : name;
+    }
+    if (id === 'attackroll') {
+      return targetToken ? `Attack ${targetToken.name}` : `Attack ${signed(character.numbers.attack ?? 0)}`;
+    }
+    return fallback;
+  }
+
+  function press(id: string) {
+    if (id !== 'attackroll') {
+      roll(id);
+      return;
+    }
+    if (preview || !character) return;
+    if (!targetToken?.characterId) {
+      table.error = 'Pick a target.';
+      return;
+    }
+    send({
+      type: 'attack',
+      attackerId: character.id,
+      targetId: targetToken.characterId,
+      plus: rollSetup.plus,
+      minus: rollSetup.minus,
+    });
+  }
+
+  const recent = $derived(
+    character
+      ? table.rolls
+          .filter((entry) => entry.contest?.verdict && (entry.contest.attackerId === character.id || entry.contest.targetId === character.id))
+          .slice(-3)
+          .reverse()
+      : [],
+  );
+
+  const strikeReady = $derived(
+    Boolean(table.strike) && (!table.activeRoll || (table.landedRollId === table.activeRoll.id && table.activeRoll.contest?.blow)),
+  );
+
+  function recentLine(attackerId: string, attackerName: string, targetName: string, verdict: string) {
+    const hit = verdict === 'hit' ? 'Hit' : 'Miss';
+    if (!character) return hit;
+    if (attackerId === character.id) return `You → ${targetName} · ${hit}`;
+    return `${attackerName} → you · ${hit}`;
+  }
 </script>
 
 {#if system && (character || gm)}
   <section class="glass pointer-events-auto rounded-2xl px-3 py-2">
+    {#if !preview && strikeReady && table.strike}
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <p class="text-sm">{table.strike.targetName} takes {table.strike.step} damage, {table.strike.marks} HP.</p>
+        <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => send({ type: 'answerStrike', useArmor: false })}>Take it</button>
+        <button class="btn px-2 py-1 text-sm" type="button" onclick={() => send({ type: 'answerStrike', useArmor: true })}>
+          Mark armor → {table.strike.withArmor} HP
+        </button>
+      </div>
+    {/if}
     <div class="flex items-center gap-2">
       {#if gm}
         <select
@@ -71,15 +146,18 @@
           {/each}
         </select>
         {#if guided}
-          <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => openCreation('pc')}>Create</button>
+          <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => openCreation('pc')}>Create</button>
         {:else}
-          <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
+          <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => send({ type: 'createCharacter', name: 'New character', kind: 'pc' })}>New</button>
         {/if}
       {:else if character}
         <p class="display text-base">{character.name}</p>
       {/if}
+      {#if !preview}
+        <button class="btn quiet ml-auto px-2 py-1 text-sm disabled:opacity-40" type="button" disabled={!table.canUndo} onclick={() => send({ type: 'undo' })}>Undo</button>
+      {/if}
       {#if character && !preview}
-        <button class="btn quiet ml-auto px-2 py-1 text-[12px]" type="button" onclick={openSheet}>Sheet</button>
+        <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={openSheet}>Sheet</button>
       {/if}
     </div>
 
@@ -88,7 +166,7 @@
         {#each sheet.toolbar.resources as id (id)}
           {@const field = fieldOf(id)}
           {#if field && (field.kind === 'pool' || field.kind === 'number')}
-            <div class="flex items-center gap-1 rounded-lg border border-[rgba(212,166,86,0.3)] px-1.5 py-1 text-[12px]">
+            <div class="flex items-center gap-1 rounded-lg border border-[rgba(212,166,86,0.3)] px-1.5 py-1 text-sm">
               <span>{field.name}</span>
               <button type="button" aria-label={`Decrease ${field.name}`} onclick={() => adjust(id, -1)}>−</button>
               <span class="display text-sm">{character.numbers[id] ?? 0}</span>
@@ -101,10 +179,19 @@
           {@const action = system.actions.find((item) => item.id === id)}
           {@const dice = system.fields.find((item) => item.id === id && item.kind === 'dice')}
           {#if action || dice}
-            <button class="btn quiet px-2 py-1 text-[12px]" type="button" onclick={() => roll(id)}>{action?.name ?? dice?.name}</button>
+            <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => press(id)}>{actionLabel(id, action?.name ?? dice?.name ?? id)}</button>
           {/if}
         {/each}
       </div>
+      {#if recent.length > 0}
+        <p class="mt-2 text-sm text-[var(--color-parchment)]/75">
+          {#each recent as entry (entry.id)}
+            {#if entry.contest?.verdict}
+              <span class="mr-3">{recentLine(entry.contest.attackerId, entry.contest.attackerName, entry.contest.targetName, entry.contest.verdict)}</span>
+            {/if}
+          {/each}
+        </p>
+      {/if}
     {/if}
   </section>
 {/if}

@@ -50,7 +50,7 @@
     { "id": "motives", "name": "Motives", "kind": "text", "textDefault": "" },
     { "id": "features", "name": "Features", "kind": "text", "textDefault": "" },
     { "id": "subclass", "name": "Subclass", "kind": "text", "textDefault": "" },
-    { "id": "pronouns", "name": "Pronouns", "kind": "text", "textDefault": "" },
+    { "id": "gender", "name": "Gender", "kind": "choice", "options": ["Male", "Female"], "textDefault": "" },
     { "id": "description", "name": "Description", "kind": "text", "textDefault": "" },
     { "id": "domains", "name": "Domains", "kind": "text", "textDefault": "" },
     { "id": "feature", "name": "Class feature", "kind": "text", "textDefault": "" },
@@ -82,7 +82,7 @@
   "sheets": {
     "pc": {
       "sections": [
-        { "title": "Identity", "columns": 2, "fields": ["class", "subclass", "ancestry", "community", "pronouns", "level"] },
+        { "title": "Identity", "columns": 2, "fields": ["class", "subclass", "ancestry", "community", "gender", "level"] },
         { "title": "Traits", "columns": 3, "fields": ["agility", "strength", "finesse", "instinct", "presence", "knowledge"] },
         { "title": "Defense", "columns": 3, "fields": ["evasion", "armorscore", "proficiency", "hpmax", "stressmax"] },
         { "title": "Thresholds", "columns": 1, "fields": ["thresholds"] },

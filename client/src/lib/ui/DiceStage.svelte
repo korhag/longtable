@@ -78,7 +78,11 @@
     <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" onclick={dismiss}></canvas>
     {#if showing}
       <button class="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left" type="button" onclick={dismiss}>
-        <p class="text-sm">{showing.rollerName} · {showing.label || showing.formula}</p>
+        {#if showing.contest}
+          <p class="text-base">{showing.contest.attackerName} {showing.contest.blow ? 'damages' : 'attacks'} {showing.contest.targetName}</p>
+        {:else}
+          <p class="text-sm">{showing.rollerName} · {showing.label || showing.formula}</p>
+        {/if}
         {#if landed}
           <span class="ml-auto flex flex-wrap items-center justify-end gap-1.5">
             {#each showing.dice as die, index (`${die.sides}-${die.tag}-${index}`)}
@@ -87,7 +91,7 @@
                 class="inline-flex items-baseline gap-1 rounded-full px-2 py-0.5"
                 style={`background:${look.body};color:${look.ink}`}
               >
-                <span class="text-xs tracking-wide">{chipName(die.tag, die.sides)}</span>
+                <span class="text-sm tracking-wide">{chipName(die.tag, die.sides)}</span>
                 <span class="display text-lg leading-none">{chipText(die.sign, die.value)}</span>
               </span>
             {/each}
@@ -97,12 +101,22 @@
               </span>
             {/if}
             <span class="display text-3xl text-[var(--color-gold-bright)]">= {showing.total}</span>
+            {#if showing.contest?.verdict}
+              <span class="display text-2xl {showing.contest.verdict === 'hit' ? 'text-[var(--color-gold-bright)]' : 'text-[#e7a090]'}">
+                {showing.contest.verdict === 'hit' ? 'Hit' : 'Miss'}
+              </span>
+              <span class="text-sm">{showing.total} vs {showing.contest.defenseName} {showing.contest.defense}</span>
+            {:else if showing.contest?.blow}
+              <span class="text-base">
+                {showing.contest.blow.marks > 0 ? `${showing.contest.blow.step} · ${showing.contest.blow.marks} HP` : 'No mark'}
+              </span>
+            {/if}
             {#if showing.outcome}
               <span class="text-sm text-[var(--color-gold-bright)]">{showing.outcome.label}</span>
             {/if}
           </span>
         {:else}
-          <p class="ml-auto text-xs tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
+          <p class="ml-auto text-sm tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
         {/if}
       </button>
     {/if}

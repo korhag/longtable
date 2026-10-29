@@ -4,5 +4,6 @@ import type { DieMesh } from "./DieMesh";
 import type { Role } from "./Role";
 import type { RollEvent } from "./RollEvent";
 import type { Snapshot } from "./Snapshot";
+import type { SystemDef } from "./SystemDef";
 
-export type ServerMsg = { "type": "welcome", playerId: string, role: Role, sessionToken: string, serverTime: bigint, dice: Array<DieMesh>, } | { "type": "pong", clientTime: bigint, serverTime: bigint, } | { "type": "snapshot" } & Snapshot | { "type": "roll" } & RollEvent | { "type": "concealed" } & ConcealedRoll | { "type": "error", message: string, };
+export type ServerMsg = { "type": "welcome", playerId: string, role: Role, sessionToken: string, serverTime: bigint, dice: Array<DieMesh>, } | { "type": "pong", clientTime: bigint, serverTime: bigint, } | { "type": "snapshot" } & Snapshot | { "type": "roll" } & RollEvent | { "type": "concealed" } & ConcealedRoll | { "type": "error", message: string, } | { "type": "kicked", message: string, } | { "type": "systems", systems: Array<SystemDef>, };

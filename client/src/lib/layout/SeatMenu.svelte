@@ -17,8 +17,8 @@
 <div use:portal>
   <button class="menu-shade" type="button" aria-label="Close seat menu" onclick={onclose} oncontextmenu={(event) => { event.preventDefault(); onclose(); }}></button>
   <div class="glass rounded-2xl p-2 text-left" style={box}>
-    <p class="truncate px-2 py-1 text-xs text-[var(--color-parchment)]/70">{name}</p>
-    <button class="w-full rounded-lg px-2 py-1 text-left text-xs text-[#e7a090] hover:bg-white/5" type="button" onclick={onkick}>Kick</button>
+    <p class="truncate px-2 py-1 text-sm text-[var(--color-parchment)]/70">{name}</p>
+    <button class="w-full rounded-lg px-2 py-1 text-left text-sm text-[#e7a090] hover:bg-white/5" type="button" onclick={onkick}>Kick</button>
   </div>
 </div>
 

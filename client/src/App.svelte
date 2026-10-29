@@ -249,7 +249,7 @@
     {/if}
 
     {#if measureLabel}
-      <p class="pointer-events-none fixed z-[var(--z-float)] rounded-full bg-[#1c140e]/90 px-2 py-1 text-xs text-[var(--color-gold-bright)]" style={`left:${measureAt.x + 14}px;top:${measureAt.y + 14}px`}>
+      <p class="pointer-events-none fixed z-[var(--z-float)] rounded-full bg-[#1c140e]/90 px-2 py-1 text-sm text-[var(--color-gold-bright)]" style={`left:${measureAt.x + 14}px;top:${measureAt.y + 14}px`}>
         {measureLabel}
       </p>
     {/if}

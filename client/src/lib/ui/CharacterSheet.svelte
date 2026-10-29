@@ -44,15 +44,15 @@
   {#if card}
     <header>
       <p class="display text-lg">{character.name}</p>
-      {#if typeLine}<p class="text-[12px] tracking-[0.14em] text-[var(--color-gold)] uppercase">{typeLine}</p>{/if}
+      {#if typeLine}<p class="text-sm tracking-[0.14em] text-[var(--color-gold)] uppercase">{typeLine}</p>{/if}
     </header>
   {/if}
   {#if sheet.sections.length === 0}
-    <p class="text-[12px] text-[var(--color-parchment)]/50">Nothing on this sheet yet.</p>
+    <p class="text-sm text-[var(--color-parchment)]/50">Nothing on this sheet yet.</p>
   {/if}
   {#each sheet.sections as section, index (index)}
     <section>
-      <p class="text-[12px] tracking-[0.16em] text-[var(--color-gold)] uppercase">{section.title}</p>
+      <p class="text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">{section.title}</p>
       <div class="mt-1 grid gap-2" style={`grid-template-columns:repeat(${section.columns},minmax(0,1fr))`}>
         {#each section.fields as id (id)}
           {@const field = definition(id)}

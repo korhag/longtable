@@ -23,9 +23,9 @@
 <div use:portal>
   <button class="menu-shade" type="button" aria-label="Close duality options" onclick={onclose} oncontextmenu={(event) => { event.preventDefault(); onclose(); }}></button>
   <div class="glass overflow-auto rounded-2xl p-3 text-left" style={menuBox(anchor, 256)}>
-  <p class="text-[10px] tracking-[0.18em] text-[var(--color-gold)] uppercase">Duality</p>
+  <p class="text-sm tracking-[0.18em] text-[var(--color-gold)] uppercase">Duality</p>
   <div class="mt-2 flex items-center justify-between gap-2">
-    <span class="text-xs">Hope</span>
+    <span class="text-sm">Hope</span>
     <div class="flex gap-1">
       {#each dice as sides (sides)}
         <button class="die-choice" class:on={config.hope === sides} type="button" onclick={() => set({ hope: sides })}>d{sides}</button>
@@ -33,7 +33,7 @@
     </div>
   </div>
   <div class="mt-2 flex items-center justify-between gap-2">
-    <span class="text-xs">Fear</span>
+    <span class="text-sm">Fear</span>
     <div class="flex gap-1">
       {#each dice as sides (sides)}
         <button class="die-choice" class:on={config.fear === sides} type="button" onclick={() => set({ fear: sides })}>d{sides}</button>
@@ -44,7 +44,7 @@
     <button class="die-choice flex-1" class:on={config.edge === 'advantage'} type="button" onclick={() => chooseEdge('advantage')}>+1d6</button>
     <button class="die-choice flex-1" class:on={config.edge === 'disadvantage'} type="button" onclick={() => chooseEdge('disadvantage')}>−1d6</button>
   </div>
-  <button class="mt-3 text-xs text-[var(--color-parchment)]/70" type="button" onclick={() => onchange({ ...DEFAULT_DUALITY })}>Reset</button>
+  <button class="mt-3 text-sm text-[var(--color-parchment)]/70" type="button" onclick={() => onchange({ ...DEFAULT_DUALITY })}>Reset</button>
   </div>
 </div>
 
@@ -60,7 +60,7 @@
     border-radius: 0.5rem;
     border: 1px solid rgba(212, 166, 86, 0.3);
     padding: 0.25rem 0.55rem;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
   }
   .die-choice.on {
     background: rgba(255, 255, 255, 0.14);

@@ -523,9 +523,9 @@ pub fn field_ceiling(field: &FieldDef, numbers: &BTreeMap<String, i32>) -> i32 {
     field.max.unwrap_or(1000).max(0)
 }
 
-/// The marks of the highest step whose value is at most `amount`.
+/// The highest step whose value is at most `amount`, and how many marks it deals.
 /// Nothing is marked when the amount sits below every step.
-pub fn threshold_marks(field: &FieldDef, amount: i32, numbers: &BTreeMap<String, i32>) -> Option<i32> {
+pub fn threshold_blow(field: &FieldDef, amount: i32, numbers: &BTreeMap<String, i32>) -> Option<(String, i32)> {
     let mut best: Option<(&ThresholdStep, i32)> = None;
     for step in &field.steps {
         let value = numbers.get(&step.id).copied().unwrap_or(step.default);
@@ -539,7 +539,12 @@ pub fn threshold_marks(field: &FieldDef, amount: i32, numbers: &BTreeMap<String,
             }
         }
     }
-    best.map(|(step, _)| step.marks)
+    best.map(|(step, _)| (step.name.clone(), step.marks))
+}
+
+/// The marks of the highest step whose value is at most `amount`.
+pub fn threshold_marks(field: &FieldDef, amount: i32, numbers: &BTreeMap<String, i32>) -> Option<i32> {
+    threshold_blow(field, amount, numbers).map(|(_, marks)| marks)
 }
 
 #[cfg(test)]

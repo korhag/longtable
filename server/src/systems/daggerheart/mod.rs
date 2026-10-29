@@ -5,7 +5,11 @@
 //          or with Fear. This is the only place that knows that.
 // ------------------------------------------------------------
 
+mod attack;
+
 use crate::dice::{RollFormula, ThrownDie};
+
+pub use attack::{attack_formula, attack_hits, damage_formula, defense_of};
 
 use super::rules::{RollOutcome, Rules};
 

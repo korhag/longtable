@@ -52,9 +52,9 @@
 
 <div class="lobby fixed inset-0 grid place-items-center bg-[#100e0c]/80 p-6">
   <form class="glass w-full max-w-md rounded-3xl p-8" onsubmit={(event) => { event.preventDefault(); submit(); }}>
-    <p class="text-xs tracking-[0.28em] text-[var(--color-gold)] uppercase">Take a seat</p>
+    <p class="text-sm tracking-[0.28em] text-[var(--color-gold)] uppercase">Take a seat</p>
     <h1 class="display mt-2 text-4xl text-[var(--color-gold-bright)]">Game Table</h1>
-    <p class="mt-2 text-xs tracking-wide text-[var(--color-gold)]/80">v{VERSION} · {VERSION_NOTE}</p>
+    <p class="mt-2 text-sm tracking-wide text-[var(--color-gold)]/80">v{VERSION} · {VERSION_NOTE}</p>
     <p class="mt-3 text-sm leading-relaxed text-[var(--color-parchment)]/75">The table is ready to play.</p>
 
     {#if hostInfo}
@@ -65,10 +65,10 @@
       </div>
     {/if}
 
-    <label class="mt-6 block text-xs tracking-wide text-[var(--color-gold)]/80 uppercase">Name
+    <label class="mt-6 block text-sm tracking-wide text-[var(--color-gold)]/80 uppercase">Name
       <input class="field mt-1" bind:value={name} maxlength="24" autocomplete="nickname" />
     </label>
-    <label class="mt-3 block text-xs tracking-wide text-[var(--color-gold)]/80 uppercase">Table passphrase
+    <label class="mt-3 block text-sm tracking-wide text-[var(--color-gold)]/80 uppercase">Table passphrase
       <input class="field mt-1" type="password" bind:value={passphrase} autocomplete="current-password" />
     </label>
 
@@ -77,7 +77,7 @@
       I am the GM
     </label>
     {#if asGm}
-      <label class="mt-3 block text-xs tracking-wide text-[var(--color-gold)]/80 uppercase">GM key
+      <label class="mt-3 block text-sm tracking-wide text-[var(--color-gold)]/80 uppercase">GM key
         <input class="field mt-1" bind:value={gmKey} autocomplete="off" spellcheck="false" />
       </label>
     {/if}

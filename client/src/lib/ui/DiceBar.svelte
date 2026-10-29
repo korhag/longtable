@@ -84,7 +84,7 @@
     {/if}
     <div class="ml-auto">
       <button
-        class="btn quiet px-2 py-1 text-xs"
+        class="btn quiet px-2 py-1 text-sm"
         type="button"
         onclick={(event) => {
           if (savedOpen) {
@@ -124,15 +124,15 @@
   <div class="flex flex-col overflow-hidden rounded-lg border border-[rgba(212,166,86,0.3)]">
     {#each modes as mode (mode.id)}
       <button
-        class={`px-3 py-2 text-left text-xs ${rollSetup.visibility === mode.id ? 'bg-white/15' : ''}`}
+        class={`px-3 py-2 text-left text-sm ${rollSetup.visibility === mode.id ? 'bg-white/15' : ''}`}
         type="button"
         onclick={() => (rollSetup.visibility = mode.id)}
       >{mode.name}</button>
     {/each}
   </div>
   <div class="flex items-center gap-1.5">
-    <button class="btn quiet px-2 text-xs" type="button" onclick={() => sound.set(!sound.muted)}>{sound.muted ? 'Sound off' : 'Sound on'}</button>
-    <button class="btn quiet px-2 text-xs" type="button" onclick={clear}>Clear</button>
+    <button class="btn quiet px-2 text-sm" type="button" onclick={() => sound.set(!sound.muted)}>{sound.muted ? 'Sound off' : 'Sound on'}</button>
+    <button class="btn quiet px-2 text-sm" type="button" onclick={clear}>Clear</button>
     <button class="btn display ml-auto px-4 text-sm" type="button" onclick={roll}>Roll</button>
   </div>
 </div>

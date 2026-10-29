@@ -8,12 +8,14 @@
 
   import { onMount } from 'svelte';
 
+  import { rollSetup } from '../../lib/dice/rollSetup.svelte';
   import type { Figure } from '../../lib/net/bindings/Figure.ts';
   import type { TokenView } from '../../lib/net/bindings/TokenView.ts';
   import { send } from '../../lib/net/socket';
   import { systems } from '../../lib/systems/store.svelte';
   import { table } from '../../lib/table.svelte';
   import { attackFormula } from './attack';
+  import RuleBook from './RuleBook.svelte';
 
   let { aimPoint, onCenter }: {
     aimPoint: { x: number; y: number } | null;
@@ -26,6 +28,8 @@
   const STRESS_COLORS = ['#8a8478', '#7eb6e0', '#d4a656', '#d27b66', '#9d7ad6'];
 
   let menuEl = $state<HTMLDivElement | null>(null);
+  let book = $state(false);
+  const followed = new Set<string>();
 
   const gm = $derived(table.role === 'gm' && !table.viewAs);
   const party = $derived(table.figures.filter((figure) => figure.kind === 'pc'));
@@ -37,8 +41,18 @@
     return table.characters.find((item) => item.id === token?.characterId) ?? null;
   });
   const formula = $derived(attacker ? attackFormula(attacker) : null);
-  const targetName = $derived(table.tokens.find((token) => token.id === table.targetTokenId)?.name ?? '');
-  const showMenu = $derived(Boolean(table.menu && menuToken && (formula || gm)));
+  const targetToken = $derived(table.tokens.find((token) => token.id === table.targetTokenId) ?? null);
+  const targetName = $derived(targetToken?.name ?? '');
+  const showMenu = $derived(Boolean(table.menu && menuToken && ((formula && targetToken?.characterId) || gm)));
+
+  $effect(() => {
+    const roll = table.activeRoll;
+    if (!roll || roll.rollerId !== table.playerId || followed.has(roll.id)) return;
+    const contest = roll.contest;
+    if (!contest || contest.verdict !== 'hit' || contest.blow) return;
+    followed.add(roll.id);
+    send({ type: 'strike', attackerId: contest.attackerId, targetId: contest.targetId, plus: 0, minus: 0 });
+  });
 
   onMount(() => {
     const close = (event: PointerEvent) => {
@@ -88,12 +102,13 @@
   }
 
   function attack() {
-    if (!attacker || !formula) return;
+    if (!attacker || !targetToken?.characterId) return;
     send({
-      type: 'roll',
-      formula,
-      visibility: 'public',
-      label: targetName ? `Attack ${targetName}` : 'Attack',
+      type: 'attack',
+      attackerId: attacker.id,
+      targetId: targetToken.characterId,
+      plus: rollSetup.plus,
+      minus: rollSetup.minus,
     });
     table.menu = null;
   }
@@ -159,9 +174,9 @@
     </span>
     {#if labeled}
       <span class="min-w-0">
-        <span class="block max-w-36 truncate text-xs">{face.name}</span>
-        <span class="block text-xs text-[var(--color-gold-bright)]">Hope {face.hope ?? 0}</span>
-        <span class="block max-w-36 truncate text-xs">{face.health}</span>
+        <span class="block max-w-36 truncate text-sm">{face.name}</span>
+        <span class="block text-sm text-[var(--color-gold-bright)]">Hope {face.hope ?? 0}</span>
+        <span class="block max-w-36 truncate text-sm">{face.health}</span>
       </span>
     {/if}
   </button>
@@ -169,18 +184,24 @@
 
 <div class="pointer-events-none absolute inset-0">
   <div class="flex items-start gap-2 p-2">
-    <div class="pointer-events-auto flex max-w-[24rem] flex-wrap gap-1" aria-label="Fear">
-      {#each Array.from({ length: 12 }, (_, index) => index) as index (index)}
-        <button
-          type="button"
-          class="h-8 w-8 rounded-full border border-[#9d7ad6] disabled:opacity-100"
-          style={`background:${index < table.fear ? '#9d7ad6' : 'transparent'}`}
-          disabled={!gm}
-          aria-label={`Fear ${index + 1}${index < table.fear ? ', filled' : ''}`}
-          onclick={() => setFear(index)}
-        ></button>
-      {/each}
+    <div class="pointer-events-auto flex shrink-0 items-center gap-2 rounded-full border border-[#c4a2ee]/40 bg-[#120c18]/90 px-2.5 py-1 shadow-[0_10px_28px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]" aria-label="Fear">
+      <span class="pl-1 text-sm tracking-[0.2em] text-[#e4d4f8] uppercase">Fear</span>
+      <span class="flex flex-nowrap items-center gap-[5px]">
+        {#each Array.from({ length: 12 }, (_, index) => index) as index (index)}
+          <button
+            type="button"
+            class="h-[1.15rem] w-[1.15rem] shrink-0 rounded-full border transition disabled:opacity-100 enabled:hover:brightness-125 {index < table.fear
+              ? 'border-[#f4ecff] bg-[#b794f6] shadow-[0_0_8px_rgba(183,148,246,0.9),inset_0_1px_1px_rgba(255,255,255,0.55)]'
+              : 'border-[#9d7ad6]/75 bg-[#1c1228] shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]'}"
+            disabled={!gm}
+            aria-label={`Fear ${index + 1}${index < table.fear ? ', filled' : ''}`}
+            onclick={() => setFear(index)}
+          ></button>
+        {/each}
+      </span>
+      <span class="display min-w-[1.1rem] pr-0.5 text-center text-sm text-[#f2d48a]">{table.fear}</span>
     </div>
+    <button class="btn quiet pointer-events-auto px-2 py-1 text-sm" type="button" onclick={() => (book = true)}>Rules</button>
     {#if foes.length > 0}
       <div class="flex max-w-full gap-1 overflow-x-auto">
         {#each foes as face (face.tokenId)}
@@ -198,8 +219,12 @@
   {/if}
 </div>
 
+{#if book}
+  <RuleBook close={() => (book = false)} />
+{/if}
+
 {#if targetFace}
-  <div class="glass pointer-events-none fixed z-[var(--z-float)] w-44 rounded-lg px-3 py-2 text-xs" style={cardStyle(aimPoint)}>
+  <div class="glass pointer-events-none fixed z-[var(--z-float)] w-44 rounded-lg px-3 py-2 text-sm" style={cardStyle(aimPoint)}>
     <p class="truncate text-sm">{targetFace.name}</p>
     <p class="mt-1">{targetFace.health}</p>
     <p>{targetFace.stress}</p>
@@ -215,9 +240,9 @@
     tabindex="-1"
     oncontextmenu={(event) => event.preventDefault()}
   >
-    {#if formula}
+    {#if formula && targetToken?.characterId}
       <button class="btn quiet" type="button" role="menuitem" onclick={attack}>
-        {targetName ? `Attack ${targetName}` : 'Attack'}
+        Attack {targetName || 'target'}
       </button>
     {/if}
     {#if gm}

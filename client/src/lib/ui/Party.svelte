@@ -16,14 +16,14 @@
       </div>
       <div>
         <p class="text-sm leading-none">{player.name}</p>
-        <p class="mt-1 text-[10px] tracking-[0.16em] text-[var(--color-gold)]/80 uppercase">
+        <p class="mt-1 text-sm tracking-[0.16em] text-[var(--color-gold)]/80 uppercase">
           {player.role === 'gm' ? 'GM' : 'Player'}
           {#if player.id === table.playerId} · you{/if}
         </p>
       </div>
       {#if table.role === 'gm' && !table.viewAs && player.id !== table.playerId && !player.connected}
         <button
-          class="btn quiet px-2 py-1 text-[10px]"
+          class="btn quiet px-2 py-1 text-sm"
           type="button"
           onclick={() => send({ type: 'removePlayer', playerId: player.id })}
         >Dismiss</button>

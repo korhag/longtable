@@ -6,4 +6,4 @@ import type { RollEvent } from "./RollEvent.ts";
 import type { Snapshot } from "./Snapshot.ts";
 import type { SystemDef } from "./SystemDef.ts";
 
-export type ServerMsg = { "type": "welcome", playerId: string, role: Role, sessionToken: string, serverTime: bigint, dice: Array<DieMesh>, } | { "type": "pong", clientTime: bigint, serverTime: bigint, } | { "type": "snapshot" } & Snapshot | { "type": "roll" } & RollEvent | { "type": "concealed" } & ConcealedRoll | { "type": "error", message: string, } | { "type": "kicked", message: string, } | { "type": "systems", systems: Array<SystemDef>, };
+export type ServerMsg = { "type": "welcome", playerId: string, role: Role, sessionToken: string, serverTime: number, dice: Array<DieMesh>, } | { "type": "pong", clientTime: number, serverTime: number, } | { "type": "snapshot" } & Snapshot | { "type": "roll" } & RollEvent | { "type": "concealed" } & ConcealedRoll | { "type": "error", message: string, } | { "type": "kicked", message: string, } | { "type": "systems", systems: Array<SystemDef>, };

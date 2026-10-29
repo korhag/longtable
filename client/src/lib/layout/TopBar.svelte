@@ -83,20 +83,19 @@
       <span class="mode-badge {mode}">{mode}</span>
       <p class="truncate text-sm">{expectation}</p>
     </div>
-    <p class="truncate text-xs text-[var(--color-parchment)]/60">
-      {table.campaign.name || 'Campaign'} · {sceneName} · {systemName} ·
-      <span title={VERSION_NOTE}>v{VERSION}</span>
+    <p class="truncate text-sm text-[var(--color-parchment)]/60">
+      {table.campaign.name || 'Campaign'} · {sceneName} · {systemName}
     </p>
   </div>
 
   {#if gm}
     <div class="flex shrink-0 items-center gap-2">
       <button class="btn quiet px-2" class:active={modes.current === 'play'} type="button" onclick={() => modes.set('play')}>Play</button>
-      <span class="text-[11px] tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Edit</span>
+      <span class="text-sm tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Edit</span>
       {#each editTabs as tab (tab.id)}
         <button class="btn quiet px-2" class:active={modes.current === tab.id} type="button" onclick={() => modes.set(tab.id)}>{tab.name}</button>
       {/each}
-      <span class="text-[11px] tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Design</span>
+      <span class="text-sm tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Design</span>
       <button class="btn quiet px-2" class:active={modes.current === 'rules'} type="button" onclick={() => modes.set('rules')}>Rules</button>
     </div>
   {/if}
@@ -126,6 +125,7 @@
         onclose={() => (seatMenu = null)}
       />
     {/if}
+    <span class="shrink-0 text-sm tracking-wide text-[var(--color-parchment)]/55" title={VERSION_NOTE}>v{VERSION}</span>
     <button class="btn quiet px-2" type="button" onclick={() => layout.reset()}>Reset</button>
     <button class="btn quiet px-2" type="button" onclick={() => leaveTable()}>Leave</button>
   </div>

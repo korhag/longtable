@@ -40,13 +40,16 @@ export class DicePlayer {
   private trayAim = new THREE.Vector3();
   private lineupEye = new THREE.Vector3(0, 8, 2);
   private lineupAim = new THREE.Vector3();
+  private cameraAim = new THREE.Vector3();
+  private fromRotation = new THREE.Quaternion();
+  private toRotation = new THREE.Quaternion();
   private felt: THREE.MeshLambertMaterial;
   private wood: THREE.MeshLambertMaterial;
   private tagColors: TagColor[] = [];
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    this.renderer.setPixelRatio(1);
     this.renderer.setClearColor(0x000000, 0);
     this.scene.add(new THREE.AmbientLight(0xfff4e4, 0.85));
     const sun = new THREE.DirectionalLight(0xfff0d2, 1.15);
@@ -153,9 +156,9 @@ export class DicePlayer {
           y + Math.sin(glide * Math.PI) * 0.35,
           z + (actor.slot.z - z) * glide,
         );
-        const qa = new THREE.Quaternion(from.q[0], from.q[1], from.q[2], from.q[3]);
-        const qb = new THREE.Quaternion(to?.q[0] ?? from.q[0], to?.q[1] ?? from.q[1], to?.q[2] ?? from.q[2], to?.q[3] ?? from.q[3]);
-        actor.group.quaternion.copy(qa.slerp(qb, frac));
+        this.fromRotation.set(from.q[0], from.q[1], from.q[2], from.q[3]);
+        this.toRotation.set(to?.q[0] ?? from.q[0], to?.q[1] ?? from.q[1], to?.q[2] ?? from.q[2], to?.q[3] ?? from.q[3]);
+        actor.group.quaternion.copy(this.fromRotation).slerp(this.toRotation, frac);
         actor.shadow.position.x = actor.group.position.x;
         actor.shadow.position.z = actor.group.position.z;
         const lift = Math.min(actor.group.position.y, 2);
@@ -280,8 +283,8 @@ export class DicePlayer {
 
   private applyCamera(glide: number) {
     this.camera.position.lerpVectors(this.trayEye, this.lineupEye, glide);
-    const aim = this.trayAim.clone().lerp(this.lineupAim, glide);
-    this.camera.lookAt(aim);
+    this.cameraAim.copy(this.trayAim).lerp(this.lineupAim, glide);
+    this.camera.lookAt(this.cameraAim);
   }
 
   private revealFaces() {
@@ -336,23 +339,8 @@ function tagRank(tag: string | null, order: string[]) {
 
 function buildDie(mesh: DieMesh, tag: string | null, tags: TagColor[]) {
   const group = new THREE.Group();
-  const positions: number[] = [];
-  const normals: number[] = [];
-  for (const face of mesh.faces) {
-    const vertices = face.indices.map((index) => mesh.vertices[index]).filter((vertex) => vertex);
-    for (let corner = 1; corner < vertices.length - 1; corner += 1) {
-      for (const vertex of [vertices[0], vertices[corner], vertices[corner + 1]]) {
-        if (!vertex) continue;
-        positions.push(vertex[0], vertex[1], vertex[2]);
-        normals.push(face.normal[0], face.normal[1], face.normal[2]);
-      }
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   const look = dieLook(mesh.sides, tag, tags);
-  group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color: look.bodyHex })));
+  group.add(new THREE.Mesh(bodyGeometry(mesh), new THREE.MeshLambertMaterial({ color: look.bodyHex })));
   const ink = look.ink;
   const stroke = look.stroke;
   if (mesh.sides === 4) {
@@ -423,41 +411,74 @@ function texturedPlate(side: number, value: number, ink: string, stroke: string,
   return plate;
 }
 
+const NUMBER_PX = 256;
+const numberTextures = new Map<string, THREE.CanvasTexture>();
+const bodyGeometries = new Map<number, THREE.BufferGeometry>();
+
+function bodyGeometry(mesh: DieMesh) {
+  const cached = bodyGeometries.get(mesh.sides);
+  if (cached) return cached;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  for (const face of mesh.faces) {
+    const vertices = face.indices.map((index) => mesh.vertices[index]).filter((vertex) => vertex);
+    for (let corner = 1; corner < vertices.length - 1; corner += 1) {
+      for (const vertex of [vertices[0], vertices[corner], vertices[corner + 1]]) {
+        if (!vertex) continue;
+        positions.push(vertex[0], vertex[1], vertex[2]);
+        normals.push(face.normal[0], face.normal[1], face.normal[2]);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  bodyGeometries.set(mesh.sides, geometry);
+  return geometry;
+}
+
 function paintNumber(value: number, ink: string, stroke: string, underline: boolean) {
+  const key = `${value}|${ink}|${stroke}|${underline ? 1 : 0}`;
+  const cached = numberTextures.get(key);
+  if (cached) return cached;
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
+  canvas.width = NUMBER_PX;
+  canvas.height = NUMBER_PX;
   const context = canvas.getContext('2d');
   if (!context) return null;
-  context.clearRect(0, 0, 512, 512);
+  const unit = NUMBER_PX / 512;
+  context.clearRect(0, 0, NUMBER_PX, NUMBER_PX);
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
   const text = String(value);
-  let size = 400;
+  let size = 400 * unit;
   context.font = `600 ${size}px Inter, sans-serif`;
   const measured = context.measureText(text).width;
-  if (measured > 450) size = Math.floor(size * (450 / measured));
+  const limit = 450 * unit;
+  if (measured > limit) size = Math.floor(size * (limit / measured));
   context.font = `600 ${size}px Inter, sans-serif`;
-  context.lineWidth = Math.max(18, Math.round(28 * (size / 320)));
+  context.lineWidth = Math.max(18 * unit, Math.round(28 * (size / 320)));
   context.strokeStyle = stroke;
-  context.strokeText(text, 256, 270);
+  const midY = 270 * unit;
+  context.strokeText(text, NUMBER_PX / 2, midY);
   context.fillStyle = ink;
-  context.fillText(text, 256, 270);
+  context.fillText(text, NUMBER_PX / 2, midY);
   if (underline && (value === 6 || value === 9)) {
     const scale = size / 320;
-    const underlineY = 270 + 120 * scale;
+    const underlineY = midY + 120 * scale;
     const half = 86 * scale;
     context.strokeStyle = ink;
-    context.lineWidth = Math.max(12, Math.round(18 * scale));
+    context.lineWidth = Math.max(12 * unit, Math.round(18 * scale));
     context.beginPath();
-    context.moveTo(256 - half, underlineY);
-    context.lineTo(256 + half, underlineY);
+    context.moveTo(NUMBER_PX / 2 - half, underlineY);
+    context.lineTo(NUMBER_PX / 2 + half, underlineY);
     context.stroke();
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
+  texture.anisotropy = 4;
+  numberTextures.set(key, texture);
   return texture;
 }
 
@@ -552,7 +573,7 @@ function smoothstep(amount: number) {
 function disposeObject(object: THREE.Object3D) {
   object.traverse((child) => {
     if (child instanceof THREE.Mesh) {
-      child.geometry.dispose();
+      if (![...bodyGeometries.values()].includes(child.geometry)) child.geometry.dispose();
       disposeMaterial(child.material);
     } else if (child instanceof THREE.Sprite) {
       disposeMaterial(child.material);
@@ -564,7 +585,7 @@ function disposeMaterial(material: THREE.Material | THREE.Material[]) {
   const materials = Array.isArray(material) ? material : [material];
   for (const item of materials) {
     const mapped = item as THREE.Material & { map?: THREE.Texture | null };
-    mapped.map?.dispose();
+    if (mapped.map && ![...numberTextures.values()].includes(mapped.map)) mapped.map.dispose();
     item.dispose();
   }
 }

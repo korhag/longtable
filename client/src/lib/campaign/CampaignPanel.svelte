@@ -6,13 +6,54 @@
   import type { Character } from '../net/bindings/Character.ts';
   import type { CharacterKind } from '../net/bindings/CharacterKind.ts';
 
-  let campaignName = $state('New campaign');
+  let making = $state(false);
+  let opening = $state(false);
+  let confirmId = $state('');
+  let campaignName = $state('');
   let campaignSystem = $state('');
   let sceneName = $state('New scene');
   let sceneWidth = $state(30);
   let sceneHeight = $state(20);
 
   const guided = $derived(overlaysFor(table.campaign.systemId) != null);
+  const systemName = $derived(table.systems.find((system) => system.id === table.campaign.systemId)?.name ?? 'No system');
+  const saved = $derived(table.campaigns.filter((item) => item.id !== table.campaign.id));
+  const confirming = $derived(confirmId !== '' && confirmId === table.campaign.id);
+
+  function startNew() {
+    making = !making;
+    opening = false;
+    confirmId = '';
+  }
+
+  function startOpen() {
+    opening = !opening;
+    making = false;
+    confirmId = '';
+  }
+
+  function createCampaign() {
+    send({
+      type: 'createCampaign',
+      name: campaignName.trim() || 'Campaign',
+      systemId: campaignSystem || null,
+    });
+    campaignName = '';
+    campaignSystem = '';
+    making = false;
+  }
+
+  function openCampaign(campaignId: string) {
+    send({ type: 'switchCampaign', campaignId });
+    opening = false;
+  }
+
+  function deleteOpen() {
+    const campaignId = table.campaign.id;
+    if (!campaignId) return;
+    send({ type: 'deleteCampaign', campaignId });
+    confirmId = '';
+  }
 
   const groups: { kind: CharacterKind; title: string; one: string }[] = [
     { kind: 'pc', title: 'PCs', one: 'PC' },
@@ -38,55 +79,56 @@
   }
 </script>
 
-<div class="flex flex-col gap-4 text-xs">
+<div class="flex flex-col gap-4 text-sm">
   <section>
-    <p class="text-xs tracking-[0.18em] text-[var(--color-gold)] uppercase">Campaigns</p>
-    <label class="mt-2 block">System for this campaign
-      <select
-        class="field mt-1"
-        value={table.campaign.systemId ?? ''}
-        onchange={(event) => send({ type: 'setCampaignSystem', systemId: event.currentTarget.value || null })}
-      >
-        <option value="">No system</option>
-        {#each table.systems as system (system.id)}
-          <option value={system.id}>{system.name}</option>
-        {/each}
-      </select>
-    </label>
-    {#each table.campaigns as item (item.id)}
-      <div class="mt-2 flex items-center gap-1">
-        <input
-          class="field"
-          value={item.name}
-          aria-label={`Rename ${item.name}`}
-          onchange={(event) => send({ type: 'renameCampaign', campaignId: item.id, name: event.currentTarget.value })}
-        />
-        {#if item.id !== table.campaign.id}
-          <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'switchCampaign', campaignId: item.id })}>Open</button>
-          <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'deleteCampaign', campaignId: item.id })}>Delete</button>
-        {:else}
-          <span class="shrink-0 text-[var(--color-gold)]">Open</span>
-        {/if}
-      </div>
-    {/each}
-    <div class="mt-2 flex flex-col gap-1">
-      <input class="field" bind:value={campaignName} maxlength="48" aria-label="New campaign name" />
-      <select class="field" bind:value={campaignSystem} aria-label="System">
-        <option value="">No system</option>
-        {#each table.systems as system (system.id)}
-          <option value={system.id}>{system.name}</option>
-        {/each}
-      </select>
-      <button
-        class="btn"
-        type="button"
-        onclick={() => send({ type: 'createCampaign', name: campaignName.trim() || 'Campaign', systemId: campaignSystem || null })}
-      >New campaign</button>
+    <div class="flex gap-1">
+      <button class="btn flex-1" class:active={making} type="button" onclick={startNew}>New +</button>
+      <button class="btn flex-1" class:active={opening} type="button" aria-expanded={opening} onclick={startOpen}>Open</button>
     </div>
+    {#if making}
+      <div class="mt-2 flex flex-col gap-1">
+        <input class="field" bind:value={campaignName} maxlength="48" placeholder="Campaign name" aria-label="Campaign name" />
+        <select class="field" bind:value={campaignSystem} aria-label="System">
+          <option value="">No system</option>
+          {#each table.systems as system (system.id)}
+            <option value={system.id}>{system.name}</option>
+          {/each}
+        </select>
+        <button class="btn" type="button" onclick={createCampaign}>Create</button>
+      </div>
+    {/if}
+    {#if opening}
+      <div class="mt-2 flex flex-col gap-1" aria-label="Saved campaigns">
+        {#each saved as item (item.id)}
+          <button class="btn quiet" type="button" onclick={() => openCampaign(item.id)}>{item.name}</button>
+        {:else}
+          <p class="px-1 py-1 opacity-70">No other campaigns</p>
+        {/each}
+      </div>
+    {/if}
+    <div class="mt-3">
+      <input
+        class="field"
+        value={table.campaign.name}
+        maxlength="48"
+        aria-label="Open campaign name"
+        onchange={(event) => send({ type: 'renameCampaign', campaignId: table.campaign.id, name: event.currentTarget.value })}
+      />
+      <p class="mt-1 text-[var(--color-gold)]">{systemName}</p>
+    </div>
+    {#if confirming}
+      <p class="mt-2">Delete {table.campaign.name}? Scenes, cast, and tokens go with it.</p>
+      <div class="mt-1 flex gap-1">
+        <button class="btn flex-1" type="button" onclick={deleteOpen}>Delete</button>
+        <button class="btn quiet flex-1" type="button" onclick={() => (confirmId = '')}>Cancel</button>
+      </div>
+    {:else}
+      <button class="btn quiet mt-2 w-full" type="button" onclick={() => (confirmId = table.campaign.id)}>Delete</button>
+    {/if}
   </section>
 
   <section>
-    <p class="text-xs tracking-[0.18em] text-[var(--color-gold)] uppercase">Scenes</p>
+    <p class="text-sm tracking-[0.18em] text-[var(--color-gold)] uppercase">Scenes</p>
     {#each table.scenes as item (item.id)}
       <div class="mt-2 flex items-center gap-1">
         <input
@@ -118,7 +160,7 @@
   </section>
 
   <section>
-    <p class="text-xs tracking-[0.18em] text-[var(--color-gold)] uppercase">Cast</p>
+    <p class="text-sm tracking-[0.18em] text-[var(--color-gold)] uppercase">Cast</p>
     {#each groups as group (group.kind)}
       <div class="mt-3">
         <div class="flex items-center justify-between">

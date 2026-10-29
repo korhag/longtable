@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '0.8.0';
-export const VERSION_NOTE = 'Click a token to target it, and click it again to take control.';
+export const VERSION = '0.12.2';
+export const VERSION_NOTE = 'The rules book lays out equipment lists as tables.';

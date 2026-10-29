@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.12.2 — 2026-10-29
+
+- The rules book lays out equipment lists as tables.
+
+## 0.12.1 — 2026-10-29
+
+- Dice rolls start sooner and play without a hitch.
+
+## 0.12.0 — 2026-10-29
+
+- The Daggerheart book is on the table: classes, cards, adversaries, and the rules.
+
+## 0.11.0 — 2026-10-29
+
+- An attack says hit or miss, then damage can mark armor.
+
+## 0.10.2 — 2026-10-29
+
+- The small print is larger.
+
+## 0.10.1 — 2026-10-29
+
+- Fear sits in one row above the map.
+
+## 0.10.0 — 2026-10-28
+
+- The name step asks for male or female.
+
+## 0.9.1 — 2026-10-28
+
+- The version stays on the lobby and on the table.
+
+## 0.9.0 — 2026-10-28
+
+- New and Open sit under Campaign, and Delete removes the open campaign.
+
 ## 0.8.0 — 2026-10-28
 
 - Click a token to target it, and click it again to take control.

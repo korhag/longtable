@@ -9,7 +9,7 @@ use crate::map::Vec2;
 use crate::net::protocol::{
     DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, Presentation, PresentationCapabilities,
     PresentationDoor, PresentationDoorLayer, PresentationLighting, PresentationVariant, PresentationView, RollLogEntry,
-    RollVisibility, SceneView, SegmentView, Snapshot, TokenKind, TokenView, Figure,
+    RollVisibility, SceneView, SegmentView, Snapshot, StrikeOffer, TokenKind, TokenView, Figure,
 };
 use crate::systems::{Character, CharacterKind};
 use crate::vision::{point_in_poly, CELLS_PER_SQUARE};
@@ -225,6 +225,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                         notice: None,
                         created_at: roll.created_at,
                         outcome: roll.outcome.clone(),
+                        contest: roll.contest.clone(),
                     }
                 } else {
                     RollLogEntry {
@@ -240,6 +241,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                         notice: Some(conceal_notice(roll.visibility, &roll.roller_name)),
                         created_at: roll.created_at,
                         outcome: None,
+                        contest: None,
                     }
                 }
             })
@@ -251,7 +253,26 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         scenes: if matches!(sight, Sight::Gm) { scene_listings(table) } else { Vec::new() },
         fear: table.fear,
         figures: faces(table, &sight, &polygons),
+        can_undo: table.undo.is_some(),
+        strike: strike_offer(table, viewer),
     }
+}
+
+fn strike_offer(table: &Table, viewer: &Viewer) -> Option<StrikeOffer> {
+    let pending = table.strike.as_ref()?;
+    let character = table.characters.iter().find(|character| character.id == pending.target_id)?;
+    let gm = viewer.role == Role::Gm && viewer.view_as.is_none();
+    let owner = character.owner_id.as_deref() == Some(viewer.player_id.as_str());
+    if !gm && !owner {
+        return None;
+    }
+    Some(StrikeOffer {
+        target_id: pending.target_id.clone(),
+        target_name: character.name.clone(),
+        step: pending.step.clone(),
+        marks: pending.marks,
+        with_armor: (pending.marks - 1).max(0),
+    })
 }
 
 const HEALTH: [&str; 5] = ["Uninjured", "Slightly Wounded", "Wounded", "Badly Wounded", "Near Death"];
@@ -437,6 +458,7 @@ mod tests {
             dice: vec![DieResult { sides: 20, value: 17, sign: 1, tag: None }],
             created_at: 1,
             outcome: Some(RollOutcome { label: "with Hope".into(), tone: "hope".into() }),
+            contest: None,
         });
         table.characters.push(Character {
             id: "ada-sheet".into(),
@@ -532,6 +554,7 @@ mod tests {
             keyframe_dt: 0.0,
             dice: Vec::new(),
             outcome: Some(RollOutcome { label: "with Fear".into(), tone: "fear".into() }),
+            contest: None,
         };
         for _ in 0..13 {
             table.commit_roll(&fear);

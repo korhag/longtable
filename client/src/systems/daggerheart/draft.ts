@@ -8,12 +8,13 @@
 import type { Character } from '../../lib/net/bindings/Character.ts';
 import {
   ARMORS,
-  CONNECTION_PROMPTS,
   STARTING_MODIFIERS,
   TRAITS,
+  ancestryByName,
   armorById,
   cardsFor,
   classById,
+  communityByName,
   diceOf,
   weaponById,
   type TraitId,
@@ -23,6 +24,7 @@ export interface CardChoice {
   id: string;
   domain: string;
   name: string;
+  text: string;
   taken: boolean;
 }
 
@@ -32,7 +34,7 @@ export interface CreationDraft {
   ancestry: string;
   community: string;
   name: string;
-  pronouns: string;
+  gender: '' | 'Male' | 'Female';
   description: string;
   traits: Record<TraitId, number | null>;
   weaponId: string;
@@ -64,7 +66,7 @@ export function emptyDraft(): CreationDraft {
     ancestry: '',
     community: '',
     name: '',
-    pronouns: '',
+    gender: '',
     description: '',
     traits: emptyTraits(),
     weaponId: '',
@@ -81,7 +83,7 @@ export function emptyDraft(): CreationDraft {
 }
 
 export function freshCards(classId: string): CardChoice[] {
-  return cardsFor(classId).map((card) => ({ id: card.id, domain: card.domain, name: card.name, taken: false }));
+  return cardsFor(classId).map((card) => ({ id: card.id, domain: card.domain, name: card.name, text: card.text, taken: false }));
 }
 
 export function applyClass(draft: CreationDraft, classId: string): CreationDraft {
@@ -163,10 +165,19 @@ export function payload(draft: CreationDraft): CharacterPayload {
   const background = chosen
     ? chosen.questions.map((question, index) => lines(question, draft.background[index] ?? '')).filter(Boolean).join('\n\n')
     : '';
-  const connections = CONNECTION_PROMPTS
+  const prompts = chosen?.connections ?? ['', '', ''];
+  const connections = prompts
     .map((question, index) => lines(question, draft.connections[index] ?? ''))
     .filter(Boolean)
     .join('\n\n');
+  const subclass = chosen?.subclasses.find((item) => item.id === draft.subclassId);
+  const feature = [
+    ...(chosen?.features ?? []),
+    chosen?.hope ?? '',
+    subclass?.foundation ?? '',
+    ancestryByName(draft.ancestry)?.feature ?? '',
+    communityByName(draft.community)?.feature ?? '',
+  ].filter(Boolean).join('\n\n');
   const experiences = draft.experiences.map((name) => `${name.trim()} +2`).filter((line) => line !== '+2');
   const name = draft.name.trim().slice(0, 24) || 'Adventurer';
 
@@ -196,13 +207,13 @@ export function payload(draft: CreationDraft): CharacterPayload {
     },
     texts: {
       class: chosen?.name ?? '',
-      subclass: chosen?.subclasses.find((item) => item.id === draft.subclassId)?.name ?? '',
+      subclass: subclass?.name ?? '',
       ancestry: draft.ancestry,
       community: draft.community,
-      pronouns: draft.pronouns.trim(),
+      gender: draft.gender,
       description: draft.description.trim(),
       domains: chosen ? chosen.domains.join(' & ') : '',
-      feature: (chosen?.features ?? []).join('\n'),
+      feature,
       experiences: experiences.join('\n'),
       primary: weapon ? weaponLine(weapon) : '',
       secondary: offhand ? weaponLine(offhand) : '',
@@ -210,7 +221,7 @@ export function payload(draft: CreationDraft): CharacterPayload {
       inventory: inventory.join('\n'),
       background,
       connections,
-      cards: takenCards(draft).map((card) => `${card.domain} — ${card.name.trim() || card.domain}`).join('\n'),
+      cards: takenCards(draft).map((card) => `${card.domain} — ${card.name.trim() || card.domain}\n${card.text.trim()}`).join('\n\n'),
       damage: weapon ? diceOf(weapon.damage) : '1d8',
       notes: '',
     },
@@ -255,7 +266,7 @@ export interface AdversaryDraft {
 }
 
 export function adversaryPayload(draft: AdversaryDraft): CharacterPayload {
-  const name = draft.name.trim().slice(0, 24) || 'Adversary';
+  const name = draft.name.trim().slice(0, 48) || 'Adversary';
   return {
     name,
     numbers: {
@@ -267,8 +278,8 @@ export function adversaryPayload(draft: AdversaryDraft): CharacterPayload {
       stressmax: clamp(draft.stress, 0, 20),
       stress: 0,
       minor: 1,
-      major: clamp(draft.major, 1, 40),
-      severe: clamp(draft.severe, 1, 60),
+      major: clamp(draft.major, 1, 99),
+      severe: clamp(draft.severe, 1, 99),
     },
     texts: {
       advtype: draft.type || 'Standard',

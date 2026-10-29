@@ -63,7 +63,24 @@ pub fn router(app: Arc<App>) -> Router {
     } else {
         tracing::info!("no built client at {} (fine while Vite is running)", app.static_dir.display());
     }
-    router
+    router.layer(axum::middleware::from_fn(cache_client))
+}
+
+/// The page must be checked every visit, or a rebuild stays invisible.
+/// Hashed files under /assets keep their long cache.
+async fn cache_client(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let path = request.uri().path().to_owned();
+    let mut response = next.run(request).await;
+    if path.starts_with("/api/") || path.starts_with("/packs/") || path == "/ws" {
+        return response;
+    }
+    let value = if path.starts_with("/assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    response.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static(value));
+    response
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -329,7 +346,15 @@ async fn dispatch(app: &App, player_id: &str, epoch: u64, message: ClientMsg) ->
     }
 
     if let ClientMsg::Roll { formula, visibility, label } = message {
-        return finish_roll(app, player_id, epoch, formula, visibility, label).await;
+        return finish_roll(app, player_id, epoch, formula, visibility, label, None).await;
+    }
+
+    if let ClientMsg::Attack { attacker_id, target_id, plus, minus } = message {
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, false).await;
+    }
+
+    if let ClientMsg::Strike { attacker_id, target_id, plus, minus } = message {
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, true).await;
     }
 
     if let ClientMsg::RollAction { character_id, action_id, visibility, plus, minus } = message {
@@ -350,7 +375,7 @@ async fn dispatch(app: &App, player_id: &str, epoch: u64, message: ClientMsg) ->
                 return true;
             }
         };
-        return finish_roll(app, player_id, epoch, formula, visibility, label).await;
+        return finish_roll(app, player_id, epoch, formula, visibility, label, None).await;
     }
 
     if let ClientMsg::SaveSystem { system } = message {
@@ -427,6 +452,39 @@ async fn active_system(app: &App) -> (Option<crate::systems::SystemDef>, String)
     (system, id.unwrap_or_default())
 }
 
+async fn finish_attack(
+    app: &App,
+    player_id: &str,
+    epoch: u64,
+    attacker_id: String,
+    target_id: String,
+    plus: i32,
+    minus: i32,
+    damage: bool,
+) -> bool {
+    let plan = {
+        let table = app.table.lock().await;
+        let Some(viewer) = table.viewer(player_id, epoch) else {
+            return false;
+        };
+        if damage {
+            table.prepare_strike(&viewer, &attacker_id, &target_id, plus, minus)
+        } else {
+            table.prepare_attack(&viewer, &attacker_id, &target_id, plus, minus)
+        }
+    };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(message) => {
+            reply_error(app, player_id, epoch, &message).await;
+            return true;
+        }
+    };
+    let formula = plan.formula.clone();
+    let label = plan.label.clone();
+    finish_roll(app, player_id, epoch, formula, crate::net::protocol::RollVisibility::Public, Some(label), Some(plan)).await
+}
+
 async fn finish_roll(
     app: &App,
     player_id: &str,
@@ -434,6 +492,7 @@ async fn finish_roll(
     formula: String,
     visibility: crate::net::protocol::RollVisibility,
     label: Option<String>,
+    plan: Option<crate::session::state::AttackPlan>,
 ) -> bool {
     let (system, rules_id) = active_system(app).await;
     let rules = rules_for(&rules_id);
@@ -464,7 +523,15 @@ async fn finish_roll(
     };
     let total = modifier + thrown.iter().map(|die| die.value as i32 * die.sign as i32).sum::<i32>();
     let outcome = rules.outcome(&thrown, total);
-    let event = RollEvent {
+    let mut contest = plan.as_ref().map(|plan| plan.contest.clone());
+    if let Some(contest) = contest.as_mut() {
+        if !plan.as_ref().is_some_and(|plan| plan.damage) {
+            let critical = outcome.as_ref().is_some_and(|item| item.tone == "critical");
+            let hit = crate::systems::daggerheart::attack_hits(total, contest.defense, critical);
+            contest.verdict = Some(if hit { "hit".into() } else { "miss".into() });
+        }
+    }
+    let mut event = RollEvent {
         id: job.id,
         roller_id: job.roller_id,
         roller_name: job.roller_name,
@@ -477,10 +544,29 @@ async fn finish_roll(
         keyframe_dt: crate::session::Table::keyframe_dt(),
         dice: thrown.into_iter().map(played_die).collect(),
         outcome,
+        contest,
     };
     let mut table = app.table.lock().await;
     if table.viewer(player_id, epoch).is_none() {
         return false;
+    }
+    if plan.as_ref().is_some_and(|plan| plan.damage) {
+        let target_id = event.contest.as_ref().map(|contest| contest.target_id.clone()).unwrap_or_default();
+        let Some(system) = system.as_ref() else {
+            table.send_to(player_id, epoch, ServerMsg::Error { message: "this table has no system".into() });
+            return true;
+        };
+        match table.receive_blow(&target_id, event.total, system) {
+            Ok(blow) => {
+                if let Some(contest) = event.contest.as_mut() {
+                    contest.blow = Some(blow);
+                }
+            }
+            Err(message) => {
+                table.send_to(player_id, epoch, ServerMsg::Error { message });
+                return true;
+            }
+        }
     }
     table.commit_roll(&event);
     table.broadcast_roll(&event);

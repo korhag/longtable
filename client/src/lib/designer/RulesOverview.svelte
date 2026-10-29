@@ -18,7 +18,7 @@
 </script>
 
 {#if system}
-  <div class="flex flex-col gap-4 text-[12px]">
+  <div class="flex flex-col gap-4 text-sm">
     {#if loose.length > 0}
       <p class="text-[#e7a090]">{loose.map((field) => field.name).join(', ')} {loose.length === 1 ? 'is' : 'are'} not on a sheet yet.</p>
     {/if}

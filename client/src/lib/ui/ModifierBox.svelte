@@ -31,7 +31,7 @@
     border-radius: 0.6rem;
     border: 1px solid rgba(212, 166, 86, 0.35);
     background: rgba(16, 14, 12, 0.45);
-    font-size: 0.8rem;
+    font-size: 0.875rem;
   }
   input {
     width: 2.6rem;
@@ -42,6 +42,6 @@
     border-radius: 0.4rem;
     padding: 0.1rem 0.35rem;
     background: rgba(255, 255, 255, 0.08);
-    font-size: 0.7rem;
+    font-size: 0.875rem;
   }
 </style>

@@ -64,6 +64,13 @@ pub fn parse_formula(input: &str) -> Result<RollFormula, FormulaError> {
     if compact.is_empty() {
         return Err(FormulaError::Empty);
     }
+    if let Some(rest) = compact.strip_prefix("flat:") {
+        let value: i32 = rest.parse().map_err(|_| FormulaError::Bad(compact.clone()))?;
+        if !(-1000..=1000).contains(&value) {
+            return Err(FormulaError::Bad(compact));
+        }
+        return Ok(RollFormula { groups: Vec::new(), modifier: value });
+    }
     if compact.len() > 48 {
         return Err(FormulaError::TooLong);
     }
@@ -194,6 +201,8 @@ mod tests {
         assert!(matches!(parse_formula("99d6"), Err(FormulaError::TooMany)));
         assert!(matches!(parse_formula(""), Err(FormulaError::Empty)));
         assert!(matches!(parse_formula("3"), Err(FormulaError::NoDice)));
+        assert_eq!(parse_formula("flat:2").unwrap().modifier, 2);
+        assert!(parse_formula("flat:2").unwrap().groups.is_empty());
         assert!(parse_formula("nope").is_err());
     }
 }

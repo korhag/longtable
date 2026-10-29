@@ -2,7 +2,7 @@
   import { modes } from '../../lib/layout/modes.svelte';
   import { systems } from '../../lib/systems/store.svelte';
   import { table } from '../../lib/table.svelte';
-  import { ADVERSARY_TYPES, JAGGED_KNIFE_BANDIT } from './catalog';
+  import { ADVERSARIES, ADVERSARY_TYPES, JAGGED_KNIFE_BANDIT } from './catalog';
   import { creation } from './creation.svelte';
   import { adversaryPayload, previewAdversary, type AdversaryDraft } from './draft';
   import AdversaryCard from './AdversaryCard.svelte';
@@ -30,9 +30,15 @@
   });
   let busy = $state(false);
   let error = $state('');
+  let query = $state('');
 
-  function useBandit() {
-    draft = { ...draft, ...JAGGED_KNIFE_BANDIT, place: draft.place };
+  const matches = $derived(
+    ADVERSARIES.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 40),
+  );
+
+  function useAdversary(name: string) {
+    const found = ADVERSARIES.find((item) => item.name === name) ?? JAGGED_KNIFE_BANDIT;
+    draft = { ...draft, ...found, place: draft.place };
   }
 
   async function finish() {
@@ -60,10 +66,20 @@
       <p class="display text-sm text-[var(--color-gold-bright)]">New adversary</p>
       <button class="btn quiet px-2" type="button" onclick={() => creation.close()}>Close</button>
     </div>
-    <button class="btn mt-3" type="button" onclick={useBandit}>Use the Jagged Knife Bandit</button>
+    <label class="mt-3 block">Find in the book
+      <input class="field mt-1" bind:value={query} placeholder="Acid Burrower, Jagged Knife…" />
+    </label>
+    <div class="mt-2 max-h-48 overflow-auto">
+      {#each matches as item (item.name)}
+        <button class="flex w-full items-baseline justify-between gap-2 rounded px-1 py-1 text-left text-sm hover:bg-white/10" type="button" onclick={() => useAdversary(item.name)}>
+          <span>{item.name}</span>
+          <span class="text-[var(--color-gold)]">T{item.tier} {item.type}</span>
+        </button>
+      {/each}
+    </div>
     <div class="mt-3 grid gap-2 overflow-auto pr-1">
       <label>Name
-        <input class="field mt-1" bind:value={draft.name} maxlength="24" />
+        <input class="field mt-1" bind:value={draft.name} maxlength="48" />
       </label>
       <label>Type
         <select class="field mt-1" bind:value={draft.type}>
@@ -96,13 +112,13 @@
         <input class="field mt-1" bind:value={draft.experience} maxlength="48" placeholder="Thief +2" />
       </label>
       <label>Features
-        <textarea class="field mt-1 min-h-28" bind:value={draft.features} maxlength="1200" placeholder="Name — Passive: what it does."></textarea>
+        <textarea class="field mt-1 min-h-28" bind:value={draft.features} maxlength="4000" placeholder="Name — Passive: what it does."></textarea>
       </label>
       <label class="flex items-center gap-2">
         <input type="checkbox" bind:checked={draft.place} disabled={!table.scene} />
         Place on {table.scene?.name ?? 'the scene'}
       </label>
-      <p class="text-[12px] text-[#e7a090]">{error}</p>
+      <p class="text-sm text-[#e7a090]">{error}</p>
       <button class="btn" type="button" disabled={busy || draft.name.trim() === ''} onclick={() => void finish()}>{busy ? 'Writing…' : 'Create adversary'}</button>
     </div>
   </div>

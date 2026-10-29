@@ -30,23 +30,32 @@
   {#each entries.slice(0, 20) as entry (entry.id)}
     <article class="glass pointer-events-auto rounded-xl px-2.5 py-1.5">
       <div class="flex items-baseline gap-2">
-        <p class="shrink-0 text-xs">{entry.rollerName}</p>
-        <p class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-parchment)]/65">
+        <p class="shrink-0 text-sm">{entry.rollerName}</p>
+        <p class="min-w-0 flex-1 truncate text-sm text-[var(--color-parchment)]/65">
           {open(entry) ? title(entry) : '···'}
         </p>
         {#if open(entry) && entry.total !== null}
           <p class="display text-base leading-none text-[var(--color-gold-bright)]">{entry.total}</p>
         {:else if entry.concealed}
-          <p class="text-[10px] tracking-wide text-[var(--color-gold)] uppercase">Hidden</p>
+          <p class="text-sm tracking-wide text-[var(--color-gold)] uppercase">Hidden</p>
         {:else}
-          <p class="text-[10px] tracking-wide text-[var(--color-gold)] uppercase">Rolling</p>
+          <p class="text-sm tracking-wide text-[var(--color-gold)] uppercase">Rolling</p>
         {/if}
       </div>
       {#if entry.concealed}
-        <p class="text-[11px] text-[var(--color-parchment)]/60">{entry.notice}</p>
+        <p class="text-sm text-[var(--color-parchment)]/60">{entry.notice}</p>
       {:else if open(entry)}
         <p class="truncate text-sm text-[var(--color-parchment)]/70">
           {dieText(entry)}
+          {#if entry.contest?.verdict}
+            <span class={entry.contest.verdict === 'hit' ? 'text-[var(--color-gold-bright)]' : 'text-[#e7a090]'}>
+              · {entry.contest.verdict === 'hit' ? 'Hit' : 'Miss'}
+            </span>
+          {:else if entry.contest?.blow}
+            <span class="text-[var(--color-parchment)]/80">
+              · {entry.contest.blow.marks > 0 ? `${entry.contest.blow.step} · ${entry.contest.blow.marks} HP` : 'No mark'}
+            </span>
+          {/if}
           {#if entry.outcome}
             <span class="text-[var(--color-gold-bright)]"> · {entry.outcome.label}</span>
           {/if}

@@ -8,13 +8,14 @@
     ARMORS,
     CLASSES,
     COMMUNITIES,
-    CONNECTION_PROMPTS,
     EXPERIENCE_EXAMPLES,
     OFFHAND,
     TRAITS,
     WEAPONS,
+    ancestryByName,
     armorById,
     classById,
+    communityByName,
     weaponById,
     type TraitId,
   } from './catalog';
@@ -34,6 +35,8 @@
   import PcSheet from './PcSheet.svelte';
   import { createFrom, placeCharacter } from './save';
   import './daggerheart.css';
+
+  const genders = ['Male', 'Female'] as const;
 
   const steps = [
     { kicker: 'Step 1', title: 'Class' },
@@ -154,7 +157,7 @@
   <div class="dh-main">
     <header>
       <div class="min-w-0 flex-1">
-        <p class="text-[11px] tracking-[0.18em] text-[var(--color-gold)] uppercase">{steps[step]?.kicker}</p>
+        <p class="text-sm tracking-[0.18em] text-[var(--color-gold)] uppercase">{steps[step]?.kicker}</p>
         <h2 class="display text-2xl">{steps[step]?.title}</h2>
       </div>
       <button class="btn quiet" type="button" onclick={() => creation.close()}>Close</button>
@@ -162,49 +165,67 @@
 
     <div class="dh-body">
       {#if step === 0}
-        <p class="dh-muted mb-3 max-w-2xl text-sm">A class is the role you play. The subclass comes next. Features stay as names until their rules are filled in.</p>
+        <p class="dh-muted mb-3 max-w-2xl text-sm">A class is the role you play. The subclass, and its foundation feature, come next.</p>
         <div class="dh-grid">
           {#each CLASSES as item (item.id)}
             <button class="dh-card" class:on={draft.classId === item.id} type="button" onclick={() => chooseClass(item.id)}>
               <p class="display text-lg">{item.name}</p>
-              <p class="mt-1 text-[12px] text-[var(--color-gold)]">{item.domains[0]} & {item.domains[1]}</p>
-              <p class="mt-2 text-[13px]">{item.pitch}</p>
-              <p class="mt-2 text-[12px]"><small>Evasion {item.evasion} · HP {item.hp} · Spellcast {item.spellcast}</small></p>
+              <p class="mt-1 text-sm text-[var(--color-gold)]">{item.domains[0]} & {item.domains[1]}</p>
+              <p class="mt-2 text-sm">{item.pitch}</p>
+              <p class="mt-2 text-sm">Evasion {item.evasion} · HP {item.hp} · Spellcast {item.spellcastLabel}</p>
             </button>
           {/each}
         </div>
+        {#if chosen}
+          <div class="mt-4 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed">{chosen.features.join('\n\n')}</div>
+          <p class="mt-3 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed">{chosen.hope}</p>
+        {/if}
       {:else if step === 1 && chosen}
         <p class="dh-muted mb-3 text-sm">A subclass sharpens the class. Pick one foundation.</p>
         <div class="dh-grid">
           {#each chosen.subclasses as item (item.id)}
-            <button class="dh-card" class:on={draft.subclassId === item.id} type="button" onclick={() => (draft.subclassId = item.id)}>
+            <button class="dh-card text-left" class:on={draft.subclassId === item.id} type="button" onclick={() => (draft.subclassId = item.id)}>
               <p class="display text-lg">{item.name}</p>
               <p class="mt-2 text-sm">{item.pitch}</p>
+              {#if item.foundation}
+                <p class="mt-2 max-h-36 overflow-auto whitespace-pre-wrap text-sm text-[var(--color-parchment)]/80">{item.foundation}</p>
+              {/if}
             </button>
           {/each}
         </div>
       {:else if step === 2}
-        <p class="dh-muted mb-3 text-sm">Heritage is an ancestry and a community. Each will grant a feature later. For now, choose the names.</p>
-        <p class="text-[11px] tracking-[0.16em] text-[var(--color-gold)] uppercase">Ancestry</p>
+        <p class="dh-muted mb-3 text-sm">Heritage is an ancestry and a community. Each one grants the feature under the list.</p>
+        <p class="text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">Ancestry</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
-          {#each ANCESTRIES as name (name)}
-            <button class="dh-chip" class:on={draft.ancestry === name} type="button" onclick={() => (draft.ancestry = name)}>{name}</button>
+          {#each ANCESTRIES as item (item.name)}
+            <button class="dh-chip" class:on={draft.ancestry === item.name} type="button" onclick={() => (draft.ancestry = item.name)}>{item.name}</button>
           {/each}
         </div>
-        <p class="mt-4 text-[11px] tracking-[0.16em] text-[var(--color-gold)] uppercase">Community</p>
+        {#if ancestryByName(draft.ancestry)}
+          <p class="mt-2 max-w-2xl whitespace-pre-wrap text-sm">{ancestryByName(draft.ancestry)?.feature}</p>
+        {/if}
+        <p class="mt-4 text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">Community</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
-          {#each COMMUNITIES as name (name)}
-            <button class="dh-chip" class:on={draft.community === name} type="button" onclick={() => (draft.community = name)}>{name}</button>
+          {#each COMMUNITIES as item (item.name)}
+            <button class="dh-chip" class:on={draft.community === item.name} type="button" onclick={() => (draft.community = item.name)}>{item.name}</button>
           {/each}
         </div>
+        {#if communityByName(draft.community)}
+          <p class="mt-2 max-w-2xl whitespace-pre-wrap text-sm">{communityByName(draft.community)?.feature}</p>
+        {/if}
       {:else if step === 3}
         <div class="grid max-w-xl gap-3">
           <label>Name
             <input class="field mt-1" bind:value={draft.name} maxlength="24" placeholder="A name the table will use" />
           </label>
-          <label>Pronouns
-            <input class="field mt-1" bind:value={draft.pronouns} maxlength="24" placeholder="she/her" />
-          </label>
+          <div>
+            <p class="text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">Gender</p>
+            <div class="mt-1 flex gap-1.5">
+              {#each genders as gender (gender)}
+                <button class="dh-chip" class:on={draft.gender === gender} type="button" onclick={() => (draft.gender = gender)}>{gender}</button>
+              {/each}
+            </div>
+          </div>
           <label>Description
             <textarea class="field mt-1 min-h-28" bind:value={draft.description} maxlength="600" placeholder="Clothes, eyes, body, skin, and the way they carry themselves."></textarea>
           </label>
@@ -220,7 +241,7 @@
             </button>
           {/each}
         </div>
-        <p class="mt-4 text-[11px] tracking-[0.14em] text-[var(--color-gold)] uppercase">{held === null ? 'Chips left' : `Holding ${signed(held)} — click a trait`}</p>
+        <p class="mt-4 text-sm tracking-[0.14em] text-[var(--color-gold)] uppercase">{held === null ? 'Chips left' : `Holding ${signed(held)} — click a trait`}</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
           {#each bag as value, index (`${value}-${index}`)}
             <button class="dh-chip" class:on={held === value} type="button" onclick={() => take(value)}>{signed(value)}</button>
@@ -243,13 +264,13 @@
           {#each WEAPONS as item (item.id)}
             <button class="dh-card" class:on={draft.weaponId === item.id} type="button" onclick={() => (draft.weaponId = item.id)}>
               <p class="display">{item.name}</p>
-              <p class="mt-1 text-[12px] text-[var(--color-gold)]">{item.trait} · {item.range} · {item.hands === 2 ? 'Two-handed' : 'One-handed'}</p>
+              <p class="mt-1 text-sm text-[var(--color-gold)]">{item.trait} · {item.range} · {item.hands === 2 ? 'Two-handed' : 'One-handed'}</p>
               <p class="mt-1 text-sm">{item.damage}</p>
             </button>
           {/each}
         </div>
         {#if weapon && weapon.hands === 1}
-          <p class="mt-4 text-[11px] tracking-[0.16em] text-[var(--color-gold)] uppercase">Other hand</p>
+          <p class="mt-4 text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">Other hand</p>
           <div class="mt-2 flex flex-wrap gap-1.5">
             <button class="dh-chip" class:on={draft.secondaryId === 'open'} type="button" onclick={() => (draft.secondaryId = 'open')}>Open hand</button>
             {#each OFFHAND as item (item.id)}
@@ -265,25 +286,25 @@
             <button class="dh-card" class:on={draft.armorId === item.id} type="button" onclick={() => (draft.armorId = item.id)}>
               <p class="display">{item.name}</p>
               <p class="mt-1 text-sm">Thresholds {item.major + 1}/{item.severe + 1} at level 1 · Score {item.score}</p>
-              <p class="mt-1 text-[12px]"><small>{item.note}</small></p>
+              <p class="mt-1 text-sm">{item.note}</p>
             </button>
           {/each}
         </div>
         {#if armor}
           <p class="mt-3 text-sm">Evasion is {chosen.evasion} from the class{armor.evasion === 0 ? '' : `, ${armor.evasion > 0 ? '+' : '−'}${Math.abs(armor.evasion)} from ${armor.name}`}, so {evasionOf(draft)}.</p>
         {/if}
-        <p class="mt-4 text-[11px] tracking-[0.16em] text-[var(--color-gold)] uppercase">Potion</p>
+        <p class="mt-4 text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">Potion</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
           <button class="dh-chip" class:on={draft.potion === 'health'} type="button" onclick={() => (draft.potion = 'health')}>Minor Health Potion</button>
           <button class="dh-chip" class:on={draft.potion === 'stamina'} type="button" onclick={() => (draft.potion = 'stamina')}>Minor Stamina Potion</button>
         </div>
-        <p class="mt-4 text-[11px] tracking-[0.16em] text-[var(--color-gold)] uppercase">And either</p>
+        <p class="mt-4 text-sm tracking-[0.16em] text-[var(--color-gold)] uppercase">And either</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
           {#each chosen.keepsakes as item (item)}
             <button class="dh-chip" class:on={draft.keepsake === item} type="button" onclick={() => (draft.keepsake = item)}>{item}</button>
           {/each}
         </div>
-        <p class="mt-3 text-[12px] text-[var(--color-parchment)]/60">Everyone also starts with a torch, 50 feet of rope, basic supplies, and a handful of gold.</p>
+        <p class="mt-3 text-sm text-[var(--color-parchment)]/60">Everyone also starts with a torch, 50 feet of rope, basic supplies, and a handful of gold.</p>
       {:else if step === 8 && chosen}
         <p class="dh-muted mb-3 max-w-2xl text-sm">Answer what you want. A blank answer can wait until the table is talking.</p>
         <div class="grid max-w-2xl gap-3">
@@ -305,23 +326,22 @@
           {/each}
         </div>
       {:else if step === 10 && chosen}
-        <p class="dh-muted mb-3 max-w-2xl text-sm">Pick two level 1 cards from {chosen.domains[0]} and {chosen.domains[1]}. Both may come from one domain. Rename them if you already know the card. The abilities come later.</p>
+        <p class="dh-muted mb-3 max-w-2xl text-sm">Pick two level 1 cards from {chosen.domains[0]} and {chosen.domains[1]}. Both may come from one domain.</p>
         <div class="dh-grid">
           {#each draft.cards as card (card.id)}
-            <div class="dh-card" class:on={card.taken}>
-              <button class="text-left" type="button" onclick={() => toggleCard(card.id)}>
-                <p class="text-[12px] text-[var(--color-gold)]">{card.domain} · level 1</p>
-                <p class="mt-1 text-sm">{card.taken ? 'Chosen' : 'Available'}</p>
-              </button>
-              <input class="field mt-2" bind:value={card.name} maxlength="48" aria-label={`${card.domain} card name`} />
-            </div>
+            <button class="dh-card text-left" class:on={card.taken} type="button" onclick={() => toggleCard(card.id)}>
+              <p class="text-sm text-[var(--color-gold)]">{card.domain} · level 1</p>
+              <p class="display mt-1">{card.name}</p>
+              <p class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-sm">{card.text}</p>
+              <p class="mt-2 text-sm">{card.taken ? 'Chosen' : 'Available'}</p>
+            </button>
           {/each}
         </div>
-        <p class="mt-2 text-[12px]">{takenCards(draft).length} of 2 chosen</p>
+        <p class="mt-2 text-sm">{takenCards(draft).length} of 2 chosen</p>
       {:else if step === 11}
         <p class="dh-muted mb-3 max-w-2xl text-sm">Ask another player, or leave these until you are at the table. You can turn a question down.</p>
         <div class="grid max-w-2xl gap-3">
-          {#each CONNECTION_PROMPTS as question, index (question)}
+          {#each chosen?.connections ?? [] as question, index (question)}
             <label>{question}
               <textarea class="field mt-1 min-h-16" bind:value={draft.connections[index]} maxlength="500"></textarea>
             </label>
@@ -338,7 +358,7 @@
 
     <footer class="dh-foot">
       <button class="btn quiet" type="button" disabled={step === 0} onclick={() => (step -= 1)}>Back</button>
-      <p class="min-w-0 flex-1 text-[12px] text-[#e7a090]">{error}</p>
+      <p class="min-w-0 flex-1 text-sm text-[#e7a090]">{error}</p>
       {#if step < steps.length - 1}
         <button class="btn" type="button" disabled={!ready} onclick={() => (step += 1)}>Next</button>
       {:else}

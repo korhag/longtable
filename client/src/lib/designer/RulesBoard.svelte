@@ -33,7 +33,7 @@
       {/if}
     </div>
   {:else}
-    <div class="grid flex-1 place-items-center p-6 text-center text-[12px]">
+    <div class="grid flex-1 place-items-center p-6 text-center text-sm">
       {#if designer.notice?.tone === 'error'}
         <p class="text-[#e7a090]">{designer.notice.text}</p>
       {:else}
