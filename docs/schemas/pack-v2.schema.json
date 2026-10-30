@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://longtable.local/schemas/pack-v2.schema.json",
+  "title": "Longtable pack",
+  "description": "Schema 2 pack manifest. The table's Check pack command is the authority. This file lists the fields that command reads.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "id", "name", "visualProfile", "pixelsPerCell", "filtering"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" },
+    "name": { "type": "string" },
+    "visualProfile": { "const": "dimetric-30-v1" },
+    "pixelsPerCell": { "const": 128 },
+    "filtering": { "enum": ["linear", "nearest"] },
+    "tiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "kind", "sourceSizePx", "coverageCells", "files"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "kind": { "enum": ["ground", "overlay", "side"] },
+          "sourceSizePx": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer" } },
+          "coverageCells": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer" } },
+          "files": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "transitionPolicy": { "enum": ["", "none", "rigid", "organic"] }
+        }
+      }
+    },
+    "objects": { "type": "array" },
+    "cast": { "type": "array" }
+  }
+}

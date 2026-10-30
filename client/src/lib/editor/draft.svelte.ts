@@ -10,10 +10,13 @@ import type { PlacedDecal } from '../net/bindings/PlacedDecal.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
 import { table } from '../table.svelte';
 import { brushCells, nearestEdge, type BrushSize, type Cell } from './brush';
+import { propMirror } from './placementRepair';
+import { clearVariantPins, pinVariant } from './variants';
 import { decodeCells, encodeCells } from './cells';
+import { cellLevel } from '../render/levels';
 import { blocksDoor, fillTheme, footprintsOverlap, type ScatterEntry } from './scatter';
 
-export type BuildTool = 'theme' | 'terrain' | 'wall' | 'door' | 'prop' | 'decal' | 'light' | 'erase';
+export type BuildTool = 'theme' | 'terrain' | 'wall' | 'door' | 'prop' | 'decal' | 'light' | 'erase' | 'raise' | 'stair';
 
 export interface DraftSummary {
   id: string;
@@ -41,6 +44,8 @@ class EditorStore {
   doorId = $state('core/hedge-gate');
   propId = $state('core/oak');
   decalId = $state('core/tuft');
+  stairId = $state('');
+  tier = $state<1 | 2>(1);
   castId = $state('');
   lightRange = $state(6);
   lightColor = $state('#e8a04a');
@@ -53,6 +58,8 @@ class EditorStore {
   private past: MapLayout[] = [];
   private future: MapLayout[] = [];
   private timer = 0;
+  private saving: Promise<boolean> | null = null;
+  private dirty = false;
   private stroke: Cell[] = [];
   private base: MapLayout | null = null;
   private painting = false;
@@ -128,7 +135,9 @@ class EditorStore {
 
   async publish() {
     if (!this.draft) return;
-    await this.save();
+    window.clearTimeout(this.timer);
+    const saved = await this.save();
+    if (!saved) return;
     const response = await fetch(`/api/drafts/${this.draft.id}/publish`, { method: 'POST', headers: this.headers() });
     if (!response.ok) {
       this.note = await response.text();
@@ -169,11 +178,16 @@ class EditorStore {
     if (phase === 'hover') {
       if (this.paints()) this.ghost = brushCells(point.x, point.y, this.brush, current.width, current.height);
       else if (this.tool === 'light') this.ghost = lightCell(point.x, point.y, current.width, current.height);
-      else this.ghost = [];
+      else if (this.tool === 'stair') this.ghost = stairCells(current, point.x, point.y);
+      else if (this.tool === 'prop') {
+        const [widthCells, depthCells] = footprintOf(this.packs, this.propId);
+        this.ghost = propCells(point.x, point.y, widthCells, depthCells, current.width, current.height);
+      } else this.ghost = [];
       return;
     }
     if (button === 2) {
       if (phase === 'down' && this.tool === 'prop') this.mirror = !this.mirror;
+      if (phase === 'down' && this.tool === 'terrain') this.pinPicture(point);
       return;
     }
     if (button !== 0) return;
@@ -192,8 +206,32 @@ class EditorStore {
     }
   }
 
+  private pinPicture(point: { x: number; y: number }) {
+    const layout = this.draft?.layout;
+    if (!layout || !this.draft) return;
+    const x = Math.floor(point.x);
+    const y = Math.floor(point.y);
+    if (x < 0 || y < 0 || x >= layout.width || y >= layout.height) return;
+    const bytes = decodeCells(layout.cells);
+    const asset = layout.terrains[bytes[y * layout.width + x] ?? 0] ?? '';
+    const tile = findIn(this.packs, asset, (pack) => pack.tiles ?? []);
+    const count = tile?.def.files.length ?? 1;
+    const name = tile?.def.name ?? 'This tile';
+    if (count <= 1) {
+      this.note = `${name} has one picture.`;
+      return;
+    }
+    const pinned = pinVariant(layout, x, y, asset, count);
+    this.past.push(cloneLayout(layout));
+    if (this.past.length > 40) this.past.shift();
+    this.future = [];
+    this.draft.layout = pinned.layout;
+    this.note = pinned.stored === 0 ? `${name} on this square follows the map.` : `${name} on this square keeps picture ${pinned.shown}.`;
+    this.schedule();
+  }
+
   private paints() {
-    return this.tool === 'theme' || this.tool === 'terrain' || this.tool === 'erase';
+    return this.tool === 'theme' || this.tool === 'terrain' || this.tool === 'erase' || this.tool === 'raise';
   }
 
   private step(point: { x: number; y: number }) {
@@ -206,6 +244,7 @@ class EditorStore {
       }
       this.ghost = this.stroke;
       if (this.tool === 'terrain') this.draft.layout = paintTerrain(base, this.stroke, this.terrainId);
+      if (this.tool === 'raise') this.draft.layout = paintLevels(base, this.stroke, this.tier);
       return;
     }
     if (this.tool === 'wall') {
@@ -215,11 +254,19 @@ class EditorStore {
     }
     if (this.stroke.length > 0) return;
     this.stroke.push({ x: Math.floor(point.x), y: Math.floor(point.y) });
-    if (this.tool === 'door') {
+    if (this.tool === 'stair') {
+      const edge = nearestEdge(point.x, point.y, layout.width, layout.height);
+      if (!edge) return;
+      const placed = addStair(layout, edge, this.stairId || 'stair');
+      this.draft.layout = placed.layout;
+      this.note = placed.note;
+    } else if (this.tool === 'door') {
       const edge = nearestEdge(point.x, point.y, layout.width, layout.height);
       if (edge) this.draft.layout = addPiece(layout, edge, 'door', this.doorId);
     } else if (this.tool === 'prop') {
-      this.draft.layout = addProp(layout, Math.floor(point.x), Math.floor(point.y), this.propId, this.mirror, this.packs);
+      const placed = addProp(layout, Math.floor(point.x), Math.floor(point.y), this.propId, this.mirror, this.packs);
+      this.draft.layout = placed.layout;
+      if (placed.note) this.note = placed.note;
     } else if (this.tool === 'decal') {
       this.draft.layout = addDecal(layout, point.x, point.y, this.decalId, this.packs);
     } else if (this.tool === 'light') {
@@ -250,13 +297,38 @@ class EditorStore {
     this.timer = window.setTimeout(() => void this.save(), 800);
   }
 
-  private async save() {
-    if (!this.draft) return;
-    await fetch(`/api/drafts/${this.draft.id}`, {
-      method: 'PUT',
-      headers: this.headers(),
-      body: JSON.stringify(this.draft),
-    });
+  private async save(): Promise<boolean> {
+    if (!this.draft) return false;
+    if (this.saving) {
+      this.dirty = true;
+      const ok = await this.saving;
+      if (!ok) return false;
+      return this.dirty ? this.save() : true;
+    }
+    const id = this.draft.id;
+    const body = JSON.stringify(this.draft);
+    this.dirty = false;
+    this.saving = this.postDraft(id, body);
+    const ok = await this.saving;
+    this.saving = null;
+    if (ok && this.dirty) return this.save();
+    return ok;
+  }
+
+  private async postDraft(id: string, body: string): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/drafts/${id}`, { method: 'PUT', headers: this.headers(), body });
+      if (!response.ok) {
+        this.note = await response.text();
+        return false;
+      }
+      const saved = (await response.json()) as { updatedAt?: number };
+      if (this.draft?.id === id && typeof saved.updatedAt === 'number') this.draft.updatedAt = saved.updatedAt;
+      return true;
+    } catch {
+      this.note = 'The map could not be saved.';
+      return false;
+    }
   }
 
   private headers(): Record<string, string> {
@@ -285,7 +357,7 @@ function paintTerrain(base: MapLayout, cells: Cell[], terrain: string): MapLayou
     if (offset >= 0 && offset < bytes.length) bytes[offset] = index;
   }
   next.cells = encodeCells(bytes);
-  return next;
+  return clearVariantPins(next, cells);
 }
 
 function addPiece(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | 'v' }, kind: 'wall' | 'door', asset: string): MapLayout {
@@ -301,15 +373,34 @@ function addPiece(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | '
   return next;
 }
 
-function addProp(layout: MapLayout, x: number, y: number, asset: string, mirror: boolean, packs: Pack[]): MapLayout {
+/** The squares a prop will cover. The click uses the top-left of the footprint, matching placement. */
+export function propCells(x: number, y: number, widthCells: number, depthCells: number, mapWidth: number, mapHeight: number): Cell[] {
+  const originX = Math.floor(x);
+  const originY = Math.floor(y);
+  const spanX = Math.max(1, Math.floor(widthCells));
+  const spanY = Math.max(1, Math.floor(depthCells));
+  const cells: Cell[] = [];
+  for (let stepY = 0; stepY < spanY; stepY += 1) {
+    for (let stepX = 0; stepX < spanX; stepX += 1) {
+      const cellX = originX + stepX;
+      const cellY = originY + stepY;
+      if (cellX < 0 || cellY < 0 || cellX >= mapWidth || cellY >= mapHeight) continue;
+      cells.push({ x: cellX, y: cellY });
+    }
+  }
+  return cells;
+}
+
+function addProp(layout: MapLayout, x: number, y: number, asset: string, mirror: boolean, packs: Pack[]): { layout: MapLayout; note: string | null } {
   const [w, d] = footprintOf(packs, asset);
   const foot = { x, y, w, d };
-  if (x < 0 || y < 0 || x + w > layout.width || y + d > layout.height) return layout;
-  if (blocksDoor(foot, layout)) return layout;
+  if (x < 0 || y < 0 || x + w > layout.width || y + d > layout.height) return { layout, note: null };
+  if (blocksDoor(foot, layout)) return { layout, note: null };
   const busy = layout.props.some((prop) => footprintsOverlap(foot, { x: prop.x, y: prop.y, ...sizeOf(packs, prop.asset) }));
-  if (busy) return layout;
-  const placed: PlacedProp = { id: crypto.randomUUID(), asset, x, y, mirror };
-  return { ...layout, props: [...layout.props, placed] };
+  if (busy) return { layout, note: null };
+  const flip = propMirror(asset, packs, mirror);
+  const placed: PlacedProp = { id: crypto.randomUUID(), asset, x, y, mirror: flip.mirror };
+  return { layout: { ...layout, props: [...layout.props, placed] }, note: flip.note };
 }
 
 function addDecal(layout: MapLayout, x: number, y: number, asset: string, packs: Pack[]): MapLayout {
@@ -337,7 +428,56 @@ function erase(base: MapLayout, cells: Cell[], packs: Pack[]): MapLayout {
     return !touches(piece.x, piece.y) && !touches(piece.x - 1, piece.y);
   });
   next.lights = (next.lights ?? []).filter((light) => !touches(Math.floor(light.x), Math.floor(light.y)));
+  if (next.stairs) next.stairs = next.stairs.filter((stair) => !touches(stair.x, stair.y) && !touches(stair.x2, stair.y2));
   return next;
+}
+
+function paintLevels(base: MapLayout, cells: Cell[], tier: number): MapLayout {
+  const next = cloneLayout(base);
+  const count = next.width * next.height;
+  const decoded = next.levels ? decodeCells(next.levels) : new Uint8Array(count);
+  const grid = decoded.length === count ? decoded : new Uint8Array(count);
+  for (const cell of cells) {
+    const index = cell.y * next.width + cell.x;
+    if (index >= 0 && index < grid.length) grid[index] = tier;
+  }
+  next.levels = encodeCells(grid);
+  return next;
+}
+
+function stairCells(layout: MapLayout, x: number, y: number): Cell[] {
+  const edge = nearestEdge(x, y, layout.width, layout.height);
+  return edge ? (edgePair(layout, edge) ?? []) : [];
+}
+
+function edgePair(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | 'v' }): [Cell, Cell] | null {
+  if (edge.axis === 'h') {
+    if (edge.y <= 0 || edge.y >= layout.height) return null;
+    return [
+      { x: edge.x, y: edge.y },
+      { x: edge.x, y: edge.y - 1 },
+    ];
+  }
+  if (edge.x <= 0 || edge.x >= layout.width) return null;
+  return [
+    { x: edge.x, y: edge.y },
+    { x: edge.x - 1, y: edge.y },
+  ];
+}
+
+function addStair(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | 'v' }, asset: string): { layout: MapLayout; note: string } {
+  const pair = edgePair(layout, edge);
+  if (!pair) return { layout, note: 'That edge is on the border of the map.' };
+  const [a, b] = pair;
+  if (Math.abs(cellLevel(layout, a.x, a.y) - cellLevel(layout, b.x, b.y)) !== 1) {
+    return { layout, note: `Raise one side of (${a.x}, ${a.y}) and (${b.x}, ${b.y}) by one step first.` };
+  }
+  const stairs = layout.stairs ?? [];
+  const same = stairs.some((stair) => (stair.x === a.x && stair.y === a.y && stair.x2 === b.x && stair.y2 === b.y) || (stair.x === b.x && stair.y === b.y && stair.x2 === a.x && stair.y2 === a.y));
+  if (same) return { layout, note: '' };
+  const next = cloneLayout(layout);
+  next.stairs = [...stairs, { id: crypto.randomUUID(), asset, x: a.x, y: a.y, x2: b.x, y2: b.y }];
+  return { layout: next, note: '' };
 }
 
 function addLight(layout: MapLayout, x: number, y: number, range: number, color: string): MapLayout {

@@ -1,55 +1,26 @@
 <script lang="ts">
   import { send } from '../net/socket';
   import { openCreation, overlaysFor } from '../../systems';
-  import { editor } from '../editor/draft.svelte';
   import { table, type Tool } from '../table.svelte';
 
   let tokenName = $state('Hero');
 
   const players = $derived(table.players.filter((player) => player.role === 'player'));
   const guided = $derived(overlaysFor(table.campaign.systemId) != null);
-  const colors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
 
   function tool(next: Tool) {
     table.tool = table.tool === next ? 'select' : next;
   }
 
   function addToken() {
-    const scene = table.scene;
-    send({
-      type: 'createToken',
-      name: tokenName.trim() || 'Token',
-      x: scene ? scene.width / 2 : 2.5,
-      y: scene ? scene.height / 2 : 2.5,
-      ownerId: null,
-      hidden: false,
-      visionRadius: 12,
-      grantsVision: true,
-      color: colors[table.tokens.length % colors.length] ?? '#d4a656',
-      characterId: null,
-      castAsset: editor.castId || null,
-      facing: 'south',
-    });
+    table.placingId = null;
+    table.placingName = tokenName.trim() || 'Token';
+    table.placingToken = !table.placingToken;
   }
 
   function place(character: (typeof table.characters)[number]) {
-    const scene = table.scene;
-    const index = table.tokens.length;
-    send({
-      type: 'createToken',
-      name: character.name,
-      x: (scene ? scene.width / 2 : 2.5) + (index % 5) - 2,
-      y: (scene ? scene.height / 2 : 2.5) + Math.floor(index / 5),
-      ownerId: character.ownerId,
-      hidden: character.kind !== 'pc',
-      visionRadius: character.kind === 'pc' ? 12 : 8,
-      grantsVision: character.kind === 'pc',
-      color: character.kind === 'adversary' ? '#c45c4a' : (colors[index % colors.length] ?? '#d4a656'),
-      characterId: character.id,
-      castAsset: character.castAssetId ?? (editor.castId || null),
-      facing: 'south',
-    });
-    table.tool = 'select';
+    table.placingToken = false;
+    table.placingId = table.placingId === character.id ? null : character.id;
   }
 </script>
 
@@ -100,13 +71,16 @@
           type="button"
           onclick={() => { if (token) table.selectedTokenId = token.id; table.tool = 'select'; }}
         >{character.name}</button>
-        <button class="btn quiet px-2 text-sm" type="button" onclick={() => place(character)}>{token ? 'Again' : 'Place'}</button>
+        <button class="btn quiet px-2 text-sm" type="button" onclick={() => place(character)}>{table.placingId === character.id ? 'Cancel' : token ? 'Again' : 'Place'}</button>
       </div>
     {/each}
   {/if}
 
   <div class="mt-3 flex gap-1.5">
     <input class="field" bind:value={tokenName} maxlength="24" placeholder="Token name" />
-    <button class="btn text-sm" type="button" onclick={addToken}>Add</button>
+    <button class="btn text-sm" type="button" onclick={addToken}>{table.placingToken ? 'Cancel' : 'Add'}</button>
   </div>
+  {#if table.placingId || table.placingToken}
+    <p class="mt-2 text-sm text-[var(--color-parchment)]/70">Click the ground to place them. Right-click cancels.</p>
+  {/if}
 </div>

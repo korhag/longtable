@@ -7,8 +7,7 @@
 
 use crate::map::Vec2;
 use crate::net::protocol::{
-    DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, Presentation, PresentationCapabilities,
-    PresentationDoor, PresentationDoorLayer, PresentationLighting, PresentationVariant, PresentationView, RollLogEntry,
+    DieResult, DoorView, FogMode, FogView, LightView, Listing, PlayerInfo, Presentation, PresentationCapabilities, RollLogEntry,
     RollVisibility, SceneView, SegmentView, Snapshot, StrikeOffer, TokenKind, TokenView, Figure,
 };
 use crate::systems::{Character, CharacterKind};
@@ -33,71 +32,25 @@ pub fn conceal_notice(visibility: RollVisibility, roller_name: &str) -> String {
     }
 }
 
-fn asset_url(scene_id: &str, session: &str, file: &str) -> String {
-    format!("/api/maps/{scene_id}/assets/{file}?session={session}")
-}
-
-fn present(scene_id: &str, session: &str, presentation: &crate::map::Prerendered) -> Presentation {
+fn filed_notice(presentation: &crate::map::Prerendered) -> Presentation {
+    let mut warnings = vec![crate::map::presentation::FILED_VIEW.to_string()];
+    warnings.extend(presentation.warnings.iter().cloned());
     Presentation {
-        active_lighting: presentation.active_lighting.clone(),
-        default_view: presentation.default_view.clone(),
-        view_order: presentation.view_order.clone(),
-        lightings: presentation
-            .lightings
-            .iter()
-            .map(|lighting| PresentationLighting { id: lighting.id.clone(), label: lighting.label.clone() })
-            .collect(),
-        views: presentation
-            .views
-            .iter()
-            .map(|view| PresentationView {
-                id: view.id.clone(),
-                azimuth_deg: view.azimuth_deg,
-                elevation_deg: view.elevation_deg,
-                ortho_half_width: view.ortho_half_width,
-                ortho_half_height: view.ortho_half_height,
-                target: view.target,
-                image_size: view.image_size,
-                pull: view.pull,
-                near: view.near,
-                far: view.far,
-                depth_url: view.depth_file.as_ref().map(|file| asset_url(scene_id, session, file)),
-                variants: view
-                    .variants
-                    .iter()
-                    .map(|variant| PresentationVariant {
-                        id: variant.id.clone(),
-                        color_url: asset_url(scene_id, session, &variant.file),
-                    })
-                    .collect(),
-            })
-            .collect(),
-        doors: presentation
-            .doors
-            .iter()
-            .map(|door| PresentationDoor {
-                id: door.id.clone(),
-                layers: door
-                    .views
-                    .iter()
-                    .map(|layer| PresentationDoorLayer {
-                        view: layer.view.clone(),
-                        lighting: layer.lighting.clone(),
-                        color_url: asset_url(scene_id, session, &layer.file),
-                        depth_url: layer.depth_file.as_ref().map(|file| asset_url(scene_id, session, file)),
-                    })
-                    .collect(),
-            })
-            .collect(),
+        active_lighting: String::new(),
+        default_view: String::new(),
+        view_order: Vec::new(),
+        lightings: Vec::new(),
+        views: Vec::new(),
+        doors: Vec::new(),
         capabilities: PresentationCapabilities {
-            depth: presentation.capabilities.depth,
-            doors: presentation.capabilities.doors,
-            move_blockers: presentation.capabilities.move_blockers,
-            walls: presentation.capabilities.walls,
-            lights: presentation.capabilities.lights,
-            snow: presentation.capabilities.snow,
+            depth: false,
+            doors: false,
+            move_blockers: false,
+            walls: false,
+            lights: false,
+            snow: false,
         },
-        warnings: presentation.warnings.clone(),
+        warnings,
     }
 }
 
@@ -107,6 +60,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
     let sight = sight_of(viewer);
     let polygons = match &sight {
         Sight::Gm => Vec::new(),
+        Sight::Player { .. } if table.uses_height_sight() => Vec::new(),
         Sight::Player { id } => table.vision_polygons(id),
     };
 
@@ -145,7 +99,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                 Vec::new()
             },
             layout: scene.layout.clone(),
-            presentation: scene.presentation.as_ref().map(|presentation| present(scene.id.as_str(), &viewer.session_token, presentation)),
+            presentation: scene.presentation.as_ref().map(filed_notice),
             schema_version: scene.schema_version,
             visual_profile: scene.visual_profile.clone(),
         }),
@@ -154,7 +108,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
             .iter()
             .filter(|token| match &sight {
                 Sight::Gm => true,
-                Sight::Player { id } => token_visible(token, id, &polygons),
+                Sight::Player { id } => token_visible(table, token, id, &polygons),
             })
             .map(|token| TokenView {
                 id: token.id.clone(),
@@ -174,6 +128,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                 character_id: token.character_id.clone(),
                 cast_asset: resolved_cast(table, token),
                 facing: token.facing.clone(),
+                footprint: Some(token.footprint),
             })
             .collect(),
         doors: table
@@ -209,6 +164,10 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                 .iter()
                 .map(|polygon| polygon.iter().map(|point| [point.x, point.y]).collect())
                 .collect(),
+            visible: match &sight {
+                Sight::Gm => None,
+                Sight::Player { id } => table.visible_bits(id),
+            },
             mode: if matches!(sight, Sight::Gm) { FogMode::Gm } else { FogMode::Player },
         },
         rolls: table
@@ -261,6 +220,8 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         strike: strike_offer(table, viewer),
         talk: table.talk.clone(),
         catalog_revision: table.catalog_revision.clone(),
+        notice: table.save_hold.clone(),
+        review: if viewer.role == Role::Gm { table.review.clone() } else { None },
     }
 }
 
@@ -290,7 +251,7 @@ fn faces(table: &Table, sight: &Sight, polygons: &[Vec<Vec2>]) -> Vec<Figure> {
         .iter()
         .filter(|token| match sight {
             Sight::Gm => true,
-            Sight::Player { id } => token_visible(token, id, polygons),
+            Sight::Player { id } => token_visible(table, token, id, polygons),
         })
         .filter_map(|token| figure_for(table, token))
         .collect()
@@ -371,12 +332,15 @@ fn resolved_cast(table: &Table, token: &super::state::Token) -> Option<String> {
         .filter(|asset| !asset.is_empty())
 }
 
-fn token_visible(token: &super::state::Token, viewer_id: &str, polygons: &[Vec<Vec2>]) -> bool {
+fn token_visible(table: &super::state::Table, token: &super::state::Token, viewer_id: &str, polygons: &[Vec<Vec2>]) -> bool {
     if token.hidden {
         return false;
     }
     if token.owner_id.as_deref() == Some(viewer_id) {
         return true;
+    }
+    if table.uses_height_sight() {
+        return table.viewer_sees(viewer_id, token);
     }
     let point = Vec2::new(token.x, token.y);
     polygons.iter().any(|polygon| point_in_poly(point, polygon))
@@ -454,6 +418,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         table.tokens.push(Token {
             id: "ada".into(),
@@ -470,6 +435,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         table.rolls.push(StoredRoll {
             id: "r".into(),
@@ -574,6 +540,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 2,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -593,6 +560,7 @@ mod tests {
             cast_override: false,
             cast_asset: Some("gate/bandit".into()),
             facing: "south".into(),
+            footprint: [1, 1],
         };
         table.tokens.push(token("ada", "Ada", 2.0, 5.0, Some("p1"), 20.0, true));
         table.tokens.push(token("near", "Near", 3.0, 5.0, None, 0.0, false));
@@ -613,6 +581,70 @@ mod tests {
         eyes.view_as = Some("p1".into());
         let as_player = snapshot(&table, &eyes);
         assert!(as_player.tokens.iter().all(|token| token.name != "Shade" && token.name != "Far"));
+    }
+
+    #[test]
+    fn a_high_observer_sees_over_a_hedge() {
+        use crate::map::layout::encode_cells;
+        use crate::map::{MapLayout, Scene, SightBlock, Vec2, DIMETRIC_PROFILE};
+
+        let mut levels = vec![0_u8; 64];
+        levels[1 * 8 + 1] = 2;
+        let mut layout = MapLayout::blank(8, 8, "core/grass");
+        layout.levels = Some(encode_cells(&levels));
+        let mut table = Table::new();
+        table.players.push(crate::session::state::Player {
+            id: "p1".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        table.scene = Some(Scene {
+            id: "rise".into(),
+            name: "Rise".into(),
+            width: 8.0,
+            height: 8.0,
+            image_file: None,
+            walls: Vec::new(),
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: Some(layout),
+            move_blockers: Vec::new(),
+            sight: vec![SightBlock { a: Vec2::new(4.0, 0.0), b: Vec2::new(4.0, 8.0), base: 0.0, top: 0.5 }],
+            presentation: None,
+            schema_version: 2,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
+        });
+        let token = |id: &str, name: &str, x: f32, y: f32, grants: bool| crate::session::state::Token {
+            id: id.into(),
+            name: name.into(),
+            x,
+            y,
+            image_file: None,
+            color: "#d4a656".into(),
+            owner_id: None,
+            hidden: false,
+            vision_radius: 20.0,
+            grants_vision: grants,
+            character_id: None,
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            footprint: [1, 1],
+        };
+        table.tokens.push(token("ada", "Ada", 1.5, 1.5, true));
+        table.tokens.push(token("far", "Far", 6.5, 1.5, false));
+        table.reveal_from_tokens();
+        let player = viewer(Role::Player, "p1");
+        let seen = snapshot(&table, &player);
+        assert!(seen.tokens.iter().any(|token| token.name == "Far"), "a high eye should clear the hedge");
+        assert!(seen.fog.visible.is_some());
+        if let Some(scene) = &mut table.scene {
+            scene.sight[0].top = 4.0;
+        }
+        let hidden = snapshot(&table, &player);
+        assert!(hidden.tokens.iter().all(|token| token.name != "Far"), "a tall wall still hides the far figure");
     }
 
     #[test]

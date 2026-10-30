@@ -9,6 +9,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedDecal } from '../net/bindings/PlacedDecal.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
 import { decodeCells, encodeCells } from './cells';
+import { clearVariantPins } from './variants';
 import type { Cell } from './brush';
 
 export interface Footprint {
@@ -92,7 +93,7 @@ export function fillTheme(
       }
     }
   }
-  return next;
+  return clearVariantPins(next, brushed);
 }
 
 function ensureTerrain(layout: MapLayout, terrain: string) {

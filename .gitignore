@@ -9,7 +9,9 @@ data/
 config.toml
 
 # Drawn art. Pack definitions stay, and so do the game systems in systems/.
+# The ruin pictures are colored blocks the acceptance test loads.
 assets/**/*.*
 !assets/**/*.json
+!assets/packs/ruin/**/*.png
 
 .DS_Store

@@ -5,30 +5,26 @@
   import { BRUSH_SIZES } from './brush';
   import AssetLibrary from './AssetLibrary.svelte';
   import { editor, type BuildTool } from './draft.svelte';
+  import { objectLevels, placementRepair, stairRepair } from './placementRepair';
 
   let width = $state(30);
   let height = $state(20);
   let blankWidth = $state(30);
   let blankHeight = $state(20);
   let name = $state('New map');
-  let fileInput: HTMLInputElement;
-
-  async function importMap(file: File) {
-    const body = new FormData();
-    body.append('map', file);
-    const response = await fetch('/api/maps/import', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${table.sessionToken ?? ''}` },
-      body,
-    });
-    if (!response.ok) {
-      table.error = await response.text();
-      return;
-    }
-    const payload = await response.json() as { warnings?: string[] };
-    const note = payload.warnings?.find((line) => line.trim().length > 0);
-    if (note) table.error = note;
-  }
+  const publishLabel = $derived(
+    editor.draft?.sceneId && editor.draft.sceneId === table.scene?.id ? 'Update this map' : 'Put on the table as a new map',
+  );
+  const repair = $derived.by(() => {
+    const draft = editor.draft;
+    if (!draft) return null;
+    const updating = Boolean(draft.sceneId && draft.sceneId === table.scene?.id);
+    if (!updating && table.scene) return null;
+    return placementRepair(table.tokens, draft.layout, editor.packs);
+  });
+  const objects = $derived(editor.draft ? objectLevels(editor.draft.layout, editor.packs) : null);
+  const stairs = $derived(editor.draft ? stairRepair(editor.draft.layout) : null);
+  const held = $derived(Boolean(repair || objects || stairs));
 
   const tools: { id: BuildTool; name: string }[] = [
     { id: 'theme', name: 'Theme' },
@@ -38,6 +34,8 @@
     { id: 'prop', name: 'Props' },
     { id: 'decal', name: 'Decals' },
     { id: 'light', name: 'Lights' },
+    { id: 'raise', name: 'Raise' },
+    { id: 'stair', name: 'Stairs' },
     { id: 'erase', name: 'Erase' },
   ];
 
@@ -93,22 +91,8 @@
 
 <div class="flex flex-col gap-1 text-sm">
   <AssetLibrary />
-  <p class="text-sm text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. R or right-click mirrors a prop. Erase lifts a wall, a prop, or a light.</p>
-  <div class="mt-2 flex gap-1.5">
-    <button class="btn quiet flex-1" type="button" onclick={() => fileInput.click()}>Import map</button>
-    <input
-      bind:this={fileInput}
-      class="hidden"
-      type="file"
-      accept=".dd2vtt,.uvtt,.ltmap,.json,application/json"
-      onchange={(event) => {
-        const file = event.currentTarget.files?.[0];
-        if (file) void importMap(file);
-        event.currentTarget.value = '';
-      }}
-    />
-  </div>
-  <div class="flex items-end gap-1.5">
+  <p class="text-sm text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. Right-click a ground square to keep the next picture of that tile. R or right-click mirrors a prop that has a mirrored picture. An upright picture stays as drawn. Erase lifts a wall, a prop, or a light.</p>
+  <div class="mt-2 flex items-end gap-1.5">
     <input class="field w-16" type="number" min="5" max="200" bind:value={blankWidth} aria-label="Blank width" />
     <input class="field w-16" type="number" min="5" max="200" bind:value={blankHeight} aria-label="Blank height" />
     <button class="btn quiet" type="button" onclick={() => send({ type: 'blankMap', width: Math.round(blankWidth), height: Math.round(blankHeight) })}>Blank</button>
@@ -138,12 +122,20 @@
     {/each}
   </div>
 
-  {#if editor.tool === 'theme' || editor.tool === 'terrain' || editor.tool === 'erase'}
+  {#if editor.tool === 'theme' || editor.tool === 'terrain' || editor.tool === 'erase' || editor.tool === 'raise'}
     <div class="mt-3 flex gap-1.5">
       {#each BRUSH_SIZES as size (size)}
         <button class="btn quiet flex-1 text-sm" class:active={editor.brush === size} type="button" onclick={() => (editor.brush = size)}>{size}</button>
       {/each}
     </div>
+  {/if}
+
+  {#if editor.tool === 'raise'}
+    <div class="mt-3 flex gap-1.5">
+      <button class="btn quiet flex-1 text-sm" class:active={editor.tier === 1} type="button" onclick={() => (editor.tier = 1)}>Step</button>
+      <button class="btn quiet flex-1 text-sm" class:active={editor.tier === 2} type="button" onclick={() => (editor.tier = 2)}>Rise</button>
+    </div>
+    <p class="mt-2 text-sm">Paint a square to this height. A stair belongs on the edge between one step.</p>
   {/if}
 
   {#if editor.tool === 'theme'}
@@ -204,7 +196,16 @@
     </div>
   {/if}
 
-  <button class="btn mt-3 w-full" type="button" disabled={!editor.draft} onclick={() => void editor.publish()}>Put on the table</button>
+  {#if repair}
+    <p class="mt-3 text-sm text-[var(--color-parchment)]">{repair}</p>
+  {/if}
+  {#if objects}
+    <p class="mt-3 text-sm text-[var(--color-parchment)]">{objects}</p>
+  {/if}
+  {#if stairs}
+    <p class="mt-3 text-sm text-[var(--color-parchment)]">{stairs}</p>
+  {/if}
+  <button class="btn mt-3 w-full" type="button" disabled={!editor.draft || held} onclick={() => void editor.publish()}>{publishLabel}</button>
   {#if table.scene?.layout}
     <button class="btn quiet mt-1.5 w-full text-sm" type="button" onclick={() => void editor.copyLive()}>Copy the table</button>
   {/if}

@@ -63,6 +63,15 @@ pub struct Segment {
     pub b: Vec2,
 }
 
+/// A sight blocker with a vertical span. `base` and `top` are world heights.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SightBlock {
+    pub a: Vec2,
+    pub b: Vec2,
+    pub base: f32,
+    pub top: f32,
+}
+
 /// A door. Closed doors block movement and sight; open doors do not.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Door {
@@ -105,6 +114,9 @@ pub struct Scene {
     /// Props that stop walking but not sight, such as a table.
     #[serde(default)]
     pub move_blockers: Vec<Segment>,
+    /// Finite sight spans. Absent on older saves, which keep infinite walls.
+    #[serde(default)]
+    pub sight: Vec<SightBlock>,
     /// Angled pictures of this same grid. Absent on older saves.
     #[serde(default)]
     pub presentation: Option<Prerendered>,

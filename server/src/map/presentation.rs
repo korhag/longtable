@@ -1,8 +1,11 @@
 // ------------------------------------------------------------
 // Module: presentation
-// Purpose: One logical map with several pictures. Directions
-//          and lighting change the picture, not the grid.
+// Purpose: Pictures filed with an old angled map. The table
+//          keeps them. The play view does not draw them.
 // ------------------------------------------------------------
+
+/// Shown when a saved scene still has angled pictures on file.
+pub const FILED_VIEW: &str = "This scene still has an angled picture. The table keeps that picture filed away and draws the fixed view.";
 
 use serde::{Deserialize, Serialize};
 

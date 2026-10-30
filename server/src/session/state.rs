@@ -5,6 +5,7 @@
 //          snapshot is pushed to every open connection.
 // ------------------------------------------------------------
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use tokio::sync::mpsc;
@@ -14,7 +15,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::dice::{parse_formula, RollFormula, KEYFRAME_DT};
 use crate::map::compile::Compiled;
-use crate::map::{MapLayout, Scene, Segment, Vec2, DIMETRIC_PROFILE};
+use crate::map::{MapLayout, Scene, Segment, SightBlock, Vec2, DIMETRIC_PROFILE};
 use crate::net::protocol::{
     Blow, ClientMsg, ConcealedRoll, Contest, DieResult, FogBrushMode, FogCell, RollEvent, RollVisibility, ServerMsg, TalkLine,
 };
@@ -23,7 +24,7 @@ use crate::systems::{
     SystemDef,
     Campaign,
 };
-use crate::vision::{cells_for, path_blocked, visibility_polygon, Explored, CELLS_PER_SQUARE};
+use crate::vision::{cells_for, path_blocked, point_in_poly, reveal_height, sees_actor, visibility_polygon, Explored, CELLS_PER_SQUARE, TALL_WALL};
 
 use super::permissions::{can_see_roll, conceal_notice, snapshot};
 
@@ -63,10 +64,17 @@ pub struct Token {
     pub cast_asset: Option<String>,
     #[serde(default = "facing_south")]
     pub facing: String,
+    /// Gameplay size in cells. A picture does not change this.
+    #[serde(default = "one_by_one")]
+    pub footprint: [u32; 2],
 }
 
 fn facing_south() -> String {
     "south".into()
+}
+
+fn one_by_one() -> [u32; 2] {
+    [1, 1]
 }
 
 pub fn cardinal_facing(from_x: f32, from_y: f32, to_x: f32, to_y: f32, previous: &str) -> String {
@@ -212,11 +220,24 @@ pub struct Table {
     pub undo: Option<UndoStep>,
     pub talk: Vec<TalkLine>,
     pub catalog_revision: String,
+    /// Set when a save could not be opened. Writes refuse to replace that file.
+    pub save_hold: Option<String>,
+    /// What an older save kept. Not written back into the file.
+    pub review: Option<String>,
     voices: HashMap<String, String>,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
     epoch: u64,
     next_color: usize,
+    /// Reused sight masks. Not part of the save. A dice roll does not recompute them.
+    sight_cache: RefCell<SightCache>,
+    /// Cast id to gameplay footprint. Not saved. Filled when the library loads.
+    cast_footprints: HashMap<String, [u32; 2]>,
+}
+
+struct SightCache {
+    explored_stamp: Option<u64>,
+    masks: HashMap<String, (u64, String)>,
 }
 
 fn roll_speech(roll: &RollEvent) -> String {
@@ -238,6 +259,149 @@ fn roll_speech(roll: &RollEvent) -> String {
     let what = roll.label.clone().filter(|label| !label.is_empty()).unwrap_or_else(|| roll.formula.clone());
     let tone = roll.outcome.as_ref().map(|outcome| format!(" {}", outcome.label)).unwrap_or_default();
     format!("{what} {}{tone}", roll.total)
+}
+
+fn figures_outside(tokens: &[Token], width: f32, height: f32) -> Option<String> {
+    let names: Vec<&str> = tokens
+        .iter()
+        .filter(|token| token.x < 0.5 || token.y < 0.5 || token.x > width - 0.5 || token.y > height - 0.5)
+        .map(|token| token.name.as_str())
+        .collect();
+    occupy_message(&names, "outside the new map", "Move them onto it, then put the map on the table again.")
+}
+
+fn figures_inside(tokens: &[Token], blockers: &[Segment]) -> Option<String> {
+    let loops = closed_loops(blockers);
+    let names: Vec<&str> = tokens
+        .iter()
+        .filter(|token| loops.iter().any(|polygon| point_in_poly(Vec2::new(token.x, token.y), polygon)))
+        .map(|token| token.name.as_str())
+        .collect();
+    occupy_message(&names, "standing in something on the new map", "Move them clear of it, then put the map on the table again.")
+}
+
+fn figures_straddling(tokens: &[Token], layout: &MapLayout) -> Option<String> {
+    let names: Vec<&str> = tokens
+        .iter()
+        .filter(|token| matches!(support_footprint(layout, token.x, token.y, token.footprint), Err(message) if message.contains("one level")))
+        .map(|token| token.name.as_str())
+        .collect();
+    occupy_message(&names, "standing across two levels", "Move them onto one level, then put the map on the table again.")
+}
+
+fn support_footprint(layout: &MapLayout, x: f32, y: f32, footprint: [u32; 2]) -> Result<(), String> {
+    let mut height = None;
+    for (cell_x, cell_y) in occupied_cells(x, y, footprint) {
+        if cell_x < 0 || cell_y < 0 || cell_x >= layout.width as i32 || cell_y >= layout.height as i32 {
+            return Err("that square is off the map".into());
+        }
+        let level = layout.level_at(cell_x as f32 + 0.5, cell_y as f32 + 0.5) as u8;
+        match height {
+            None => height = Some(level),
+            Some(previous) if previous != level => return Err("that body does not fit on one level".into()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn occupied_cells(x: f32, y: f32, footprint: [u32; 2]) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    let xs = axis_cells(x, footprint[0]);
+    let ys = axis_cells(y, footprint[1]);
+    for cell_y in ys {
+        for cell_x in xs.clone() {
+            cells.push((cell_x, cell_y));
+        }
+    }
+    cells
+}
+
+fn axis_cells(center: f32, span: u32) -> Vec<i32> {
+    let span = span.max(1);
+    let start = (center - span as f32 / 2.0).floor() as i32;
+    (0..span as i32).map(|step| start + step).collect()
+}
+
+fn snap_footprint(x: f32, y: f32, footprint: [u32; 2], width: f32, height: f32) -> Option<(f32, f32)> {
+    Some((snap_axis(x, footprint[0], width)?, snap_axis(y, footprint[1], height)?))
+}
+
+fn snap_axis(value: f32, span: u32, limit: f32) -> Option<f32> {
+    let span = span.max(1);
+    if span % 2 == 1 {
+        return snap_cell(value, limit);
+    }
+    if !value.is_finite() {
+        return None;
+    }
+    let center = value.round();
+    let half = span as f32 / 2.0;
+    if center < half || center + half > limit + 0.001 {
+        return None;
+    }
+    Some(center)
+}
+
+fn occupy_message(names: &[&str], where_they_are: &str, repair: &str) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    let list = match names {
+        [one] => (*one).to_string(),
+        [first, second] => format!("{first} and {second}"),
+        many => {
+            let last = many.last().copied().unwrap_or("");
+            let rest = many[..many.len() - 1].join(", ");
+            format!("{rest}, and {last}")
+        }
+    };
+    let verb = if names.len() == 1 { "is" } else { "are" };
+    Some(format!("{list} {verb} {where_they_are}. {repair}"))
+}
+
+/// Object footprints are stored as consecutive closed rings of edges.
+fn closed_loops(segments: &[Segment]) -> Vec<Vec<Vec2>> {
+    let mut loops = Vec::new();
+    let mut current: Vec<Vec2> = Vec::new();
+    for segment in segments {
+        if current.last().is_some_and(|last| !same_point(last, &segment.a)) {
+            current.clear();
+        }
+        if current.is_empty() {
+            current.push(segment.a);
+        }
+        current.push(segment.b);
+        if current.len() >= 4 && same_point(current.last().unwrap(), &current[0]) {
+            current.pop();
+            loops.push(std::mem::take(&mut current));
+        }
+    }
+    loops
+}
+
+fn same_point(a: &Vec2, b: &Vec2) -> bool {
+    (a.x - b.x).abs() < 0.001 && (a.y - b.y).abs() < 0.001
+}
+
+fn grants_for(token: &Token, viewer_id: &str) -> bool {
+    token.grants_vision && !token.hidden && (token.owner_id.is_none() || token.owner_id.as_deref() == Some(viewer_id))
+}
+
+fn same_edge(span: &SightBlock, wall: &Segment) -> bool {
+    let close = |left: Vec2, right: Vec2| (left.x - right.x).abs() < 0.02 && (left.y - right.y).abs() < 0.02;
+    (close(span.a, wall.a) && close(span.b, wall.b)) || (close(span.a, wall.b) && close(span.b, wall.a))
+}
+
+fn edge_base(layout: &MapLayout, a: Vec2, b: Vec2) -> f32 {
+    let mid_x = (a.x + b.x) * 0.5;
+    let mid_y = (a.y + b.y) * 0.5;
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let length = (dx * dx + dy * dy).sqrt().max(0.001);
+    let nx = -dy / length * 0.05;
+    let ny = dx / length * 0.05;
+    layout.level_at(mid_x + nx, mid_y + ny).max(layout.level_at(mid_x - nx, mid_y - ny))
 }
 
 impl Table {
@@ -264,11 +428,27 @@ impl Table {
             undo: None,
             talk: Vec::new(),
             catalog_revision: String::new(),
+            save_hold: None,
+            review: None,
             voices: HashMap::new(),
             clients: Vec::new(),
             sessions: HashMap::new(),
             epoch: 0,
             next_color: 0,
+            sight_cache: RefCell::new(SightCache { explored_stamp: None, masks: HashMap::new() }),
+            cast_footprints: HashMap::new(),
+        }
+    }
+
+    /// Remember each cast picture's gameplay size. The picture itself stays a picture.
+    pub fn note_cast_footprints(&mut self, catalog: &crate::assets::Catalog) {
+        self.cast_footprints.clear();
+        for pack in &catalog.packs {
+            for actor in &pack.cast {
+                let width = actor.suggested_footprint_cells[0].clamp(1, 8);
+                let depth = actor.suggested_footprint_cells[1].clamp(1, 8);
+                self.cast_footprints.insert(format!("{}/{}", pack.id, actor.id), [width, depth]);
+            }
         }
     }
 
@@ -608,6 +788,10 @@ impl Table {
                 self.delete_scene(viewer, &scene_id)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::DuplicateScene { scene_id } => {
+                self.duplicate_scene(viewer, &scene_id)?;
+                Ok(CommandEffect::Refresh)
+            }
         }
     }
 
@@ -775,9 +959,9 @@ impl Table {
 
     fn move_token(&mut self, viewer: &Viewer, token_id: &str, x: f32, y: f32) -> Result<bool, String> {
         let (width, height) = self.bounds();
-        let x = snap_cell(x, width).ok_or_else(|| "that square is off the map".to_string())?;
-        let y = snap_cell(y, height).ok_or_else(|| "that square is off the map".to_string())?;
         let index = self.token_index(token_id).ok_or_else(|| "that token is not on the table".to_string())?;
+        let footprint = self.tokens[index].footprint;
+        let (x, y) = snap_footprint(x, y, footprint, width, height).ok_or_else(|| "that square is off the map".to_string())?;
         let token = &self.tokens[index];
         let gm = viewer.role == crate::net::protocol::Role::Gm;
         if !gm && token.owner_id.as_deref() != Some(viewer.player_id.as_str()) {
@@ -789,15 +973,19 @@ impl Table {
         if (token.x - x).abs() < 0.01 && (token.y - y).abs() < 0.01 {
             return Ok(false);
         }
+        if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.as_ref()) {
+            support_footprint(layout, x, y, footprint)?;
+        }
         if !gm {
             let from = Vec2::new(token.x, token.y);
             let to = Vec2::new(x, y);
             let walls = self.blocking_walls();
-            if path_blocked(from, to, &walls) {
+            let blockers = self.scene.as_ref().map(|scene| scene.move_blockers.clone()).unwrap_or_default();
+            if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.as_ref()) {
+                crate::map::navigation::find_route(layout, from, to, &walls, &blockers, footprint)?;
+            } else if path_blocked(from, to, &walls) {
                 return Err("a wall is in the way".into());
-            }
-            let blockers = self.scene.as_ref().map(|scene| scene.move_blockers.as_slice()).unwrap_or(&[]);
-            if path_blocked(from, to, blockers) {
+            } else if path_blocked(from, to, &blockers) {
                 return Err("something is in the way".into());
             }
         }
@@ -822,18 +1010,12 @@ impl Table {
         Ok(())
     }
 
-    fn set_lighting(&mut self, viewer: &Viewer, lighting: &str) -> Result<(), String> {
+    fn set_lighting(&mut self, viewer: &Viewer, _lighting: &str) -> Result<(), String> {
         self.require_gm(viewer)?;
-        let scene = self.scene.as_mut().ok_or_else(|| "there is no map".to_string())?;
-        let presentation = scene.presentation.as_mut().ok_or_else(|| "this map has no lighting to change".to_string())?;
-        if !presentation.lightings.iter().any(|item| item.id == lighting) {
-            return Err("that lighting is not in this package".into());
+        if self.scene.is_none() {
+            return Err("there is no map".into());
         }
-        if !presentation.views.iter().all(|view| view.variants.iter().any(|variant| variant.id == lighting)) {
-            return Err("that lighting is missing a picture".into());
-        }
-        presentation.active_lighting = lighting.to_string();
-        Ok(())
+        Err("the table uses one fixed view".into())
     }
 
     fn fog_brush(&mut self, viewer: &Viewer, mode: FogBrushMode, cells: &[FogCell]) -> Result<(), String> {
@@ -865,8 +1047,6 @@ impl Table {
     ) -> Result<(), String> {
         self.require_gm(viewer)?;
         let (width, height) = self.bounds();
-        let x = snap_cell(x, width).unwrap_or(1.5);
-        let y = snap_cell(y, height).unwrap_or(1.5);
         let owner_id = self.known_owner(owner_id)?;
         let character_id = match character_id {
             Some(id) if !id.is_empty() => {
@@ -879,6 +1059,13 @@ impl Table {
             _ => None,
         };
         let grants_vision = grants_vision && !hidden;
+        let resolved = cast_asset.clone().filter(|asset| !asset.is_empty()).or_else(|| {
+            character_id.as_ref().and_then(|id| {
+                self.characters.iter().find(|character| character.id == *id).and_then(|character| character.cast_asset_id.clone())
+            })
+        });
+        let footprint = resolved.as_ref().and_then(|asset| self.cast_footprints.get(asset).copied()).unwrap_or([1, 1]);
+        let (x, y) = snap_footprint(x, y, footprint, width, height).unwrap_or((1.5, 1.5));
         self.tokens.push(Token {
             id: Uuid::new_v4().to_string(),
             name: clean_name(&name),
@@ -894,6 +1081,7 @@ impl Table {
             cast_override: cast_asset.is_some(),
             cast_asset,
             facing: facing.unwrap_or_else(|| "south".into()),
+            footprint,
         });
         self.reveal_from_tokens();
         Ok(())
@@ -916,7 +1104,22 @@ impl Table {
         cast_asset: Option<String>,
         facing: Option<String>,
     ) -> Result<(), String> {
-        self.require_gm(viewer)?;
+        let facing_only = facing.is_some()
+            && name.is_none()
+            && owner_id.is_none()
+            && !clear_owner
+            && hidden.is_none()
+            && vision_radius.is_none()
+            && grants_vision.is_none()
+            && color.is_none()
+            && character_id.is_none()
+            && !clear_character
+            && !set_cast_asset;
+        let owns = self.tokens.iter().any(|token| token.id == token_id && token.owner_id.as_deref() == Some(viewer.player_id.as_str()));
+        let own_turn = facing_only && owns && viewer.role != crate::net::protocol::Role::Gm;
+        if !own_turn {
+            self.require_gm(viewer)?;
+        }
         let owner_id = self.known_owner(owner_id)?;
         if !clear_character {
             if let Some(id) = &character_id {
@@ -960,12 +1163,15 @@ impl Table {
         }
         if set_cast_asset {
             token.cast_override = true;
+            // A new picture does not change how many squares the body occupies.
             token.cast_asset = cast_asset.filter(|asset| !asset.is_empty());
         }
         if let Some(facing) = facing {
             token.facing = cardinal_facing(0.0, 0.0, 0.0, 0.0, &facing);
         }
-        self.reveal_from_tokens();
+        if !own_turn {
+            self.reveal_from_tokens();
+        }
         Ok(())
     }
 
@@ -1038,6 +1244,7 @@ impl Table {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -1069,6 +1276,20 @@ impl Table {
         } else {
             Uuid::new_v4().to_string()
         };
+        let width = layout.width as f32;
+        let height = layout.height as f32;
+        let updating = self.scene.as_ref().is_some_and(|scene| scene.id == id);
+        if updating || self.scene.is_none() {
+            if let Some(message) = figures_outside(&self.tokens, width, height) {
+                return Err(message);
+            }
+            if let Some(message) = figures_inside(&self.tokens, &compiled.move_blockers) {
+                return Err(message);
+            }
+            if let Some(message) = figures_straddling(&self.tokens, &layout) {
+                return Err(message);
+            }
+        }
         let mut doors = compiled.doors;
         let preserve = self.scene.as_ref().is_some_and(|scene| {
             scene.id == id && (scene.width - layout.width as f32).abs() < 0.01 && (scene.height - layout.height as f32).abs() < 0.01
@@ -1081,8 +1302,9 @@ impl Table {
             }
         }
         let memory = if preserve { Some(self.explored.clone()) } else { None };
-        let width = layout.width as f32;
-        let height = layout.height as f32;
+        if !updating && self.scene.is_some() {
+            self.pack_live_scene();
+        }
         self.install_scene(Scene {
             id: id.clone(),
             name,
@@ -1094,6 +1316,7 @@ impl Table {
             lights: compiled.lights,
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
+            sight: compiled.sight,
             presentation: None,
             schema_version: 2,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -1114,6 +1337,8 @@ impl Table {
         self.scene = Some(scene);
         let (cells_w, cells_h) = cells_for(width, height);
         self.explored.resize(cells_w, cells_h);
+        self.sight_cache.borrow_mut().explored_stamp = None;
+        self.sight_cache.borrow_mut().masks.clear();
         self.reveal_from_tokens();
     }
 
@@ -1138,6 +1363,25 @@ impl Table {
     // --------------------------------------------------------
 
     pub fn reveal_from_tokens(&mut self) {
+        if self.uses_height_sight() {
+            let stamp = self.sight_inputs();
+            if self.sight_cache.borrow().explored_stamp == Some(stamp) {
+                return;
+            }
+            let spans = self.sight_spans();
+            let layout = self.sight_layout();
+            let eyes: Vec<(f32, f32, f32)> = self
+                .tokens
+                .iter()
+                .filter(|token| token.grants_vision && !token.hidden)
+                .map(|token| (token.x, token.y, token.vision_radius))
+                .collect();
+            for (x, y, radius) in eyes {
+                reveal_height(&mut self.explored, None, x, y, radius, &layout, &spans);
+            }
+            self.sight_cache.borrow_mut().explored_stamp = Some(stamp);
+            return;
+        }
         let walls = self.blocking_walls();
         let polygons: Vec<Vec<Vec2>> = self
             .tokens
@@ -1148,6 +1392,117 @@ impl Table {
         for polygon in polygons {
             self.explored.paint_polygon(&polygon);
         }
+    }
+
+    pub(crate) fn uses_height_sight(&self) -> bool {
+        let Some(scene) = &self.scene else { return false };
+        if !scene.sight.is_empty() {
+            return true;
+        }
+        scene.layout.as_ref().is_some_and(|layout| layout.has_raised_ground())
+    }
+
+    pub(crate) fn viewer_sees(&self, viewer_id: &str, token: &Token) -> bool {
+        let layout = self.sight_layout();
+        let spans = self.sight_spans();
+        self.tokens.iter().filter(|eye| grants_for(eye, viewer_id)).any(|eye| {
+            sees_actor(eye.x, eye.y, eye.vision_radius, token.x, token.y, &layout, &spans)
+        })
+    }
+
+    pub(crate) fn visible_bits(&self, viewer_id: &str) -> Option<String> {
+        if !self.uses_height_sight() {
+            return None;
+        }
+        let stamp = self.sight_inputs();
+        if let Some(bits) = self
+            .sight_cache
+            .borrow()
+            .masks
+            .get(viewer_id)
+            .filter(|(cached, _)| *cached == stamp)
+            .map(|(_, bits)| bits.clone())
+        {
+            return Some(bits);
+        }
+        let layout = self.sight_layout();
+        let spans = self.sight_spans();
+        let mut mask = Explored::new(self.explored.width, self.explored.height);
+        let eyes: Vec<(f32, f32, f32)> = self
+            .tokens
+            .iter()
+            .filter(|token| grants_for(token, viewer_id))
+            .map(|token| (token.x, token.y, token.vision_radius))
+            .collect();
+        let mut ignored = Explored::new(self.explored.width, self.explored.height);
+        for (x, y, radius) in eyes {
+            reveal_height(&mut ignored, Some(&mut mask), x, y, radius, &layout, &spans);
+        }
+        let bits = mask.to_base64();
+        self.sight_cache.borrow_mut().masks.insert(viewer_id.to_string(), (stamp, bits.clone()));
+        Some(bits)
+    }
+
+    fn sight_layout(&self) -> MapLayout {
+        if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.clone()) {
+            return layout;
+        }
+        let (width, height) = self.bounds();
+        MapLayout::blank(width.max(5.0) as u32, height.max(5.0) as u32, "core/grass")
+    }
+
+    fn sight_spans(&self) -> Vec<SightBlock> {
+        let Some(scene) = &self.scene else { return Vec::new() };
+        let mut spans = scene.sight.clone();
+        for wall in self.blocking_walls() {
+            if spans.iter().any(|span| same_edge(span, &wall)) {
+                continue;
+            }
+            let base = scene.layout.as_ref().map(|layout| edge_base(layout, wall.a, wall.b)).unwrap_or(0.0);
+            spans.push(SightBlock { a: wall.a, b: wall.b, base, top: base + TALL_WALL });
+        }
+        spans
+    }
+
+    fn sight_inputs(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        let mix = |hash: &mut u64, value: u64| {
+            *hash ^= value;
+            *hash = hash.wrapping_mul(0x100000001b3);
+        };
+        let mix_f = |hash: &mut u64, value: f32| mix(hash, value.to_bits() as u64);
+        if let Some(scene) = &self.scene {
+            mix_f(&mut hash, scene.width);
+            mix_f(&mut hash, scene.height);
+            for wall in &scene.walls {
+                mix_f(&mut hash, wall.a.x);
+                mix_f(&mut hash, wall.a.y);
+                mix_f(&mut hash, wall.b.x);
+                mix_f(&mut hash, wall.b.y);
+            }
+            for door in &scene.doors {
+                mix(&mut hash, if door.open { 1 } else { 2 });
+            }
+            for block in &scene.sight {
+                mix_f(&mut hash, block.base);
+                mix_f(&mut hash, block.top);
+                mix_f(&mut hash, block.a.x);
+                mix_f(&mut hash, block.b.y);
+            }
+            if let Some(levels) = scene.layout.as_ref().and_then(|layout| layout.levels.as_deref()) {
+                for byte in levels.bytes() {
+                    mix(&mut hash, byte as u64);
+                }
+            }
+        }
+        for token in &self.tokens {
+            mix_f(&mut hash, token.x);
+            mix_f(&mut hash, token.y);
+            mix_f(&mut hash, token.vision_radius);
+            mix(&mut hash, u64::from(token.grants_vision));
+            mix(&mut hash, u64::from(token.hidden));
+        }
+        hash
     }
 
     pub fn vision_polygons(&self, player_id: &str) -> Vec<Vec<Vec2>> {
@@ -1425,10 +1780,41 @@ impl Table {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
         });
+        Ok(())
+    }
+
+    fn duplicate_scene(&mut self, viewer: &Viewer, scene_id: &str) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if self.scenes.len() >= 40 {
+            return Err("this campaign has enough scenes".into());
+        }
+        let source = if let Some(scene) = self.scene.as_ref().filter(|scene| scene.id == scene_id) {
+            scene.clone()
+        } else {
+            self.scenes
+                .iter()
+                .find(|shelf| shelf.id == scene_id)
+                .and_then(|shelf| shelf.scene.clone())
+                .ok_or_else(|| "that scene is not in this campaign".to_string())?
+        };
+        let mut copy = source;
+        copy.id = Uuid::new_v4().to_string();
+        let stem: String = copy.name.chars().take(42).collect();
+        copy.name = title(&format!("{stem} copy"))?;
+        let (cells_w, cells_h) = cells_for(copy.width, copy.height);
+        let shelf = SceneShelf {
+            id: copy.id.clone(),
+            name: copy.name.clone(),
+            scene: Some(copy),
+            tokens: Vec::new(),
+            explored: Explored::new(cells_w, cells_h),
+        };
+        self.scenes.push(shelf);
         Ok(())
     }
 
@@ -2067,6 +2453,127 @@ mod tests {
         Viewer { player_id: "gm".into(), role: Role::Gm, view_as: None, session_token: "t".into() }
     }
 
+    fn empty_compiled() -> Compiled {
+        Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() }
+    }
+
+    fn named_token(name: &str, x: f32, y: f32) -> Token {
+        Token {
+            id: name.to_string(),
+            name: name.to_string(),
+            x,
+            y,
+            image_file: None,
+            color: "#7eb8a2".into(),
+            owner_id: None,
+            hidden: false,
+            vision_radius: 8.0,
+            grants_vision: true,
+            character_id: None,
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            footprint: [1, 1],
+        }
+    }
+
+    #[test]
+    fn duplicating_a_scene_leaves_the_figures_where_they_are() {
+        let mut table = Table::new();
+        table.scene = Some(Scene {
+            id: "hall".into(),
+            name: "Hall".into(),
+            width: 12.0,
+            height: 12.0,
+            image_file: None,
+            walls: Vec::new(),
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: Some(crate::map::layout::MapLayout::blank(12, 12, "core/grass")),
+            move_blockers: Vec::new(),
+            sight: Vec::new(),
+            presentation: None,
+            schema_version: 2,
+            visual_profile: crate::map::DIMETRIC_PROFILE.to_string(),
+        });
+        table.tokens.push(named_token("Ada", 4.5, 4.5));
+        table
+            .command(&gm(), crate::net::protocol::ClientMsg::DuplicateScene { scene_id: "hall".into() }, None)
+            .unwrap();
+        assert_eq!(table.scene.as_ref().unwrap().id, "hall");
+        assert_eq!(table.tokens[0].name, "Ada");
+        assert_eq!(table.scenes.len(), 1);
+        assert!(table.scenes[0].tokens.is_empty());
+        assert_ne!(table.scenes[0].id, "hall");
+        assert_eq!(table.scenes[0].scene.as_ref().unwrap().layout.as_ref().unwrap().width, 12);
+    }
+
+    #[test]
+    fn turning_a_figure_does_not_move_them() {
+        let mut table = Table::new();
+        table.tokens.push(named_token("Ada", 4.5, 6.5));
+        table.command(&gm(), crate::net::protocol::ClientMsg::UpdateToken {
+            token_id: "Ada".into(),
+            name: None,
+            owner_id: None,
+            clear_owner: false,
+            hidden: None,
+            vision_radius: None,
+            grants_vision: None,
+            color: None,
+            character_id: None,
+            clear_character: false,
+            set_cast_asset: false,
+            cast_asset: None,
+            facing: Some("east".into()),
+        }, None).unwrap();
+        assert_eq!(table.tokens[0].facing, "east");
+        assert_eq!(table.tokens[0].x, 4.5);
+        assert_eq!(table.tokens[0].y, 6.5);
+    }
+
+    #[test]
+    fn a_player_can_turn_their_own_figure() {
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        let mut mine = named_token("Ada", 4.5, 6.5);
+        mine.owner_id = Some("p".into());
+        table.tokens.push(mine);
+        table.tokens.push(named_token("Bram", 2.5, 2.5));
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
+        let turn = |token_id: &str, facing: Option<String>, name: Option<String>| crate::net::protocol::ClientMsg::UpdateToken {
+            token_id: token_id.into(),
+            name,
+            owner_id: None,
+            clear_owner: false,
+            hidden: None,
+            vision_radius: None,
+            grants_vision: None,
+            color: None,
+            character_id: None,
+            clear_character: false,
+            set_cast_asset: false,
+            cast_asset: None,
+            facing,
+        };
+        table.command(&player, turn("Ada", Some("west".into()), None), None).unwrap();
+        assert_eq!(table.tokens[0].facing, "west");
+        assert_eq!(table.tokens[0].x, 4.5);
+        let refused = table.command(&player, turn("Bram", Some("north".into()), None), None);
+        assert!(refused.is_err(), "someone else's figure should stay put");
+        assert_eq!(table.tokens[1].facing, "south");
+        let renamed = table.command(&player, turn("Ada", Some("north".into()), Some("Hero".into())), None);
+        assert!(renamed.is_err(), "a player should not rename a figure from the turn");
+        assert_eq!(table.tokens[0].name, "Ada");
+        assert_eq!(table.tokens[0].facing, "west");
+    }
+
     #[test]
     fn the_gm_key_ignores_case_and_spaces() {
         let mut table = Table::new();
@@ -2104,6 +2611,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
 
         let gm_viewer = table.viewer(&gm_seat.player_id, gm_epoch).unwrap();
@@ -2160,6 +2668,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -2179,6 +2688,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         let blocked = table.move_token(&player, "ada", 1.5, 6.5);
@@ -2208,6 +2718,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -2227,6 +2738,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         assert!(table.move_token(&player, "ada", 2.5, 7.5).is_err());
@@ -2260,6 +2772,7 @@ mod tests {
                 Segment { a: Vec2::new(3.0, 6.0), b: Vec2::new(1.0, 6.0) },
                 Segment { a: Vec2::new(1.0, 6.0), b: Vec2::new(1.0, 5.0) },
             ],
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -2279,6 +2792,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         assert!(table.move_token(&player, "ada", 2.5, 7.5).is_err());
@@ -2296,13 +2810,89 @@ mod tests {
         let mut table = Table::new();
         let layout = MapLayout::blank(8, 8, "core/grass");
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
-        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() }, None);
+        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() }, None);
         assert!(err.is_err());
         table
-            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() }, None)
+            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() }, None)
             .unwrap();
         assert_eq!(table.scene.as_ref().unwrap().name, "Glade");
         assert!(table.scene.as_ref().unwrap().layout.is_some());
+    }
+
+    #[test]
+    fn a_smaller_map_does_not_slide_a_figure_inward() {
+        let mut table = Table::new();
+        let wide = MapLayout::blank(8, 8, "core/grass");
+        let id = table
+            .publish_built(&gm(), "Glade".into(), wide, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() }, None)
+            .unwrap();
+        table.tokens.push(Token {
+            id: "ada".into(),
+            name: "Ada".into(),
+            x: 7.5,
+            y: 7.5,
+            image_file: None,
+            color: "#7eb8a2".into(),
+            owner_id: None,
+            hidden: false,
+            vision_radius: 8.0,
+            grants_vision: true,
+            character_id: None,
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            footprint: [1, 1],
+        });
+        let small = MapLayout::blank(6, 6, "core/grass");
+        let err = table
+            .publish_built(&gm(), "Glade".into(), small, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() }, Some(id))
+            .unwrap_err();
+        assert!(err.contains("Ada"), "{err}");
+        assert!(err.contains("outside"), "{err}");
+        assert!((table.tokens[0].x - 7.5).abs() < 0.01, "the figure stayed put");
+        assert_eq!(table.scene.as_ref().unwrap().width, 8.0);
+    }
+
+    #[test]
+    fn a_figure_inside_an_object_blocks_the_update() {
+        let mut table = Table::new();
+        let layout = MapLayout::blank(8, 8, "core/grass");
+        let id = table
+            .publish_built(&gm(), "Glade".into(), layout.clone(), empty_compiled(), None)
+            .unwrap();
+        table.tokens.push(named_token("Ada", 3.5, 4.5));
+        let blocked = Compiled {
+            walls: Vec::new(),
+            doors: Vec::new(),
+            move_blockers: vec![
+                Segment { a: Vec2::new(3.0, 4.0), b: Vec2::new(4.0, 4.0) },
+                Segment { a: Vec2::new(4.0, 4.0), b: Vec2::new(4.0, 5.0) },
+                Segment { a: Vec2::new(4.0, 5.0), b: Vec2::new(3.0, 5.0) },
+                Segment { a: Vec2::new(3.0, 5.0), b: Vec2::new(3.0, 4.0) },
+            ],
+            lights: Vec::new(),
+            sight: Vec::new(),
+        };
+        let err = table.publish_built(&gm(), "Glade".into(), layout, blocked, Some(id)).unwrap_err();
+        assert!(err.contains("Ada"), "{err}");
+        assert!(err.contains("standing in something"), "{err}");
+        assert!((table.tokens[0].x - 3.5).abs() < 0.01);
+        assert!(table.scene.as_ref().unwrap().move_blockers.is_empty());
+    }
+
+    #[test]
+    fn a_new_map_keeps_figures_with_the_map_they_were_on() {
+        let mut table = Table::new();
+        let wide = MapLayout::blank(8, 8, "core/grass");
+        let first = table.publish_built(&gm(), "Glade".into(), wide, empty_compiled(), None).unwrap();
+        table.tokens.push(named_token("Ada", 2.5, 2.5));
+        let small = MapLayout::blank(6, 6, "core/grass");
+        let second = table.publish_built(&gm(), "Yard".into(), small, empty_compiled(), None).unwrap();
+        assert_ne!(first, second);
+        assert!(table.tokens.is_empty(), "the new map does not inherit the figures");
+        let shelf = table.scenes.iter().find(|scene| scene.id == first).unwrap();
+        assert_eq!(shelf.tokens[0].name, "Ada");
+        assert_eq!(table.scene.as_ref().unwrap().name, "Yard");
     }
 
     #[test]
@@ -2517,6 +3107,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: None,
             schema_version: 1,
             visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -2536,6 +3127,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         table.explored.set(0, 0, true);
         table
@@ -2616,7 +3208,7 @@ mod tests {
     }
 
     #[test]
-    fn lighting_changes_the_picture_without_resetting_the_table() {
+    fn lighting_cannot_change_the_fixed_view() {
         let mut table = Table::new();
         table.players.push(Player {
             id: "p".into(),
@@ -2640,6 +3232,7 @@ mod tests {
             lights: Vec::new(),
             layout: None,
             move_blockers: Vec::new(),
+            sight: Vec::new(),
             presentation: Some(crate::map::Prerendered {
                 active_lighting: "day".into(),
                 default_view: "view-0".into(),
@@ -2694,6 +3287,7 @@ mod tests {
             cast_override: false,
             cast_asset: None,
             facing: "south".into(),
+            footprint: [1, 1],
             });
         table.explored.set(19, 19, true);
         let player = Viewer {
@@ -2703,12 +3297,335 @@ mod tests {
             session_token: "seat".into(),
         };
         assert!(table.command(&player, ClientMsg::SetLighting { lighting: "night".into() }, None).is_err());
-        table.command(&gm(), ClientMsg::SetLighting { lighting: "night".into() }, None).unwrap();
+        let refused = match table.command(&gm(), ClientMsg::SetLighting { lighting: "night".into() }, None) {
+            Err(message) => message,
+            Ok(_) => panic!("lighting should not change the view"),
+        };
+        assert!(refused.contains("fixed view"), "{refused}");
         let scene = table.scene.as_ref().unwrap();
         assert_eq!(scene.id, "camp");
-        assert_eq!(scene.presentation.as_ref().unwrap().active_lighting, "night");
+        assert_eq!(scene.presentation.as_ref().unwrap().active_lighting, "day");
         assert_eq!(scene.walls.len(), 1);
         assert_eq!(table.tokens.len(), 1);
         assert!(table.explored.get(19, 19));
+        let seen = crate::session::permissions::snapshot(&table, &player);
+        let notice = seen.scene.unwrap().presentation.unwrap();
+        assert!(notice.views.is_empty());
+        assert!(notice.view_order.is_empty());
+        assert!(notice.warnings.iter().any(|line| line.contains("filed away")));
+        assert!(notice.warnings.iter().all(|line| !line.contains(".png")));
+    }
+
+    #[test]
+    fn a_player_climbs_stairs_and_not_a_cliff() {
+        use crate::map::compile::Compiled;
+        use crate::map::layout::{encode_cells, StairLink};
+        use crate::net::protocol::ClientMsg;
+
+        let mut levels = vec![0_u8; 36];
+        levels[1] = 1;
+        levels[2] = 2;
+        levels[6] = 1;
+        let mut layout = crate::map::MapLayout::blank(6, 6, "core/grass");
+        layout.levels = Some(encode_cells(&levels));
+        layout.stairs = Some(vec![StairLink { id: "up".into(), asset: "steps/stair".into(), x: 0, y: 0, x2: 1, y2: 0 }]);
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        let compiled = Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new(), sight: Vec::new() };
+        table.publish_built(&gm(), "Rise".into(), layout, compiled, None).unwrap();
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Ada".into(),
+                    x: 0.5,
+                    y: 0.5,
+                    owner_id: Some("p".into()),
+                    hidden: false,
+                    vision_radius: 6.0,
+                    grants_vision: true,
+                    color: "#d4a656".into(),
+                    character_id: None,
+                    cast_asset: None,
+                    facing: Some("east".into()),
+                },
+                None,
+            )
+            .unwrap();
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
+        let id = table.tokens[0].id.clone();
+        let cliff = table.command(&player, ClientMsg::MoveToken { token_id: id.clone(), x: 0.5, y: 1.5 }, None).err().expect("a cliff should stop the move");
+        assert!(cliff.contains("no stairs"), "{cliff}");
+        assert!((table.tokens[0].x - 0.5).abs() < 0.01);
+        table.command(&player, ClientMsg::MoveToken { token_id: id.clone(), x: 1.5, y: 0.5 }, None).expect("the stair should let the player climb");
+        assert!((table.tokens[0].x - 1.5).abs() < 0.01);
+        let high = table.command(&player, ClientMsg::MoveToken { token_id: id.clone(), x: 2.5, y: 0.5 }, None).err().expect("the next rise has no stair");
+        assert!(high.contains("no stairs"), "{high}");
+        table.command(&gm(), ClientMsg::MoveToken { token_id: id, x: 2.5, y: 0.5 }, None).unwrap();
+        assert!((table.tokens[0].x - 2.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_player_walks_around_a_wall() {
+        use crate::net::protocol::ClientMsg;
+
+        let layout = MapLayout::blank(5, 5, "core/grass");
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        let mut compiled = empty_compiled();
+        compiled.walls.push(Segment { a: Vec2::new(1.0, 0.0), b: Vec2::new(1.0, 1.0) });
+        table.publish_built(&gm(), "Yard".into(), layout, compiled, None).unwrap();
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Ada".into(),
+                    x: 0.5,
+                    y: 0.5,
+                    owner_id: Some("p".into()),
+                    hidden: false,
+                    vision_radius: 6.0,
+                    grants_vision: true,
+                    color: "#d4a656".into(),
+                    character_id: None,
+                    cast_asset: None,
+                    facing: Some("east".into()),
+                },
+                None,
+            )
+            .unwrap();
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
+        let id = table.tokens[0].id.clone();
+        table.command(&player, ClientMsg::MoveToken { token_id: id, x: 1.5, y: 0.5 }, None).expect("the walk goes around the wall");
+        assert!((table.tokens[0].x - 1.5).abs() < 0.01);
+        assert!((table.tokens[0].y - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_wide_body_must_stand_on_one_level() {
+        use crate::map::layout::encode_cells;
+        use crate::net::protocol::ClientMsg;
+
+        let mut levels = vec![0_u8; 64];
+        for y in 0..8 {
+            for x in 4..8 {
+                levels[y * 8 + x] = 1;
+            }
+        }
+        let mut layout = MapLayout::blank(8, 8, "core/grass");
+        layout.levels = Some(encode_cells(&levels));
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        table.cast_footprints.insert("ruin/brute".into(), [2, 2]);
+        let id = table.publish_built(&gm(), "Yard".into(), layout.clone(), empty_compiled(), None).unwrap();
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Brute".into(),
+                    x: 3.0,
+                    y: 3.0,
+                    owner_id: Some("p".into()),
+                    hidden: false,
+                    vision_radius: 6.0,
+                    grants_vision: true,
+                    color: "#d4a656".into(),
+                    character_id: None,
+                    cast_asset: Some("ruin/brute".into()),
+                    facing: Some("south".into()),
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(table.tokens[0].footprint, [2, 2]);
+        assert!((table.tokens[0].x - 3.0).abs() < 0.01, "an even body sits on the corner");
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
+        let token_id = table.tokens[0].id.clone();
+        let split = match table.command(&player, ClientMsg::MoveToken { token_id: token_id.clone(), x: 4.0, y: 3.0 }, None) {
+            Err(message) => message,
+            Ok(_) => panic!("a split body should stay put"),
+        };
+        assert!(split.contains("one level"), "{split}");
+        assert!((table.tokens[0].x - 3.0).abs() < 0.01);
+        table.command(&player, ClientMsg::MoveToken { token_id: token_id.clone(), x: 3.0, y: 5.0 }, None).unwrap();
+        assert!((table.tokens[0].y - 5.0).abs() < 0.01, "the same level is a legal step");
+        let climb = match table.command(&player, ClientMsg::MoveToken { token_id: token_id.clone(), x: 5.0, y: 5.0 }, None) {
+            Err(message) => message,
+            Ok(_) => panic!("a wide body should not cross onto the rise"),
+        };
+        assert!(climb.contains("one level"), "{climb}");
+        assert!((table.tokens[0].x - 3.0).abs() < 0.01);
+        assert!((table.tokens[0].y - 5.0).abs() < 0.01);
+        table.tokens[0].x = 3.0;
+        table.tokens[0].y = 3.0;
+        let mut raised = layout;
+        let mut stepped = vec![0_u8; 64];
+        stepped[3 * 8 + 3] = 1;
+        raised.levels = Some(encode_cells(&stepped));
+        let err = table.publish_built(&gm(), "Yard".into(), raised, empty_compiled(), Some(id)).unwrap_err();
+        assert!(err.contains("Brute"), "{err}");
+        assert!(err.contains("two levels"), "{err}");
+        assert!((table.tokens[0].x - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_largest_map_publishes_and_a_larger_one_does_not() {
+        use crate::net::protocol::ClientMsg;
+
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "p".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        let layout = MapLayout::blank(200, 200, "core/grass");
+        layout.validate().unwrap();
+        let id = table.publish_built(&gm(), "Field".into(), layout, empty_compiled(), None).unwrap();
+        assert_eq!(table.scene.as_ref().unwrap().width, 200.0);
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Ada".into(),
+                    x: 1.5,
+                    y: 1.5,
+                    owner_id: Some("p".into()),
+                    hidden: false,
+                    vision_radius: 8.0,
+                    grants_vision: true,
+                    color: "#d4a656".into(),
+                    character_id: None,
+                    cast_asset: None,
+                    facing: Some("south".into()),
+                },
+                None,
+            )
+            .unwrap();
+        let token_id = table.tokens[0].id.clone();
+        table
+            .command(&gm(), ClientMsg::MoveToken { token_id, x: 199.5, y: 199.5 }, None)
+            .unwrap();
+        assert!((table.tokens[0].x - 199.5).abs() < 0.01);
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
+        let seen = crate::session::permissions::snapshot(&table, &player);
+        assert_eq!(seen.scene.as_ref().unwrap().width, 200.0);
+        assert!(seen.tokens.iter().any(|token| token.name == "Ada"));
+        let too_big = MapLayout::blank(201, 200, "core/grass");
+        let err = table.publish_built(&gm(), "Field".into(), too_big, empty_compiled(), Some(id)).unwrap_err();
+        assert!(err.contains("200"), "{err}");
+        assert_eq!(table.scene.as_ref().unwrap().width, 200.0);
+        assert!((table.tokens[0].x - 199.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_linked_figure_follows_the_character_picture() {
+        use crate::net::protocol::ClientMsg;
+        use crate::systems::CharacterKind;
+        use std::collections::BTreeMap;
+
+        let mut table = Table::new();
+        table.players.push(Player {
+            id: "gm".into(),
+            name: "Host".into(),
+            role: Role::Gm,
+            color: "#f4f1ea".into(),
+            connected: true,
+        });
+        table.cast_footprints.insert("ruin/brute".into(), [2, 2]);
+        table
+            .command(&gm(), ClientMsg::CreateCharacter { name: "Ada".into(), kind: CharacterKind::Pc }, None)
+            .unwrap();
+        let character_id = table.characters[0].id.clone();
+        fn picture(table: &mut Table, character_id: &str, asset: &str) {
+            table
+                .command(
+                    &gm(),
+                    ClientMsg::UpdateCharacter {
+                        character_id: character_id.to_string(),
+                        name: None,
+                        kind: None,
+                        owner_id: None,
+                        clear_owner: false,
+                        numbers: BTreeMap::new(),
+                        texts: BTreeMap::new(),
+                        set_cast_asset: true,
+                        cast_asset_id: Some(asset.into()),
+                    },
+                    None,
+                )
+                .unwrap();
+        }
+        picture(&mut table, &character_id, "ruin/brute");
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Ada".into(),
+                    x: 2.5,
+                    y: 2.5,
+                    owner_id: None,
+                    hidden: false,
+                    vision_radius: 8.0,
+                    grants_vision: true,
+                    color: "#d4a656".into(),
+                    character_id: Some(character_id.clone()),
+                    cast_asset: None,
+                    facing: Some("south".into()),
+                },
+                None,
+            )
+            .unwrap();
+        table
+            .command(
+                &gm(),
+                ClientMsg::CreateToken {
+                    name: "Shade".into(),
+                    x: 4.5,
+                    y: 2.5,
+                    owner_id: None,
+                    hidden: false,
+                    vision_radius: 8.0,
+                    grants_vision: false,
+                    color: "#c45c4a".into(),
+                    character_id: Some(character_id.clone()),
+                    cast_asset: Some("ruin/bandit".into()),
+                    facing: Some("west".into()),
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(table.tokens[0].footprint, [2, 2], "the body size comes from the character picture at placement");
+        assert!(!table.tokens[0].cast_override);
+        assert!(table.tokens[1].cast_override);
+        let cast_of = |table: &Table, name: &str| {
+            let seen = crate::session::permissions::snapshot(table, &gm());
+            seen.tokens.into_iter().find(|token| token.name == name).unwrap().cast_asset
+        };
+        assert_eq!(cast_of(&table, "Ada").as_deref(), Some("ruin/brute"));
+        assert_eq!(cast_of(&table, "Shade").as_deref(), Some("ruin/bandit"));
+        picture(&mut table, &character_id, "ruin/scout");
+        assert_eq!(cast_of(&table, "Ada").as_deref(), Some("ruin/scout"));
+        assert_eq!(cast_of(&table, "Shade").as_deref(), Some("ruin/bandit"));
+        assert_eq!(table.tokens[0].footprint, [2, 2], "a new picture does not resize the body");
     }
 }

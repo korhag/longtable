@@ -51,7 +51,9 @@ impl App {
         table.sync_fog_size();
 
         let (house, fresh) = House::load(&data_dir, &config.table_passphrase, &table.campaign.name);
-        if fresh {
+        if table.save_hold.is_some() {
+            tracing::error!("the save is on hold, so boot did not write a replacement");
+        } else if fresh {
             if let Some(id) = house.open_id() {
                 let path = data_dir.join("tables").join(format!("{id}.json"));
                 if let Err(err) = storage::write_to(&table, &path) {
@@ -61,7 +63,9 @@ impl App {
         } else if let Some(id) = house.open_id() {
             let path = data_dir.join("tables").join(format!("{id}.json"));
             if path.is_file() {
-                storage::load_file(&mut table, &path);
+                if let Err(err) = storage::load_file(&mut table, &path) {
+                    tracing::error!("{err}");
+                }
                 table.passphrase = config.table_passphrase.clone();
                 table.gm_key = config.gm_key.clone();
             } else if let Err(err) = storage::write_to(&table, &path) {
@@ -71,6 +75,7 @@ impl App {
 
         table.catalog_revision = "1".into();
         catalog.revision = "1".into();
+        table.note_cast_footprints(&catalog);
         let (save_tx, save_rx) = mpsc::unbounded_channel();
         let app = Arc::new(Self {
             table: Mutex::new(table),

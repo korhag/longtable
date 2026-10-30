@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // Module: engine
-// Purpose: The tabletop. One textured plane, flat disc tokens,
+// Purpose: The tabletop. One fixed camera, upright figures,
 //          and a fog sheet. It redraws only when the view or
 //          the camera changes, so an idle table costs nothing.
 // ------------------------------------------------------------
@@ -10,20 +10,26 @@ import * as THREE from 'three';
 import { fileUrl, findIn, loadTexture, type CastDef, type Pack } from '../assets/catalog';
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
+import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { Role } from '../net/bindings/Role.ts';
 import type { SceneView } from '../net/bindings/SceneView.ts';
 import type { TokenView } from '../net/bindings/TokenView.ts';
 import { bitAt, decodeBits } from '../fog/bits';
 import type { Tool } from '../table.svelte';
-import { cameraDepth, framedDistance, pan, projectedSpan, sceneBasis } from './cameraProfile';
+import { cameraDepth, centeredSpan, framedDistance, pan, sceneBasis } from './cameraProfile';
+import { footprintCells, placeAnchor } from './footprint';
+import { cellLevel, FOG_LIFT, sceneRise, supportHeight } from './levels';
+import { inSight } from './seen';
 import { opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { DecalLayer } from './decals';
 import { OcclusionOutlines } from './occlusion';
-import { PrerenderedLayer } from './prerendered';
 import { ringPaint, type CastPaint, type RingMark } from './rings';
 import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
-import { TerrainLayer } from './terrain';
+import { blockingSegments, walkRoute } from './route';
+import { stairLanding } from './stairLanding';
+import { fogStamp, sameFogPicture, sameFogStamp, type FogStamp } from './fogStamp';
+import { fogShell, gridPositions, TerrainLayer } from './terrain';
 
 export interface EngineHooks {
   onMove: (tokenId: string, x: number, y: number) => void;
@@ -32,11 +38,13 @@ export interface EngineHooks {
   onToggleDoor: (doorId: string, open: boolean) => void;
   onBuild?: (phase: 'down' | 'move' | 'up' | 'hover', point: { x: number; y: number }, button: number) => void;
   canDrag: (token: TokenView) => boolean;
-  onMeasure?: (delta: { dx: number; dy: number; x: number; y: number } | null) => void;
+  onMeasure?: (delta: { dx: number; dy: number; x: number; y: number; landX: number; landY: number; note: string | null } | null) => void;
   onWarning?: (message: string) => void;
   onTarget?: (tokenId: string | null) => void;
   onMenu?: (tokenId: string | null, x: number, y: number) => void;
   onPaint?: () => void;
+  onPlace?: (point: { x: number; y: number }) => void;
+  onCancelPlace?: () => void;
 }
 
 export interface View {
@@ -45,12 +53,16 @@ export interface View {
   doors: DoorView[];
   fog: FogView | null;
   role: Role;
+  /** Whose eyes this picture uses. Their own figure stays even in the dark. */
+  seatId?: string | null;
   selectedId: string | null;
   targetId: string | null;
   hoverId: string | null;
   tool: Tool;
   packs: Pack[];
   ghost: { x: number; y: number }[];
+  /** Squares the next click will give a new figure. Empty means placement is off. */
+  placeSpan: [number, number] | null;
   buildMode: boolean;
   viewId: string;
   cast: Record<string, CastPaint>;
@@ -65,7 +77,6 @@ interface TokenNode {
   ticks: THREE.Group;
   label: THREE.Sprite;
   card: THREE.Mesh;
-  imageUrl: string | null;
   bodyKey: string;
 }
 
@@ -95,6 +106,7 @@ export class TableEngine {
     tool: 'select',
     packs: [],
     ghost: [],
+    placeSpan: null,
     buildMode: false,
     viewId: '',
     cast: {},
@@ -107,6 +119,7 @@ export class TableEngine {
   private legacyNotice = '';
   private hoverCell: THREE.LineLoop | null = null;
   private dragLine: THREE.Line | null = null;
+  private dragNote: string | null = null;
   private dragOrigin: { x: number; y: number } | null = null;
   private board: THREE.Mesh | null = null;
   private wallLines: THREE.LineSegments | null = null;
@@ -123,21 +136,20 @@ export class TableEngine {
   private building = false;
   private ghostMesh: THREE.Mesh | null = null;
   private ghostKey = '';
+  private placeMesh: THREE.Mesh | null = null;
+  private placeKey = '';
   private terrain: TerrainLayer;
   private decals: DecalLayer;
   private standees: StandeeLayer;
   private objects: SceneObjects;
   private outlines = new OcclusionOutlines();
-  private viewKey = '';
   private lastBrush = 0;
   private pointer = { x: 0, y: 0 };
   private mapKey = '';
-  private fogKey = '';
+  private fogStamp: FogStamp | null = null;
   private framedScene = '';
   private frameId = 0;
-  private standing = false;
   private fogTexture: THREE.Texture | null = null;
-  private prerendered: PrerenderedLayer;
 
   constructor(
     private host: HTMLElement,
@@ -160,7 +172,6 @@ export class TableEngine {
     this.decals = new DecalLayer(this.scene3);
     this.standees = new StandeeLayer(this.scene3);
     this.objects = new SceneObjects(this.scene3);
-    this.prerendered = new PrerenderedLayer(this.scene3);
     this.resize();
 
     const canvas = this.renderer.domElement;
@@ -182,6 +193,7 @@ export class TableEngine {
       textures: this.renderer.info.memory.textures,
       geometries: this.renderer.info.memory.geometries,
       draws: this.stats.draws,
+      calls: this.lastCalls,
       renderer: info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'unavailable',
     };
   }
@@ -214,12 +226,29 @@ export class TableEngine {
     });
   }
 
+  private lastCalls = 0;
+  private sceneryToken = 1;
+
+  get sceneryDraws() {
+    return this.outlines.sceneryDraws;
+  }
+
+  private bumpScenery() {
+    this.sceneryToken += 1;
+    this.invalidate();
+  }
+
+  renderNow() {
+    this.draw();
+  }
+
   private draw() {
     this.stats.draws += 1;
     try {
       const bodies = [...this.nodes.values()].map((node) => node.card).filter((body) => body.visible);
       this.renderer.render(this.scene3, this.camera);
-      this.outlines.draw(this.renderer, this.scene3, this.camera, bodies, this.view.selectedId, [this.tokenGroup]);
+      this.lastCalls = this.renderer.info.render.calls;
+      this.outlines.draw(this.renderer, this.scene3, this.camera, bodies, this.view.selectedId, [this.tokenGroup], this.sceneryToken);
       this.hooks.onPaint?.();
     } catch (error) {
       console.error(error);
@@ -227,28 +256,30 @@ export class TableEngine {
   }
 
   dispose() {
+    this.showPlace(null);
     this.running = false;
     cancelAnimationFrame(this.frameId);
     document.removeEventListener('visibilitychange', this.onVisible);
     window.removeEventListener('resize', this.resize);
     this.terrain.clear();
+    this.decals.clear();
     this.objects.clear();
     this.standees.clear?.();
     this.outlines.dispose();
     for (const node of this.nodes.values()) disposeToken(node);
     this.nodes.clear();
-    this.prerendered.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
 
   sync(view: View) {
-    const nextKey = viewSignature(view);
-    const changed = nextKey !== this.viewKey;
-    this.viewKey = nextKey;
+    const changed = !sameView(this.view, view);
+    if (!sameScenery(this.view, view)) this.sceneryToken += 1;
+    const wasPlacing = this.view.placeSpan != null;
     this.view = view;
-    this.standing = false;
+    if (wasPlacing && !view.placeSpan && !this.dragging) this.hooks.onMeasure?.(null);
     this.ensureMap();
+    this.syncGrid();
     this.syncFog();
     this.syncWalls();
     this.syncDoors();
@@ -256,10 +287,8 @@ export class TableEngine {
     this.syncTokens();
     this.syncBuilt();
     this.syncGhost();
+    if (!view.placeSpan) this.showPlace(null);
     this.applyPresentation();
-    if (this.standing) {
-      for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
-    }
     if (changed) this.invalidate();
   }
 
@@ -278,11 +307,9 @@ export class TableEngine {
     this.mapKey = key;
     this.mapMesh?.geometry.dispose();
     (this.mapMesh?.material as THREE.Material | undefined)?.dispose();
-    this.grid?.geometry.dispose();
-    (this.grid?.material as THREE.Material | undefined)?.dispose();
     this.board?.geometry.dispose();
+    (this.board?.material as THREE.Material | undefined)?.dispose();
     this.mapMesh?.removeFromParent();
-    this.grid?.removeFromParent();
     this.board?.removeFromParent();
 
     this.board = new THREE.Mesh(
@@ -304,13 +331,10 @@ export class TableEngine {
         material.map = texture;
         material.color.set(0xffffff);
         material.needsUpdate = true;
-        this.invalidate();
+        this.bumpScenery();
       });
     }
 
-    this.grid = gridLines(width, height);
-    this.scene3.add(this.grid);
-    this.applyGrid();
     if (this.mapMesh) this.mapMesh.visible = !this.view.scene?.layout;
     const sceneId = this.view.scene?.id ?? 'empty';
     if (sceneId !== this.framedScene) {
@@ -320,28 +344,54 @@ export class TableEngine {
     }
   }
 
+  private gridKey = '';
+
+  private syncGrid() {
+    const { width, height } = this.bounds();
+    const levels = this.view.scene?.layout?.levels ?? '';
+    const key = `${width}x${height}:${levels}`;
+    if (key === this.gridKey && this.grid) return;
+    this.gridKey = key;
+    this.grid?.geometry.dispose();
+    (this.grid?.material as THREE.Material | undefined)?.dispose();
+    this.grid?.removeFromParent();
+    this.grid = gridLines(width, height, this.view.scene?.layout ?? null);
+    this.scene3.add(this.grid);
+    this.applyGrid();
+  }
+
   private syncFog() {
     const fog = this.view.fog;
     const { width, height } = this.bounds();
     if (!fog) {
+      this.fogStamp = null;
       this.fogTexture = null;
       this.fogMesh?.removeFromParent();
       return;
     }
-    const key = `${fog.explored}:${fog.mode}:${JSON.stringify(fog.visiblePolygons)}:${width}`;
-    if (key === this.fogKey && this.fogMesh) return;
-    this.fogKey = key;
+    const levels = this.view.scene?.layout?.levels ?? '';
+    if (this.fogStamp && this.fogMesh && sameFogStamp(this.fogStamp, fog, width, levels)) return;
+    this.fogStamp = fogStamp(fog, width, levels);
     const canvas = drawFog(fog, width, height);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
     this.fogTexture = texture;
+    const shell = fogShell(width, height, this.view.scene?.layout ?? null);
     if (!this.fogMesh) {
       this.fogMesh = new THREE.Mesh(
-        plane(width, height),
-        new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+        shell.geometry,
+        new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          depthWrite: true,
+          depthTest: true,
+          alphaTest: 0.2,
+          side: THREE.DoubleSide,
+        }),
       );
-      this.fogMesh.position.set(0, 0.03, 0);
+      this.fogMesh.position.set(0, shell.lifted ? 0 : FOG_LIFT, 0);
+      this.fogMesh.raycast = () => {};
       this.scene3.add(this.fogMesh);
     } else {
       const material = this.fogMesh.material as THREE.MeshBasicMaterial;
@@ -349,8 +399,10 @@ export class TableEngine {
       material.map = texture;
       material.needsUpdate = true;
       this.fogMesh.geometry.dispose();
-      this.fogMesh.geometry = plane(width, height);
-      this.fogMesh.position.set(0, 0.03, 0);
+      this.fogMesh.geometry = shell.geometry;
+      this.fogMesh.position.set(0, shell.lifted ? 0 : FOG_LIFT, 0);
+      this.fogMesh.raycast = () => {};
+      if (!this.fogMesh.parent) this.scene3.add(this.fogMesh);
     }
   }
 
@@ -376,7 +428,7 @@ export class TableEngine {
 
   private syncDoors() {
     clearGroup(this.doorGroup);
-    if (this.view.scene?.layout || this.standing) return;
+    if (this.view.scene?.layout) return;
     for (const door of this.view.doors) {
       const mesh = segmentQuad(door.a, door.b, 0.12, door.open ? 0xc6a15a : 0x8d3d32, 0.05);
       mesh.userData.doorId = door.id;
@@ -414,10 +466,10 @@ export class TableEngine {
       this.placeCamera();
     }
     const showAll = this.view.buildMode || this.view.role === 'gm' || this.view.fog?.mode === 'gm';
-    this.terrain.sync(layout, this.view.packs, () => this.invalidate());
-    this.decals.sync(layout, this.view.packs, showAll ? null : this.view.fog, showAll, () => this.invalidate());
-    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.invalidate());
-    this.objects.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.invalidate());
+    this.terrain.sync(layout, this.view.packs, () => this.bumpScenery());
+    this.decals.sync(layout, this.view.packs, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
+    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
+    this.objects.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
   }
 
   private syncGhost() {
@@ -445,9 +497,46 @@ export class TableEngine {
     this.scene3.add(this.ghostMesh);
   }
 
+  private showPlace(point: { x: number; y: number } | null) {
+    const span = this.view.placeSpan;
+    const { width, height } = this.bounds();
+    const cells = point && span ? footprintCells(point.x, point.y, span[0], span[1], width, height) : [];
+    const key = cells.map((cell) => `${cell.x},${cell.y}`).join(';');
+    if (key === this.placeKey) return;
+    this.placeKey = key;
+    this.placeMesh?.geometry.dispose();
+    (this.placeMesh?.material as THREE.Material | undefined)?.dispose();
+    this.placeMesh?.removeFromParent();
+    this.placeMesh = null;
+    if (cells.length === 0) {
+      this.invalidate();
+      return;
+    }
+    const positions: number[] = [];
+    for (const cell of cells) {
+      const y = cellLevel(this.view.scene?.layout ?? null, cell.x + 0.5, cell.y + 0.5) + 0.08;
+      positions.push(cell.x, y, cell.y, cell.x + 1, y, cell.y, cell.x + 1, y, cell.y + 1);
+      positions.push(cell.x, y, cell.y, cell.x + 1, y, cell.y + 1, cell.x, y, cell.y + 1);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    this.placeMesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ color: 0xf2d48a, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.placeMesh.renderOrder = 3;
+    this.scene3.add(this.placeMesh);
+    this.invalidate();
+  }
+
+  private visibleTokens() {
+    if (this.view.role === 'gm') return this.view.tokens;
+    return this.view.tokens.filter((token) => !token.hidden && inSight(token, this.view.fog, this.view.seatId));
+  }
+
   private syncTokens() {
     const seen = new Set<string>();
-    for (const token of this.view.tokens) {
+    for (const token of this.visibleTokens()) {
       seen.add(token.id);
       let node = this.nodes.get(token.id);
       if (!node) {
@@ -456,8 +545,8 @@ export class TableEngine {
         this.tokenGroup.add(node.group);
       }
       const dragging = this.dragging?.id === token.id;
-      if (!dragging) node.group.position.set(token.x, 0, token.y);
-      paintToken(node, token, ringMark(token.id, this.view), this.standing, this.view, () => this.invalidate());
+      if (!dragging) node.group.position.set(token.x, supportHeight(this.view.scene?.layout, token.x, token.y), token.y);
+      paintToken(node, token, ringMark(token.id, this.view), this.view, () => this.invalidate());
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;
@@ -478,7 +567,7 @@ export class TableEngine {
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
-    const span = projectedSpan(width, height, 0);
+    const span = centeredSpan(width, height, sceneRise(this.view.scene?.layout));
     this.distance = Math.max(framedDistance(span.width, span.height, canvasW, canvasH, this.insets), 8);
     this.placeCamera();
   }
@@ -518,7 +607,7 @@ export class TableEngine {
   setGrid(style: 'off' | 'faint' | 'strong') {
     this.gridStyle = style;
     this.applyGrid();
-    this.invalidate();
+    this.bumpScenery();
   }
 
   cycleGrid() {
@@ -567,10 +656,7 @@ export class TableEngine {
     this.camera.bottom = -(ndcY + 1) * viewH / 2;
     this.camera.top = this.camera.bottom + viewH;
     this.camera.updateProjectionMatrix();
-    if (this.standing) {
-      for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
-    }
-    this.invalidate();
+    this.bumpScenery();
   }
 
   private snap(distance: number) {
@@ -597,7 +683,6 @@ export class TableEngine {
     if (this.mapMesh) this.mapMesh.visible = !scene?.layout;
     if (this.board) this.board.visible = true;
     if (this.fogMesh) this.fogMesh.visible = true;
-    this.prerendered.hide();
     if (!presentation || !scene) {
       this.legacyNotice = '';
       return;
@@ -614,6 +699,14 @@ export class TableEngine {
       -((event.clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(ndc, this.camera);
+    const surface = this.terrain.hit(this.raycaster);
+    if (surface) {
+      if (surface.stair && !this.view.buildMode) {
+        const landing = stairLanding(this.view.scene?.layout, surface.point.x, surface.point.z);
+        if (landing) return new THREE.Vector3(landing.x, surface.point.y, landing.y);
+      }
+      return surface.point;
+    }
     const hit = new THREE.Vector3();
     return this.raycaster.ray.intersectPlane(this.ground, hit) ? hit : null;
   }
@@ -662,7 +755,7 @@ export class TableEngine {
     if (!hit) return null;
     const x = Math.floor(hit.x);
     const y = Math.floor(hit.z);
-    return this.view.tokens.find((token) => Math.floor(token.x) === x && Math.floor(token.y) === y)?.id ?? null;
+    return this.visibleTokens().find((token) => coversCell(token, x, y))?.id ?? null;
   }
 
   private onDown = (event: PointerEvent) => {
@@ -677,6 +770,20 @@ export class TableEngine {
       if (hit) {
         this.building = true;
         this.hooks.onBuild('down', { x: hit.x, y: hit.z }, event.button);
+      }
+      return;
+    }
+    if (this.view.placeSpan) {
+      if (event.button === 2) {
+        this.hooks.onCancelPlace?.();
+        this.hooks.onMeasure?.(null);
+        this.acted = true;
+        return;
+      }
+      if (event.button === 0) {
+        const hit = this.hitMap(event);
+        if (hit) this.hooks.onPlace?.({ x: hit.x, y: hit.z });
+        this.acted = true;
       }
       return;
     }
@@ -731,6 +838,16 @@ export class TableEngine {
       if (hit) this.hooks.onBuild(this.building ? 'move' : 'hover', { x: hit.x, y: hit.z }, event.button);
       return;
     }
+    if (this.view.placeSpan) {
+      const hit = this.hitMap(event);
+      this.showPlace(hit ? { x: hit.x, y: hit.z } : null);
+      const span = this.view.placeSpan;
+      const { width, height } = this.bounds();
+      const x = hit ? placeAnchor(hit.x, span[0], width) : null;
+      const y = hit ? placeAnchor(hit.z, span[1], height) : null;
+      this.hooks.onMeasure?.(x == null || y == null ? null : { dx: 0, dy: 0, x: event.clientX, y: event.clientY, landX: x, landY: y, note: null });
+      return;
+    }
     if (this.brushing) {
       this.paintBrush(event, false);
       return;
@@ -744,18 +861,24 @@ export class TableEngine {
     const hit = this.hitMap(event);
     if (!hit) return;
     const { width, height } = this.bounds();
-    const x = THREE.MathUtils.clamp(Math.floor(hit.x) + 0.5, 0.5, width - 0.5);
-    const y = THREE.MathUtils.clamp(Math.floor(hit.z) + 0.5, 0.5, height - 0.5);
+    const token = this.view.tokens.find((item) => item.id === this.dragging?.id);
+    const span = token?.footprint ?? [1, 1];
+    const x = placeAnchor(hit.x, span[0], width);
+    const y = placeAnchor(hit.z, span[1], height);
+    if (x == null || y == null) return;
     const node = this.nodes.get(this.dragging.id);
-    node?.group.position.set(x, 0.02, y);
+    node?.group.position.set(x, supportHeight(this.view.scene?.layout, x, y), y);
     this.dragging.moved = true;
-    this.showDrag(x, y);
+    this.showDrag(x, y, span);
     if (this.dragOrigin) {
       this.hooks.onMeasure?.({
         dx: Math.round(x - this.dragOrigin.x),
         dy: Math.round(y - this.dragOrigin.y),
         x: event.clientX,
         y: event.clientY,
+        landX: x,
+        landY: y,
+        note: this.dragNote,
       });
     }
     this.invalidate();
@@ -777,6 +900,7 @@ export class TableEngine {
     }
     this.dragging = null;
     this.dragOrigin = null;
+    this.dragNote = null;
     if (this.dragLine) this.dragLine.visible = false;
     this.hooks.onMeasure?.(null);
     this.panning = false;
@@ -801,10 +925,10 @@ export class TableEngine {
     if (!this.hoverCell) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.03, 0, 1, 0.03, 0, 1, 0.03, 1, 0, 0.03, 1], 3));
-      this.hoverCell = new THREE.LineLoop(geometry, new THREE.LineBasicMaterial({ color: 0xf2d48a, transparent: true, opacity: 0.8 }));
+      this.hoverCell = new THREE.LineLoop(geometry, new THREE.LineBasicMaterial({ color: 0xf2d48a, transparent: true, opacity: 0.8, depthWrite: false }));
       this.scene3.add(this.hoverCell);
     }
-    this.hoverCell.position.set(x, 0, y);
+    this.hoverCell.position.set(x, cellLevel(this.view.scene?.layout, x + 0.5, y + 0.5), y);
     this.hoverCell.visible = true;
     this.invalidate();
   }
@@ -816,18 +940,46 @@ export class TableEngine {
     }
   }
 
-  private showDrag(x: number, y: number) {
+  private showDrag(x: number, y: number, footprint: [number, number]) {
     if (!this.dragOrigin) return;
-    if (!this.dragLine) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-      this.dragLine = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xf2d48a }));
-      this.scene3.add(this.dragLine);
+    const layout = this.view.scene?.layout ?? null;
+    const from = this.dragOrigin;
+    let points: { x: number; y: number; z: number }[];
+    if (this.view.role === 'gm') {
+      this.dragNote = null;
+      points = [
+        { x: from.x, y: cellLevel(layout, from.x, from.y) + 0.04, z: from.y },
+        { x, y: cellLevel(layout, x, y) + 0.04, z: y },
+      ];
+    } else {
+      const walk = walkRoute(layout, from, { x, y }, blockingSegments(layout, this.view.doors, this.view.packs), footprint);
+      points = walk.points;
+      this.dragNote = walk.note;
     }
-    const positions = this.dragLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    positions.setXYZ(0, this.dragOrigin.x, 0.04, this.dragOrigin.y);
-    positions.setXYZ(1, x, 0.04, y);
-    positions.needsUpdate = true;
+    if (points.length < 2) {
+      if (this.dragLine) this.dragLine.visible = false;
+      return;
+    }
+    const flat = new Float32Array(points.length * 3);
+    points.forEach((item, index) => {
+      flat[index * 3] = item.x;
+      flat[index * 3 + 1] = item.y;
+      flat[index * 3 + 2] = item.z;
+    });
+    const count = (this.dragLine?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined)?.count;
+    if (!this.dragLine || count !== points.length) {
+      this.dragLine?.geometry.dispose();
+      this.dragLine?.removeFromParent();
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+      this.dragLine = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: this.dragNote ? 0xc45c4a : 0xf2d48a, depthWrite: false }));
+      this.scene3.add(this.dragLine);
+    } else {
+      const positions = this.dragLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+      (positions.array as Float32Array).set(flat);
+      positions.needsUpdate = true;
+      (this.dragLine.material as THREE.LineBasicMaterial).color.set(this.dragNote ? 0xc45c4a : 0xf2d48a);
+    }
     this.dragLine.visible = true;
   }
 
@@ -868,14 +1020,9 @@ function plane(width: number, height: number) {
   return geometry;
 }
 
-function gridLines(width: number, height: number) {
-  const points: number[] = [];
-  const columns = Math.min(Math.ceil(width), 160);
-  const rows = Math.min(Math.ceil(height), 160);
-  for (let x = 0; x <= columns; x += 1) points.push(x, 0.012, 0, x, 0.012, height);
-  for (let y = 0; y <= rows; y += 1) points.push(0, 0.012, y, width, 0.012, y);
+function gridLines(width: number, height: number, layout: MapLayout | null) {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions(width, height, layout), 3));
   return new THREE.LineSegments(
     geometry,
     new THREE.LineBasicMaterial({ color: 0xd4a656, transparent: true, opacity: 0.16 }),
@@ -952,7 +1099,7 @@ function createToken(token: TokenView): TokenNode {
   card.userData.body = true;
   group.add(disc, ring, halo, ticks, label, card);
   group.position.set(token.x, 0, token.y);
-  return { id: token.id, group, disc, ring, halo, ticks, label, card, imageUrl: '', bodyKey: '' };
+  return { id: token.id, group, disc, ring, halo, ticks, label, card, bodyKey: '' };
 }
 
 function tickRing(): THREE.Group {
@@ -976,27 +1123,22 @@ function ringMark(id: string, view: View): RingMark {
   return null;
 }
 
-function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean, view: View, onPaint: () => void) {
+function paintToken(node: TokenNode, token: TokenView, mark: RingMark, view: View, onPaint: () => void) {
   const cast = view.cast[token.id] ?? { tone: 'other' as const, color: token.color };
   const paint = ringPaint(cast.tone, cast.color, mark, view.role === 'gm');
+  const span = Math.max(token.footprint?.[0] ?? 1, token.footprint?.[1] ?? 1);
   const ring = node.ring.material as THREE.MeshBasicMaterial;
   ring.color.set(paint.color);
-  node.ring.scale.setScalar(paint.scale);
+  node.ring.scale.setScalar(paint.scale * span);
   const halo = node.halo.material as THREE.MeshBasicMaterial;
   node.halo.visible = paint.halo != null;
   if (paint.halo) halo.color.set(paint.halo);
-  node.halo.scale.setScalar(Math.max(paint.scale, 1.08));
+  node.halo.scale.setScalar(Math.max(paint.scale, 1.08) * span);
   node.ticks.visible = paint.ticks;
-  const built = Boolean(view.scene?.layout);
-  if (built) {
-    node.disc.visible = false;
-    node.card.visible = true;
-    paintBody(node, token, view.packs, onPaint);
-    node.label.position.y = 1.7;
-  } else {
-    paintDisc(node, token, standing);
-    node.label.position.y = standing ? 1.7 : 0.2;
-  }
+  node.disc.visible = false;
+  node.card.visible = true;
+  paintBody(node, token, view.packs, onPaint);
+  node.label.position.y = 1.7;
   const material = node.label.material as THREE.SpriteMaterial;
   const previous = material.userData.name as string | undefined;
   if (previous !== token.name) {
@@ -1042,38 +1184,24 @@ function paintBody(node: TokenNode, token: TokenView, packs: View['packs'], onPa
   });
 }
 
+function coversCell(token: TokenView, x: number, y: number) {
+  const [width, depth] = token.footprint ?? [1, 1];
+  return bodyCells(token.x, width).includes(x) && bodyCells(token.y, depth).includes(y);
+}
+
+function bodyCells(center: number, span: number) {
+  const size = Math.max(1, span || 1);
+  const start = Math.floor(center - size / 2);
+  const cells = [];
+  for (let step = 0; step < size; step += 1) cells.push(start + step);
+  return cells;
+}
+
 function castFrame(actor: CastDef, facing: string) {
   if (facing === 'east') return actor.views.east;
   if (facing === 'west') return actor.views.west;
   if (facing === 'north') return actor.views.north;
   return actor.views.south;
-}
-
-function paintDisc(node: TokenNode, token: TokenView, standing: boolean) {
-  const disc = node.disc.material as THREE.MeshLambertMaterial;
-  disc.opacity = token.hidden ? 0.45 : 1;
-  disc.transparent = token.hidden;
-  const cardMaterial = node.card.material as THREE.MeshBasicMaterial;
-  const applyPortrait = (texture: THREE.Texture | null) => {
-    disc.map = texture;
-    disc.needsUpdate = true;
-    cardMaterial.map = texture;
-    cardMaterial.needsUpdate = true;
-  };
-  if (node.imageUrl !== token.imageUrl) {
-    disc.map?.dispose();
-    node.imageUrl = token.imageUrl;
-    if (token.imageUrl) {
-      new THREE.TextureLoader().load(token.imageUrl, (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        applyPortrait(texture);
-      });
-    } else {
-      applyPortrait(initialTexture(token.name, token.color));
-    }
-  }
-  node.disc.visible = !standing;
-  node.card.visible = standing;
 }
 
 function disposeToken(node: TokenNode) {
@@ -1098,15 +1226,114 @@ function shown(object: THREE.Object3D) {
   return true;
 }
 
-function viewSignature(view: View) {
-  const scene = view.scene;
-  const layout = scene?.layout;
-  const tokens = view.tokens.map((token) => `${token.id}@${token.x},${token.y},${token.facing},${token.castAsset ?? ''},${token.hidden ? 1 : 0},${token.name}`).join(';');
-  const doors = view.doors.map((door) => `${door.id}:${door.open ? 1 : 0}`).join(';');
-  const props = layout?.props.map((prop) => `${prop.id}@${prop.x},${prop.y},${prop.asset}`).join(';') ?? '';
-  const pieces = layout?.pieces.map((piece) => `${piece.id}:${piece.asset}:${piece.open ? 1 : 0}:${piece.axis}`).join(';') ?? '';
-  const packs = view.packs.map((pack) => `${pack.id}:${pack.contentHash ?? ''}`).join(',');
-  return [scene?.id, scene?.width, scene?.height, layout?.cells, tokens, doors, props, pieces, packs, view.selectedId, view.targetId, view.role, view.fog?.mode, view.buildMode, view.tool].join('|');
+function sameView(left: View, right: View) {
+  const leftScene = left.scene;
+  const rightScene = right.scene;
+  return leftScene?.id === rightScene?.id
+    && leftScene?.width === rightScene?.width
+    && leftScene?.height === rightScene?.height
+    && leftScene?.layout?.cells === rightScene?.layout?.cells
+    && (leftScene?.layout?.levels ?? '') === (rightScene?.layout?.levels ?? '')
+    && sameStairs(leftScene?.layout?.stairs, rightScene?.layout?.stairs)
+    && sameTokens(left.tokens, right.tokens)
+    && sameDoors(left.doors, right.doors)
+    && sameProps(leftScene?.layout?.props, rightScene?.layout?.props)
+    && samePieces(leftScene?.layout?.pieces, rightScene?.layout?.pieces)
+    && samePacks(left.packs, right.packs)
+    && left.selectedId === right.selectedId
+    && left.targetId === right.targetId
+    && left.role === right.role
+    && sameFogPicture(left.fog, right.fog)
+    && (left.seatId ?? '') === (right.seatId ?? '')
+    && left.buildMode === right.buildMode
+    && left.tool === right.tool;
+}
+
+function sameScenery(left: View, right: View) {
+  const leftScene = left.scene;
+  const rightScene = right.scene;
+  const leftPlace = left.placeSpan;
+  const rightPlace = right.placeSpan;
+  return leftScene?.id === rightScene?.id
+    && leftScene?.width === rightScene?.width
+    && leftScene?.height === rightScene?.height
+    && (leftScene?.imageUrl ?? '') === (rightScene?.imageUrl ?? '')
+    && leftScene?.layout?.cells === rightScene?.layout?.cells
+    && (leftScene?.layout?.levels ?? '') === (rightScene?.layout?.levels ?? '')
+    && sameStairs(leftScene?.layout?.stairs, rightScene?.layout?.stairs)
+    && sameProps(leftScene?.layout?.props, rightScene?.layout?.props)
+    && samePieces(leftScene?.layout?.pieces, rightScene?.layout?.pieces)
+    && sameDoors(left.doors, right.doors)
+    && samePacks(left.packs, right.packs)
+    && sameFogSheet(left.fog, right.fog)
+    && sameCells(left.ghost, right.ghost)
+    && leftPlace?.[0] === rightPlace?.[0]
+    && leftPlace?.[1] === rightPlace?.[1]
+    && left.role === right.role
+    && left.buildMode === right.buildMode;
+}
+
+function sameTokens(left: View['tokens'], right: View['tokens']) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((token, index) => {
+    const other = right[index];
+    return !!other
+      && token.id === other.id
+      && token.x === other.x
+      && token.y === other.y
+      && token.facing === other.facing
+      && (token.castAsset ?? '') === (other.castAsset ?? '')
+      && token.hidden === other.hidden
+      && (token.ownerId ?? '') === (other.ownerId ?? '')
+      && token.name === other.name;
+  });
+}
+
+function sameDoors(left: View['doors'], right: View['doors']) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((door, index) => door.id === right[index]?.id && door.open === right[index]?.open);
+}
+
+function sameProps(left: View['scene'] extends infer _ ? NonNullable<View['scene']>['layout'] extends infer layout ? layout extends { props: infer props } ? props : undefined : undefined : undefined, right: typeof left) {
+  const a = left ?? [];
+  const b = right ?? [];
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((prop, index) => prop.id === b[index]?.id && prop.x === b[index]?.x && prop.y === b[index]?.y && prop.asset === b[index]?.asset);
+}
+
+function samePieces(left: NonNullable<NonNullable<View['scene']>['layout']>['pieces'] | undefined, right: NonNullable<NonNullable<View['scene']>['layout']>['pieces'] | undefined) {
+  const a = left ?? [];
+  const b = right ?? [];
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((piece, index) => piece.id === b[index]?.id && piece.asset === b[index]?.asset && piece.open === b[index]?.open && piece.axis === b[index]?.axis);
+}
+
+function sameStairs(left: NonNullable<NonNullable<View['scene']>['layout']>['stairs'], right: NonNullable<NonNullable<View['scene']>['layout']>['stairs']) {
+  const a = left ?? [];
+  const b = right ?? [];
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((stair, index) => stair.x === b[index]?.x && stair.y === b[index]?.y && stair.x2 === b[index]?.x2 && stair.y2 === b[index]?.y2);
+}
+
+function samePacks(left: View['packs'], right: View['packs']) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((pack, index) => pack.id === right[index]?.id && (pack.contentHash ?? '') === (right[index]?.contentHash ?? ''));
+}
+
+function sameCells(left: View['ghost'], right: View['ghost']) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((cell, index) => cell.x === right[index]?.x && cell.y === right[index]?.y);
+}
+
+function sameFogSheet(left: View['fog'], right: View['fog']) {
+  return sameFogPicture(left, right);
 }
 
 function preferLowPower() {
@@ -1115,26 +1342,6 @@ function preferLowPower() {
   } catch {
     return true;
   }
-}
-
-function initialTexture(name: string, color: string) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  if (!context) return new THREE.CanvasTexture(canvas);
-  context.fillStyle = '#1a140f';
-  context.beginPath();
-  context.arc(128, 128, 120, 0, Math.PI * 2);
-  context.fill();
-  context.fillStyle = color;
-  context.font = '700 96px Cinzel, serif';
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(name.slice(0, 2).toUpperCase(), 128, 136);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
 }
 
 function labelTexture(name: string) {
@@ -1177,8 +1384,14 @@ function drawFog(fog: FogView, mapWidth: number, mapHeight: number) {
     image.data[offset + 2] = 4;
     image.data[offset + 3] = alpha;
   }
+  if (!gm && fog.visible) {
+    const seen = decodeBits(fog.visible);
+    for (let index = 0; index < count; index += 1) {
+      if (bitAt(seen, index)) image.data[index * 4 + 3] = 0;
+    }
+  }
   context.putImageData(image, 0, 0);
-  if (!gm && fog.visiblePolygons.length > 0) {
+  if (!gm && !fog.visible && fog.visiblePolygons.length > 0) {
     context.globalCompositeOperation = 'destination-out';
     context.fillStyle = '#000';
     for (const polygon of fog.visiblePolygons) {

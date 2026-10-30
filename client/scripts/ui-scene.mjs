@@ -16,26 +16,11 @@ await mkdir(dataDir);
 await mkdir(assetsDir);
 await writeFile(packPath, gateZip());
 
-const server = spawn(
-  'cargo',
-  ['run', '--quiet', '--manifest-path', 'server/Cargo.toml', '--offline'],
-  {
-    cwd: root,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      RPG_BIND: '127.0.0.1:8080',
-      RPG_DATA_DIR: dataDir,
-      RPG_ASSETS_DIR: assetsDir,
-      RPG_SYSTEMS_DIR: join(root, 'systems'),
-      RPG_PASSPHRASE: 'table',
-      RPG_GM_KEY: 'testkey',
-    },
-  },
-);
+let server = startTable();
 const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', '5174', '--strictPort'], {
   cwd: client,
   stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, LONGTABLE_API: 'http://127.0.0.1:8096' },
 });
 const chrome = spawn(
   'chromium',
@@ -56,15 +41,10 @@ const chrome = spawn(
 );
 
 let serverLog = '';
-server.stdout.on('data', (chunk) => {
-  serverLog += chunk;
-});
-server.stderr.on('data', (chunk) => {
-  serverLog += chunk;
-});
+watch(server);
 
 try {
-  await waitForHttp('http://127.0.0.1:8080/api/host', 120);
+  await waitForHttp('http://127.0.0.1:8096/api/host', 120);
   await waitForHttp('http://127.0.0.1:5174/', 60);
   const browser = await browserSocket();
   const gm = await openPage(browser, 'gm');
@@ -103,7 +83,7 @@ try {
   await gm.fill('[aria-label="Width"]', '12');
   await gm.fill('[aria-label="Height"]', '12');
   await gm.clickButton('New');
-  await gm.waitForEnabled('Put on the table');
+  await gm.waitForEnabled('Put on the table as a new map');
   await gm.clickButton('Floor');
   await gm.clickButton('Fit');
   await delay(400);
@@ -111,21 +91,30 @@ try {
   await gm.clickButton('Objects');
   await gm.clickButton('Barrel');
   await gm.clickCanvas(0.56, 0.52);
+  await gm.clickButton('Raise');
+  await gm.clickButton('1');
+  await gm.clickButton('Step');
+  await gm.clickCanvas(0.5, 0.48);
+  await gm.clickButton('Objects');
+  await gm.clickButton('Stair');
+  await gm.clickCanvas(0.5, 0.48);
   await gm.clickButton('Cast');
   await gm.clickButton('Bandit');
-  await gm.clickButton('Put on the table');
+  await gm.clickButton('Put on the table as a new map');
   await gm.waitFor('On the table');
   const published = await player.waitForSnapshot((value) => value.scene?.name === 'Gate');
   const terrains = published.scene?.layout?.terrains ?? [];
   const props = published.scene?.layout?.props ?? [];
   if (!terrains.includes('gate/floor')) throw new Error(`the floor click did not paint; terrains are ${JSON.stringify(terrains)}`);
   if (!props.some((prop) => prop.asset === 'gate/barrel')) throw new Error('the barrel click did not place');
+  if (!published.scene?.layout?.levels) throw new Error('the raise click did not set a height');
+  if (!(published.scene.layout.stairs ?? []).some((stair) => stair.asset === 'gate/stair')) {
+    throw new Error(`the stair click did not place\n${await gm.text()}`);
+  }
 
   await gm.clickButton('Play');
-  await gm.fill('input[placeholder="Token name"]', 'Ada');
-  await gm.clickButton('Add');
-  await gm.fill('input[placeholder="Token name"]', 'Lurker');
-  await gm.clickButton('Add');
+  await placeFigure(gm, player, 'Ada', 0.5, 0.42);
+  await placeFigure(gm, player, 'Lurker', 0.62, 0.46);
   await gm.clickButton('Fit');
   await delay(500);
   let hidden = '';
@@ -143,6 +132,31 @@ try {
     if (hidden === 'Ada' || hidden === 'Lurker') break;
   }
   if (hidden !== 'Ada' && hidden !== 'Lurker') throw new Error(`the click did not select a figure (${hidden})`);
+  const gave = await gm.eval(`(() => {
+    const label = [...document.querySelectorAll('label')].find((node) => node.textContent.trim().startsWith('Owner'));
+    const select = label?.querySelector('select');
+    const option = [...(select?.options ?? [])].find((item) => item.textContent.trim().toLowerCase() === 'ada');
+    if (!select || !option) return false;
+    select.value = option.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`);
+  if (!gave) throw new Error(`the owner list has no ada\n${await gm.text()}`);
+  const owned = await player.waitForSnapshot((value) => {
+    const token = (value.tokens ?? []).find((item) => item.name === hidden);
+    return !!token?.ownerId;
+  });
+  const stood = owned.tokens.find((token) => token.name === hidden);
+  await player.waitFor('West');
+  await player.clickButton('West');
+  const turned = await player.waitForSnapshot((value) => {
+    const token = (value.tokens ?? []).find((item) => item.name === hidden);
+    return token?.facing === 'west';
+  });
+  const afterTurn = turned.tokens.find((token) => token.name === hidden);
+  if (afterTurn.x !== stood.x || afterTurn.y !== stood.y) {
+    throw new Error(`turning moved ${hidden} from ${stood.x},${stood.y} to ${afterTurn.x},${afterTurn.y}`);
+  }
   const hiddenClick = await gm.eval(`(() => {
     const section = [...document.querySelectorAll('section')].find((node) => node.textContent.includes('sight'));
     const button = [...(section?.querySelectorAll('button') ?? [])].find((node) => node.textContent.trim() === 'Hide');
@@ -167,16 +181,40 @@ try {
 
   const before = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf8'));
   await gm.clickButton('Map');
-  await gm.clickButton('Put on the table');
+  await gm.clickButton('Update this map');
   await gm.waitFor('On the table');
   await delay(800);
   const after = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf8'));
   if (!after.scene?.layout?.terrains?.includes('gate/floor')) throw new Error('the painted tile is not in the save');
   if (!after.scene.layout.props?.some((prop) => prop.asset === 'gate/barrel')) throw new Error('the barrel is not in the save');
+  if (!after.scene.layout.levels) throw new Error('the raised square is not in the save');
+  if (!(after.scene.layout.stairs ?? []).some((stair) => stair.asset === 'gate/stair')) throw new Error('the stair is not in the save');
   if (after.scene.id !== before.scene.id) throw new Error('publishing again changed the scene id');
   const savedHidden = after.tokens.find((token) => token.name === hidden);
   const savedShown = after.tokens.find((token) => token.name === shown);
   if (!savedHidden?.hidden || savedShown?.cast_asset !== 'gate/bandit') throw new Error('the save lost the hidden figure or the cast picture');
+
+  server.kill('SIGTERM');
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      await fetch('http://127.0.0.1:8096/api/host');
+    } catch {
+      break;
+    }
+    await delay(200);
+  }
+  server = startTable();
+  watch(server);
+  await waitForHttp('http://127.0.0.1:8096/api/host', 120);
+  await gm.reload();
+  await gm.waitFor('Play');
+  await player.reload();
+  const restored = await player.waitForSnapshot((value) => {
+    const names = (value.tokens ?? []).map((token) => token.name);
+    const stairs = value.scene?.layout?.stairs ?? [];
+    return value.scene?.name === 'Gate' && value.scene?.layout?.levels && stairs.some((stair) => stair.asset === 'gate/stair') && names.includes(shown) && !names.includes(hidden);
+  });
+  if (!restored.scene?.layout?.terrains?.includes('gate/floor')) throw new Error('the restart dropped the painted floor');
 
   console.log('UI_OK');
   console.log('renderer: headless Chromium SwiftShader. This checks the buttons, the published scene, and the second seat. It is not a discrete-GPU frame measurement.');
@@ -189,6 +227,43 @@ try {
   server.kill('SIGTERM');
   await delay(300);
   await rm(work, { recursive: true, force: true });
+}
+
+function startTable() {
+  return spawn(
+    'cargo',
+    ['run', '--quiet', '--manifest-path', 'server/Cargo.toml', '--offline'],
+    {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        RPG_BIND: '127.0.0.1:8096',
+        RPG_DATA_DIR: dataDir,
+        RPG_ASSETS_DIR: assetsDir,
+        RPG_SYSTEMS_DIR: join(root, 'systems'),
+        RPG_PASSPHRASE: 'table',
+        RPG_GM_KEY: 'testkey',
+      },
+    },
+  );
+}
+
+function watch(child) {
+  child.stdout.on('data', (chunk) => {
+    serverLog += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    serverLog += chunk;
+  });
+}
+
+async function placeFigure(gm, player, name, x, y) {
+  await gm.fill('input[placeholder="Token name"]', name);
+  await gm.clickButton('Add');
+  await gm.waitFor('Click the ground');
+  await gm.clickCanvas(x, y);
+  await player.waitForSnapshot((value) => (value.tokens ?? []).some((token) => token.name === name));
 }
 
 async function waitForHttp(url, attempts) {
@@ -384,7 +459,7 @@ async function openPage(browser, name) {
     },
     async waitFor(text) {
       const needle = text.toLowerCase();
-      for (let attempt = 0; attempt < 50; attempt += 1) {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((await this.text()).toLowerCase().includes(needle)) return;
         await delay(250);
       }
@@ -465,6 +540,7 @@ function gateZip() {
     'pack.json': packManifest(),
     'tiles/floor.png': png(128, 128, 255),
     'objects/barrel.png': png(32, 48, 0),
+    'objects/stair.png': png(32, 48, 0),
     'cast/bandit/north.png': png(32, 64, 0),
     'cast/bandit/east.png': png(32, 64, 0),
     'cast/bandit/south.png': png(32, 64, 0),
@@ -500,6 +576,19 @@ function packManifest() {
       "renderLayers": [{
         "kind": "upright",
         "file": "objects/barrel.png",
+        "sizePx": [32, 48],
+        "pivotPx": [16, 46]
+      }]
+    }, {
+      "id": "stair",
+      "name": "Stair",
+      "kind": "stairs",
+      "placement": "connection",
+      "footprintCells": [1, 1],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [{
+        "kind": "upright",
+        "file": "objects/stair.png",
         "sizePx": [32, 48],
         "pivotPx": [16, 46]
       }]

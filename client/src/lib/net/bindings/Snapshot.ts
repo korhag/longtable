@@ -32,4 +32,12 @@ talk: Array<TalkLine>,
 /**
  * Changes when a pack is imported, so every seat can reload the library.
  */
-catalogRevision: string, };
+catalogRevision: string, 
+/**
+ * Why the table will not write, when a save could not be opened.
+ */
+notice?: string, 
+/**
+ * What an older save kept. Only the GM receives it.
+ */
+review?: string, };

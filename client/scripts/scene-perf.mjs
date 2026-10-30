@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const port = 5202;
-const url = `http://127.0.0.1:${port}/perf.html`;
+const ceiling = process.argv.includes('--ceiling');
+const url = `http://127.0.0.1:${port}/perf.html${ceiling ? '?ceiling=1' : ''}`;
 const swift = process.argv.includes('--swiftshader');
 const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: new URL('..', import.meta.url),
@@ -86,7 +87,7 @@ async function gpuPoll(pageUrl) {
     const attached = await browser.send('Target.attachToTarget', { targetId: created.targetId, flatten: true });
     const session = attached.sessionId;
     await browser.send('Runtime.enable', {}, session);
-    const deadline = Date.now() + 90000;
+    const deadline = Date.now() + (ceiling ? 180000 : 90000);
     let text = '';
     while (Date.now() < deadline) {
       const result = await browser.send('Runtime.evaluate', {

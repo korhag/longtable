@@ -105,6 +105,14 @@ fn read_draft(path: &Path) -> Result<Draft, String> {
     serde_json::from_str(&text).map_err(|err| format!("could not read the draft: {err}"))
 }
 
+/// A save may replace a draft only when it still has the revision the GM loaded.
+pub fn check_revision(stored: Option<u64>, sent: u64) -> Result<(), String> {
+    if stored.is_some_and(|stored| stored != sent) {
+        return Err("this map was saved somewhere else. Reload it, then save again.".into());
+    }
+    Ok(())
+}
+
 pub fn safe_id(id: &str) -> Result<String, String> {
     if (8..=64).contains(&id.len()) && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
         Ok(id.to_string())
@@ -136,5 +144,13 @@ mod tests {
         store.delete("draft-0001").unwrap();
         assert!(store.get("draft-0001").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_older_save_cannot_replace_a_newer_one() {
+        assert!(check_revision(None, 0).is_ok());
+        assert!(check_revision(Some(5), 5).is_ok());
+        let err = check_revision(Some(9), 5).unwrap_err();
+        assert!(err.contains("saved somewhere else"), "{err}");
     }
 }

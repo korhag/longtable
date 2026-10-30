@@ -1,5 +1,241 @@
 # Changelog
 
+## 1.10.0 — 2026-10-30
+
+- Right-click a ground square to keep one picture of that tile.
+
+## 1.9.10 — 2026-10-30
+
+- The map stays off the table while a figure, an object, or a stair still does not fit.
+
+## 1.9.9 — 2026-10-30
+
+- A stair left between squares that are no longer one step apart is named before the map goes on the table.
+
+## 1.9.8 — 2026-10-30
+
+- Painting fog shows up without moving the camera.
+
+## 1.9.7 — 2026-10-30
+
+- An upright picture stays as drawn. It is not flipped.
+- Two things on one map cannot share an id.
+
+## 1.9.6 — 2026-10-30
+
+- An object standing on two heights is named, and the map stays off the table.
+- An object that hangs off the map is named the same way.
+- Panning a 200-square map on this computer stayed inside the 33 ms budget.
+
+## 1.9.5 — 2026-10-30
+
+- A click on a stair lands on the nearer end, and the middle lands on the higher square.
+
+## 1.9.4 — 2026-10-30
+
+- A change in the lit area updates which figures get an outline.
+
+## 1.9.3 — 2026-10-30
+
+- Looking across the map reads the ground once, not again for every square.
+
+## 1.9.2 — 2026-10-30
+
+- Raising one square rebuilds that part of the ground, not the whole map.
+
+## 1.9.1 — 2026-10-30
+
+- A wide figure cannot cross a rise that does not fit its body.
+
+## 1.9.0 — 2026-10-30
+
+- A dragged figure walks around a wall when the straight line is blocked.
+- The square under the pointer sits on that square.
+
+## 1.8.34 — 2026-10-30
+
+- The grid sits on a raised square instead of cutting through it.
+
+## 1.8.33 — 2026-10-30
+
+- A raised edge shows the cliff picture from the pack.
+
+## 1.8.32 — 2026-10-30
+
+- A rug on a raised square sits on that square.
+
+## 1.8.31 — 2026-10-30
+
+- Opening a door leaves the other objects in place.
+
+## 1.8.30 — 2026-10-30
+
+- The map editor paints the scene. It does not import an angled picture.
+- An older save still opens when its last undo step cannot be kept, and that step is cleared.
+
+## 1.8.29 — 2026-10-30
+
+- You can turn your own figure without walking.
+
+## 1.8.28 — 2026-10-30
+
+- Moving a figure does not redraw the ground behind them.
+
+## 1.8.27 — 2026-10-30
+
+- A figure you cannot see is left off your picture.
+
+## 1.8.26 — 2026-10-30
+
+- A figure with no picture still gets an outline when something stands in front.
+
+## 1.8.25 — 2026-10-30
+
+- The editor names a figure standing in an object before the map goes on the table.
+
+## 1.8.24 — 2026-10-30
+
+- The editor names a figure who would not fit before the map goes on the table.
+
+## 1.8.23 — 2026-10-30
+
+- Hovering a tree or a barrel shows the squares it will cover.
+
+## 1.8.22 — 2026-10-30
+
+- A stair that does not fit names the two squares.
+
+## 1.8.21 — 2026-10-30
+
+- An older save tells you what it kept, and a copy of that file is left beside it.
+
+## 1.8.20 — 2026-10-30
+
+- A hidden figure is left out of a player’s picture, outline, and click.
+
+## 1.8.19 — 2026-10-30
+
+- A ground tile shows how it joins another ground, and a picture marks its pivot.
+- A 200-square map was measured on this computer. Panning it was slower than the 33 ms budget.
+
+## 1.8.18 — 2026-10-30
+
+- Copying a scene keeps the figures on the scene they were already on.
+
+## 1.8.17 — 2026-10-30
+
+- A selected figure can be turned to face north, east, south, or west.
+
+## 1.8.16 — 2026-10-30
+
+- The guide no longer says the view can turn, or that a figure drops in the middle.
+
+## 1.8.15 — 2026-10-30
+
+- A figure stands upright on every map. A missing picture is a plain stand-in.
+
+## 1.8.14 — 2026-10-30
+
+- Fog sits under a figure’s feet, so the figure is not cut off at the ground.
+
+## 1.8.13 — 2026-10-30
+
+- Dragging a figure, or choosing where to place one, names the height of that square.
+
+## 1.8.12 — 2026-10-30
+
+- Fit leaves room above the ground, so a figure on a raised square stays in view.
+
+## 1.8.11 — 2026-10-30
+
+- A character can be named from the campaign list.
+- Picture on a character is how their figure’s art is chosen. A later picture for a new figure does not replace it.
+
+## 1.8.10 — 2026-10-30
+
+- A figure’s feet sit on the ground, including on a raised square.
+- Dragging a large figure follows the corner they stand on.
+
+## 1.8.9 — 2026-10-30
+
+- Placing a figure waits for a click on the map, and a marker shows the squares.
+
+## 1.8.8 — 2026-10-30
+
+- A figure linked to a character keeps that character’s picture when it changes.
+
+## 1.8.7 — 2026-10-30
+
+- A map of 200 squares can go on the table. A larger one cannot.
+
+## 1.8.6 — 2026-10-30
+
+- A large figure has to stand on one level, and stays put if a move would split them.
+
+## 1.8.5 — 2026-10-30
+
+- A figure standing in something is named, and that map stays off the table until you move them.
+- A map saved somewhere else has to be reloaded before it can be saved again.
+- Putting a different map on the table keeps the figures with the map they were already on.
+
+## 1.8.4 — 2026-10-30
+
+- A smaller map leaves a figure where they stand and names anyone still outside.
+
+## 1.8.3 — 2026-10-30
+
+- A new figure stands a square away from the last one, so they do not pile up.
+
+## 1.8.2 — 2026-10-30
+
+- Fog on a raised square stays in front of the lower ground.
+
+## 1.8.1 — 2026-10-30
+
+- The asset guide now walks through a raised map, from the pack to a player’s eyes.
+
+## 1.8.0 — 2026-10-30
+
+- Check a pack before it is added to the table.
+
+## 1.7.2 — 2026-10-30
+
+- An old angled picture stays filed away. The table draws one fixed view.
+
+## 1.7.1 — 2026-10-30
+
+- Fog on a raised square follows that square down its cliff.
+
+## 1.7.0 — 2026-10-30
+
+- A ruin pack is included, with ground, a tree, a door, stairs, and two figures.
+
+## 1.6.2 — 2026-10-30
+
+- A sight blocker no longer stops your feet. Only a movement blocker does.
+
+## 1.6.1 — 2026-10-30
+
+- A save this table cannot read is left in place, and the table says so.
+- A copy of that file is kept beside it. The next save does not replace the original.
+- A version 1 save still opens. Its campaign, characters, scenes, and figures keep their names. The next save is version 2, after that copy is made.
+
+## 1.6.0 — 2026-10-30
+
+- A figure on high ground can see over a low obstacle, and fog follows the raised ground.
+- A tall wall still hides what is behind it. The floor of a square can stay hidden while the figure standing there is seen.
+- The selected figure's panel says whether it stands on the floor, a step, or a rise, and how that compares with the target.
+
+## 1.5.0 — 2026-10-30
+
+- You can walk up a stair onto higher ground, and a cliff stops you.
+- The Raise brush paints a square to a step or a rise. A stair sits on the edge between those heights.
+- A figure and a placed object stand on the height of their square. A click hits that surface.
+
+## 1.4.1 — 2026-10-30
+
+- A placed object stands on its pivot, and a barrel blocks a step without hiding the view.
+
 ## 1.4.0 — 2026-10-29
 
 - A pack's tiles, objects, and people can be placed on the map, and a hidden figure stays hidden.

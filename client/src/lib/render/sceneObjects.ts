@@ -12,6 +12,7 @@ import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { CUTOUT_RIGHT, CUTOUT_TOWARD, CUTOUT_UP, cutoutMaterial, orientUpright, uprightGeometry } from './cutout';
+import { cellLevel, SUPPORT_CLEARANCE, supportHeight } from './levels';
 import { seen } from './seen';
 
 export const objectStats = { rebuilds: 0, instances: 0 };
@@ -48,12 +49,13 @@ export class SceneObjects {
         const origin = found.def.originCells ?? [found.def.footprintCells[0] / 2, found.def.footprintCells[1] / 2];
         const x = prop.x + origin[0];
         const z = prop.y + origin[1];
+        const height = supportHeight(layout, x, z);
         const visible = showAll || seen(fog, x, z);
         found.def.renderLayers.forEach((layer, index) => {
           const key = `${prop.asset}:${index}:${layer.file}:${layer.kind}:${found.def.pixelsPerWorldUnit ?? 128}:${found.pack.contentHash ?? ''}`;
           const bucket = placed.get(key) ?? { sig: '', matrices: [], layer, pack: found.pack, pixels: found.def.pixelsPerWorldUnit ?? 128 };
-          bucket.matrices.push(instanceMatrix(x, z, layer, visible));
-          bucket.sig += `${prop.id}@${x},${z},${visible ? 1 : 0};`;
+          bucket.matrices.push(instanceMatrix(x, height, z, layer, visible));
+          bucket.sig += `${prop.id}@${x},${height},${z},${visible ? 1 : 0};`;
           placed.set(key, bucket);
         });
       }
@@ -63,11 +65,12 @@ export class SceneObjects {
         const open = doors.find((door) => door.id === piece.id)?.open ?? piece.open;
         const midX = piece.axis === 'h' ? piece.x + 0.5 : piece.x;
         const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
-        const sig = `${piece.asset}:${piece.axis}:${open ? 1 : 0}:${found.pack.contentHash ?? ''}`;
+        const height = edgeLevel(layout, piece.axis, piece.x, piece.y);
+        const sig = `${piece.asset}:${piece.axis}:${open ? 1 : 0}:${height}:${found.pack.contentHash ?? ''}`;
         wanted.set(piece.id, {
           sig,
           visible: showAll || seen(fog, midX, midY),
-          make: () => this.pieceGroup(piece.axis, piece.x, piece.y, open, found.def, found.pack, generation, onPaint),
+          make: () => this.pieceGroup(piece.axis, piece.x, piece.y, height, open, found.def, found.pack, generation, onPaint),
         });
       }
     }
@@ -149,10 +152,10 @@ export class SceneObjects {
     objectStats.instances = instances;
   }
 
-  private pieceGroup(axis: string, x: number, y: number, open: boolean, object: ObjectDef, pack: Pack, generation: number, onPaint: () => void) {
+  private pieceGroup(axis: string, x: number, y: number, height: number, open: boolean, object: ObjectDef, pack: Pack, generation: number, onPaint: () => void) {
     const group = new THREE.Group();
     const along = axis === 'h';
-    group.position.set(along ? x + 0.5 : x, 0, along ? y : y + 0.5);
+    group.position.set(along ? x + 0.5 : x, height + SUPPORT_CLEARANCE, along ? y : y + 0.5);
     const state = open ? 'open' : 'closed';
     const layers = object.renderLayers.filter((layer) => (layer.axis ?? '') === '' || layer.axis === axis);
     const matched = layers.filter((layer) => (layer.state ?? '') === '' || layer.state === state);
@@ -197,10 +200,16 @@ function disposeGroup(group: THREE.Group) {
   });
 }
 
-function instanceMatrix(x: number, z: number, layer: ObjectLayer, visible: boolean) {
+function edgeLevel(layout: MapLayout, axis: string, x: number, y: number) {
+  const here = cellLevel(layout, x, y);
+  const other = axis === 'h' ? cellLevel(layout, x, y - 1) : cellLevel(layout, x - 1, y);
+  return Math.max(here, other);
+}
+
+function instanceMatrix(x: number, height: number, z: number, layer: ObjectLayer, visible: boolean) {
   const offset = layer.rootOffsetWorld ?? [0, 0, 0];
   const ground = layer.kind === 'ground';
-  scratchPosition.set(x + offset[0], (ground ? 0.015 : 0) + offset[1], z + offset[2]);
+  scratchPosition.set(x + offset[0], height + (ground ? 0.015 : 0) + offset[1], z + offset[2]);
   scratchMatrix.compose(scratchPosition, ground ? groundQuat : uprightQuat, visible ? scratchScale : hiddenScale);
   return scratchMatrix.clone();
 }

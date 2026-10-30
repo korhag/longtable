@@ -21,7 +21,7 @@ Reviewed commit: `a26bbd0b9c1d1e14135bf61f31bc0d4566d8fb51` (v1.2.0). The workin
 | `npx vitest run src/lib/assets/catalog.test.ts` in `client` | 1 passed. Asking for the same picture twice counts as one decode. |
 | `node client/scripts/load-scene.mjs` | `LOAD_OK` |
 
-`a_flat_scene_imports_compiles_publishes_and_reloads` is the authoritative scene test. It imports a schema-2 zip, compiles a barrel as a movement blocker and an oak trunk as sight, refuses stairs and a nonzero height grid, publishes twice with the same scene id, shows the cast picture to the player, omits the hidden token from the player snapshot, and reads the cast picture and the hidden token back from `state.json`.
+`a_flat_scene_imports_compiles_publishes_and_reloads` is the authoritative scene test. It imports a schema-2 zip, compiles a barrel as a movement blocker and an oak trunk as sight, accepts a stair object and a one-step height grid, refuses a height above 2, publishes twice with the same scene id, shows the cast picture to the player, omits the hidden token from the player snapshot, and reads the cast picture and the hidden token back from `state.json`.
 
 `a_player_joins_the_published_scene_on_a_second_socket` opens two live sockets on `127.0.0.1`. The GM imports the pack while the player is connected, and both snapshots move from catalog revision `1` to `2`. The GM publishes the draft twice and the scene id stays the same. The player receives the barrel, Ada's bandit picture, and Bram's scout picture. The hidden figure never arrives. Moving Ada east updates the player's snapshot and leaves Bram facing south. When the GM looks through Ada's eyes, the hidden figure drops out of the GM snapshot and returns when that view is cleared. The save reloads the scene id, both pictures, the facing, and the hidden figure.
 
@@ -43,9 +43,30 @@ The proposed small-scene budget was a p95 around 16.7 ms, and a low-power budget
 
 An earlier `scene-perf.mjs --swiftshader` run drew the same scenes on SwiftShader at 1920×1080. That run checked rebuilds, idle sleep, and the texture plateau. It did not produce these frame times. SwiftShader is not this result.
 
-`occlusion-render.mjs` draws the real outline pass at device pixel ratios 1 and 2. On SwiftShader, the outline appears where a green occluder is in front of a red figure and does not appear on the visible side. The same page loads the table engine: an opaque part of a figure can be selected, a transparent part cannot, a figure removed from the view cannot be selected, and both far corners of a 200×200 map stay in front of the camera when the view is centered on the opposite corner.
+## Raised map, 30 Oct 2026
 
-`ui-scene.mjs` drives the real buttons in two browser contexts on headless Chromium (SwiftShader). The GM imports a schema-2 zip, paints Floor, places a barrel, assigns the bandit picture, and puts the map on the table. A second person creates an account, accepts the friend request, asks for a seat, and sits down. That person's snapshot receives catalog revision `2`, the floor, the barrel, and the visible figure's cast picture. The hidden figure is absent. The GM looks through that person's eyes and comes back with Your eyes. Putting the map on the table a second time keeps the scene id, and `state.json` keeps the tile, the barrel, the cast picture, and the hidden figure. This is a button check, not the Intel frame-time measurement.
+`node client/scripts/scene-perf.mjs` was run again on the same computer: Linux 7.2.5-3-omarchy, 12 threads, MemTotal 32531516 kB, Chromium 152.0.7977.82, ANGLE on Mesa Intel UHD Graphics 630, drawing buffer 1920×1080. The raised scene is 20×20, with columns at tiers 0, 1, and 2, a stair every third row on each step, 100 barrels, and 8 cast. The camera pans across it. This is not the 12×12 ruin forest.
+
+| Scene in this run | What happened |
+| --- | --- |
+| 20×20 flat, 100 objects, 8 cast | 1 terrain rebuild and 3 object rebuilds. Idle draws stayed at 3. Opening one door rebuilt that door. Active frames, after dropping the first five of forty: p50 20.5 ms, p95 34.4 ms, p99 42 ms. |
+| 50×50 flat, 500 objects, 50 cast | 1 terrain rebuild and 1 object rebuild. Building the scene plus a 200 ms settle took 696 ms. Active frames, after dropping the first five of twenty-four: p50 17 ms, p95 28.3 ms, p99 28.3 ms. |
+| 20×20 raised, 100 objects, 8 cast | 1 terrain rebuild. The barrel drawing from the crowded scene was reused, so object rebuilds stayed 0. Moving one actor added no terrain or object rebuild. Panning, after dropping the first five of twenty-four frames: p50 16.1 ms, p95 19.7 ms, p99 19.7 ms. |
+| 30 switches between a 12×12 and a 16×16 scene | Texture count 13 after the first scene and 13 after the thirtieth. |
+
+The raised p95 of 19.7 ms is inside the 33.3 ms budget. The flat 20×20 p95 in this same run is 34.4 ms, above that budget. These numbers belong to this run only.
+
+`occlusion-render.mjs` draws the real outline pass at device pixel ratios 1 and 2. On SwiftShader, the outline appears where a green occluder is in front of a red figure and does not appear on the visible side. The same page loads the table engine: an opaque part of a figure can be selected, a transparent part cannot, a figure removed from the view cannot be selected, and both far corners of a 200×200 map stay in front of the camera when the view is centered on the opposite corner. It then draws the ruin oak picture, which is a green block, in the fixed camera. A scout standing behind that oak stays in the view, picks up a cream outline, and can still be hovered. A second figure that was never sent has no hover target. The run printed `OCCLUSION_OK`.
+
+`ui-scene.mjs` drives the real buttons in two browser contexts on headless Chromium (SwiftShader). The temporary table listens on `127.0.0.1:8096`, and that run's Vite proxy is pointed at the same port. The GM imports a schema-2 zip, paints Floor, places a barrel, raises one square with the size-1 brush, places Stair on that square's edge, assigns the bandit picture, and puts the map on the table. A second person creates an account, accepts the friend request, asks for a seat, and sits down. That person's snapshot receives catalog revision `2`, the floor, the barrel, the height grid, the stair, and the visible figure's cast picture. The hidden figure is absent. The GM looks through that person's eyes and comes back with Your eyes. Putting the map on the table a second time keeps the scene id, and `state.json` keeps the tile, the barrel, the height grid, the stair, the cast picture, and the hidden figure. The table process is then stopped and started again on the same save. Both seats come back, and the second seat still has the floor, the height, the stair, and the visible figure, with the hidden figure absent. The run printed `UI_OK`. This is a button check, not the Intel frame-time measurement, and it is not the 12×12 ruin scene.
+
+`ruin-ui.mjs` repeats that path with the ruin pack on an empty asset directory, temporary port `8097`. The GM imports the pack, paints Grass, Dirt, Cobble, and Ruin floor, places Leaves, Oak, Barrel, Table, and Hedge, draws walls on both axes and a door, raises tiers 1 and 2, and places two stairs. Ada is added with the scout picture. Bram and Shade share the bandit picture, and one adversary is hidden. The second seat receives the map, Ada's scout picture, and a bandit, without the hidden name. After the table process restarts, that seat still has the ruin map and still lacks the hidden figure. The run printed `RUIN_UI_OK`. The pictures are the colored blocks. The clicks do not reproduce the server test's exact squares.
+
+`the_largest_map_publishes_and_a_larger_one_does_not` publishes a 200 by 200 map, moves a figure to the far corner, and leaves that map in place when a 201-square side is refused. `ceiling.test.ts` builds the fog shell for a flat 200 by 200 map and for one raised square on that map. The vitest body took 242 ms. That is a build check, not a frame time.
+
+`node client/scripts/scene-perf.mjs --ceiling` then drew a flat 200 by 200 map with 16 barrels and 8 cast on the same computer: Linux 7.2.5-3-omarchy, 12 threads, MemTotal 32531516 kB, Chromium 152.0.7977.82, ANGLE Mesa Intel UHD Graphics 630, drawing buffer 1920×1080. Building it took 1680 ms and rebuilt the terrain once. Panning, after dropping the first five of sixteen frames: p50 22 ms, p95 38.6 ms, p99 38.6 ms. That p95 is above the 33.3 ms budget. The last scene frame used 30 draw calls, 17 textures, and 23 geometries. Moving one actor did not rebuild the terrain. This is a sparse map, not the 50 by 50 scene with 500 objects, and not the ruin forest.
+
+The same command was run again on 30 Oct 2026 after the ground was split into 64-square pieces. Same machine, Chromium 152.0.7977.82, ANGLE Mesa Intel UHD Graphics 630, buffer 1920×1080. Building the flat 200 by 200 map took 1388 ms and rebuilt 16 terrain pieces. Panning, after dropping the first five of sixteen frames: p50 16.7 ms, p95 18.1 ms, p99 18.1 ms. That p95 is inside the 33.3 ms budget. The last scene frame used 44 draw calls, 18 textures, and 38 geometries. Moving one actor did not rebuild the terrain. This run does not replace the earlier miss of 38.6 ms, and it is still not the crowded 50 by 50 scene.
 
 `a_player_does_not_receive_an_adversary_outside_sight` puts a wall between Ada and Shade, and leaves Far outside Ada's sight. Neither name is in the player's snapshot or in the GM's view through Ada's eyes. Near, on Ada's side of the wall, is present. The GM's own view still has Shade. A figure that never arrives has no body, outline, label, or click target.
 
@@ -57,9 +78,10 @@ Nothing in the flat scene gate is waiting on a measurement that missed its budge
 
 ## Remaining original-plan goals
 
-These are not done, and they are not abandoned.
+The first performance table is the flat scenes. The later run also measured a 20×20 map with tiers 0, 1, and 2. That run is not the 12×12 ruin forest.
 
-- Tiers 0–2 and stairs. The importer and the layout reject them with "not available yet".
-- Height-aware sight and fog. A vision blocker is still an infinite wall, so it also stops walking.
-- Full migration off the legacy terrain and prop lists. Old packs still load. New packs do not have to fill those lists.
-- The elevated acceptance scene and production art.
+- Height-aware sight uses the eye and the figure sample. A wall or closed door is 8 units tall. An object's vision volume keeps the height written in the pack, and that span does not stop walking.
+- The fog mesh covers a raised top and its cliff. `node client/scripts/fog-render.mjs` prints `FOG_OK` on headless Chromium with SwiftShader. That run checks colors, not frame time.
+- Old packs still load. New packs do not have to fill the legacy terrain and prop lists.
+- `assets/packs/ruin` is a diagnostic pack of colored blocks. The server test builds the 12×12 scene from it. It is not production art.
+- An old angled picture stays in the save. The play snapshot does not include its cameras or pictures, and lighting cannot switch them.

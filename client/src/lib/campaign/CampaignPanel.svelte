@@ -60,24 +60,9 @@
     { kind: 'npc', title: 'NPCs', one: 'NPC' },
     { kind: 'adversary', title: 'Adversaries', one: 'adversary' },
   ];
-  const colors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
-
   function place(character: Character) {
-    const scene = table.scene;
-    send({
-      type: 'createToken',
-      name: character.name,
-      x: scene ? scene.width / 2 : 2.5,
-      y: scene ? scene.height / 2 : 2.5,
-      ownerId: character.ownerId,
-      hidden: character.kind !== 'pc',
-      visionRadius: 12,
-      grantsVision: character.kind === 'pc',
-      color: colors[table.tokens.length % colors.length] ?? '#d4a656',
-      characterId: character.id,
-      castAsset: character.castAssetId ?? null,
-      facing: 'south',
-    });
+    table.placingToken = false;
+    table.placingId = table.placingId === character.id ? null : character.id;
   }
 </script>
 
@@ -144,6 +129,7 @@
         {:else}
           <span class="shrink-0 text-[var(--color-gold)]">Open</span>
         {/if}
+        <button class="btn quiet px-2 text-sm" type="button" onclick={() => send({ type: 'duplicateScene', sceneId: item.id })}>Copy</button>
         <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'deleteScene', sceneId: item.id })}>Delete</button>
       </div>
     {/each}
@@ -163,6 +149,11 @@
 
   <section>
     <p class="text-sm tracking-[0.18em] text-[var(--color-gold)] uppercase">Cast</p>
+    {#if table.placingId}
+      <p class="mt-2 text-sm text-[var(--color-parchment)]/70">Click the ground to place them. Right-click cancels.</p>
+    {:else if systems.assigningId}
+      <p class="mt-2 text-sm text-[var(--color-parchment)]/70">Open Map and click the picture this character should use.</p>
+    {/if}
     {#each groups as group (group.kind)}
       <div class="mt-3">
         <div class="flex items-center justify-between">
@@ -175,7 +166,24 @@
         </div>
         {#each table.characters.filter((character) => character.kind === group.kind) as character (character.id)}
           <div class="mt-1 rounded-lg border border-white/10 p-2">
-            <p class="text-sm">{character.name}</p>
+            <input
+              class="field text-sm"
+              value={character.name}
+              maxlength="48"
+              aria-label="Character name"
+              onchange={(event) => send({
+                type: 'updateCharacter',
+                characterId: character.id,
+                name: event.currentTarget.value,
+                kind: null,
+                ownerId: null,
+                clearOwner: false,
+                numbers: {},
+                texts: {},
+                setCastAsset: false,
+                castAssetId: null,
+              })}
+            />
             {#if group.kind === 'pc'}
               <select
                 class="field mt-1"
@@ -201,7 +209,8 @@
             {/if}
             <div class="mt-1 flex gap-1">
               <button class="btn quiet flex-1" type="button" onclick={() => { systems.selectedId = character.id; systems.sheetOpen = true; }}>Sheet</button>
-              <button class="btn quiet flex-1" type="button" onclick={() => place(character)}>Place</button>
+              <button class="btn quiet flex-1 text-sm" type="button" onclick={() => { systems.assigningId = systems.assigningId === character.id ? null : character.id; }}>{systems.assigningId === character.id ? 'Cancel' : 'Picture'}</button>
+              <button class="btn quiet flex-1 text-sm" type="button" onclick={() => place(character)}>{table.placingId === character.id ? 'Cancel' : 'Place'}</button>
               <button class="btn quiet px-2" type="button" onclick={() => send({ type: 'deleteCharacter', characterId: character.id })}>Delete</button>
             </div>
           </div>

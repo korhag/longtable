@@ -83,6 +83,24 @@ export function projectedSpan(width: number, depth: number, rise: number) {
   return { width: maxRight - minRight, height: maxUp - minUp };
 }
 
+/** Span around the ground center, so a symmetric frame still holds the raised corners. */
+export function centeredSpan(width: number, depth: number, rise: number) {
+  const { right, up } = sceneBasis();
+  const focus = { x: width / 2, y: 0, z: depth / 2 };
+  let maxRight = 0;
+  let maxUp = 0;
+  for (const y of [0, rise]) {
+    for (const x of [0, width]) {
+      for (const z of [0, depth]) {
+        const rel = { x: x - focus.x, y, z: z - focus.z };
+        maxRight = Math.max(maxRight, Math.abs(dot(rel, right)));
+        maxUp = Math.max(maxUp, Math.abs(dot(rel, up)));
+      }
+    }
+  }
+  return { width: maxRight * 2, height: maxUp * 2 };
+}
+
 /** Orthographic full height so the span fits the visible area inside the docks. */
 export function framedDistance(
   spanWidth: number,

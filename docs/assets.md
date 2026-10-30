@@ -2,7 +2,7 @@
 
 The live scene uses one camera, `dimetric-30-v1`. It is orthographic, 30° above the ground, and looks from the south-west. Pan and zoom do not turn it. A new pack uses schema 2. The GM imports one zip. The same records paint the ground, place objects, and dress the cast. Do not copy a new picture into the old terrain or prop lists.
 
-An example manifest is `docs/schemas/pack-v2.example.json`.
+An example manifest is `docs/schemas/pack-v2.example.json`. The same file is the template. `docs/schemas/pack-v2.schema.json` lists the fields. Map → Check pack runs the table's rules on a zip and installs nothing. Import pack is the step that adds it. A playable diagnostic pack is `assets/packs/ruin`. Its pictures are colored blocks, not finished art. The 12 by 12 scene in the server test uses that pack: four grounds, a transparent overlay, an oak, a barrel, a table, walls on both axes, a door, tiers 0, 1, and 2, and two stairs.
 
 ## What a pack is
 
@@ -35,9 +35,9 @@ A ground tile is one cell.
 | `files` | one or more PNGs |
 | `transitionPolicy` | `none`, `rigid`, or `organic` |
 
-The picture is drawn looking straight down. The camera shortens the north-south direction. Do not paint that shortening into the file. `rigid` keeps the picture aligned to the cell. `organic` only changes which neighbor the edge borrows. It does not warp the picture. Extra files are variants. The map seed picks one and keeps it.
+The picture is drawn looking straight down. The camera shortens the north-south direction. Do not paint that shortening into the file. `rigid` keeps the picture aligned to the cell. `organic` only changes which neighbor the edge borrows. It does not warp the picture. Extra files are variants. The map seed picks one and keeps it. Right-click a square while the ground brush is selected to keep a different picture. Painting that square again lets the seed choose.
 
-A `side` tile is the same picture used for a future raised edge. The table does not raise cells yet.
+A `side` tile is the picture on a raised edge. A cell is tier 0, 1, or 2. One tier is one world unit. A stair is the only way from one tier to the next.
 
 An `overlay` tile is a flat picture on top of the ground, such as a rug or a puddle. It is not a wall.
 
@@ -47,12 +47,12 @@ An object is one placed thing: a barrel, a tree, a wall, or a door.
 
 | Field | Allowed |
 | --- | --- |
-| `kind` | `static`, `wall`, or `door` |
-| `placement` | `cell` or `edge` |
+| `kind` | `static`, `wall`, `door`, or `stairs` |
+| `placement` | `cell`, `edge`, or `connection` |
 | `footprintCells` | each side from 1 to 8 |
 | `pixelsPerWorldUnit` | 1 to 4096 |
 
-`kind: stairs` and `placement: connection` are refused. The message says raised terrain and stairs are not available yet.
+A stair uses `kind: stairs` and `placement: connection`. It joins two neighboring squares one tier apart. A jump from tier 0 to tier 2 needs two stairs.
 
 Each picture is a `renderLayers` entry:
 
@@ -70,7 +70,7 @@ The pivot is a pixel index from the top-left of the file. `0` is the first pixel
 
 An upright picture stands on the root and faces the camera. It is not a flat card turned with the camera quaternion. A ground layer lies on the cell. Draw the object on a transparent background. An opaque upright picture is accepted with a warning, because the outline and the depth cut need real transparency.
 
-`blocksMovement` without `blocksVision` stops walking and does not stop sight. `blocksVision` becomes a wall of the vision polygon. On this flat table that wall also stops walking. A tree should use a small trunk polygon for both, and let the picture extend past it. Finite height, and a canopy that blocks sight without blocking feet, are not implemented.
+`blocksMovement` stops walking. `blocksVision` stops sight and does not stop walking. A `visionVolume` gives that sight span a base and a height. A ray sees over it only when the line clears the top. With no volume, the span is 8 units tall. An eye is one step above its square, and a figure is sampled slightly lower. Terrain is solid below its surface. A tree should use a small trunk polygon, and let the picture extend past it.
 
 `collisionPolygon` and each vision polygon are in world units around the root, with 3 to 32 points. An empty collision polygon uses the footprint rectangle.
 
@@ -82,6 +82,8 @@ A cast entry has four views: `north`, `east`, `south`, and `west`. Each view has
 
 North is toward the top of the map, which is negative Z. East is positive X. South is positive Z. West is negative X. When a figure moves, the larger step picks the facing. A tie keeps the previous facing.
 
+`suggestedFootprintCells` is the body on the ground. A one-cell figure stands on a square center. An even body, such as the ruin Brute at 2 by 2, stands on the corner between squares. The picture does not change that size. The whole body has to stand on one height. A move or a map update that would split it across two levels is refused, and the figure stays put.
+
 The portrait is a separate file. It is the picture on the sheet and on a token that is not standing on a built map. It is not the body on the map. Assigning a cast picture does not replace the portrait.
 
 On a built map the body comes from the token's cast picture when one is set, otherwise from the character's cast picture, otherwise from the token's own picture. A hidden figure is left out of a player's view entirely: no body, no outline, no name, and no click.
@@ -90,11 +92,22 @@ On a built map the body comes from the token's cast picture when one is set, oth
 
 - A profile other than `dimetric-30-v1`.
 - A ground tile that is not 128 by 128, or that covers more than one cell.
-- Stairs, a connection placement, or a height grid that is not all ground level.
+- A height other than 0, 1, or 2, or a stair that does not join neighboring squares one step apart.
 - A missing picture, a pivot outside the picture, a zero footprint, or a scale outside 1 to 4096.
 - A reference the catalog does not contain. The map will not skip that blocker.
 - A zip that breaks the size limits, or a path that escapes the pack.
 
-## What is still later work
+## Build a raised scene
 
-Raised tiers, stairs, and sight that knows height are not part of this pack. A flat scene can be imported, painted, published, joined, saved, and reloaded. An elevated scene cannot. See the remaining goals in `docs/milestones/flat-gate.md`.
+The ruin pack in `assets/packs/ruin` is already on a table that loads this checkout. Its pictures are colored blocks, not finished art. A zip of that folder can also be checked and imported. The buttons below are the ones on the table.
+
+1. Open Map. Check pack reads the zip and installs nothing. Import pack adds it. The library lists Tiles, Objects, and Cast. Select a ground tile to see it repeated, and joined with another ground. Select an object or a figure to see a gold mark on the pivot. The checker behind a picture shows where it is transparent.
+2. New makes a draft. Click a ground tile, then paint. Leaves is an overlay, so it selects Decals. Click the map to place it.
+3. Click an object. An oak, a barrel, or a table selects Props. A wall selects Walls. A door selects Doors. Moving over the map shows the squares that object will cover. Click a square for a prop, or an edge for a wall or a door.
+4. Raise, then Step or Rise, paints a square to tier 1 or 2. A climb of two tiers needs two edges. Stairs, then the stair picture, then click the edge between the two heights. A flat edge names the two squares and says to raise one side by one step first. If a later height change leaves a stair between squares that are no longer one step apart, that stair is named in the editor, and the map stays off the table.
+5. On the character, click Picture. Then open Map, Cast, and the picture. That sets the body. A later picture chosen for a new figure does not change it. The portrait stays on the sheet.
+6. Put on the table. If a figure would be left outside the map, standing in an object, or standing on two heights, their name is shown first and they stay where they are. An object that covers two heights, or hangs off the map, is named the same way and stays in the draft. The button waits until that list is clear. Switch to Play. Place, or Add, waits for a click on the map. The marker shows the squares, and the label names the height. Dragging a figure onto a stair lands on the nearer end. A drag that stops in the middle lands on the higher square. Select a figure and choose North, East, South, or West to turn them without moving. An adversary starts hidden. Select the one players should see and press Show. Add uses the cast picture last clicked in the library.
+7. See as that player. A figure on the high ground can see over a low hedge. A wall still hides the far side. A hidden figure is absent: no body, no outline, no name, and no click. Your eyes returns to the GM view.
+8. Each change asks the table to save. After that save, a restart keeps the map, the cast pictures, and the hidden figure.
+
+Middle-drag pans. The wheel zooms. The view does not turn.

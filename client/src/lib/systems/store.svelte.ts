@@ -11,6 +11,7 @@ import { table } from '../table.svelte';
 class SystemsStore {
   selectedId = $state<string | null>(null);
   sheetOpen = $state(false);
+  assigningId = $state<string | null>(null);
 
   get active(): SystemDef | null {
     const id = table.campaign.systemId;

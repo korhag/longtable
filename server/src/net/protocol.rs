@@ -317,6 +317,7 @@ fn facing_south() -> String {
     "south".into()
 }
 
+
 pub(crate) fn flex_revision<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     struct Visit;
     impl<'de> serde::de::Visitor<'de> for Visit {
@@ -361,6 +362,10 @@ pub struct TokenView {
     /// World facing: north, east, south, or west. The camera does not turn.
     #[serde(default = "facing_south")]
     pub facing: String,
+    /// Gameplay size in cells. Absent means one square.
+    #[serde(default)]
+    #[ts(optional)]
+    pub footprint: Option<[u32; 2]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -404,6 +409,11 @@ pub struct FogView {
     pub height: u32,
     pub explored: String,
     pub visible_polygons: Vec<Vec<[f32; 2]>>,
+    /// Cells the viewer can see right now, in the same bit order as `explored`.
+    /// Absent means the client still uses `visiblePolygons`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub visible: Option<String>,
     pub mode: FogMode,
 }
 
@@ -465,6 +475,14 @@ pub struct Snapshot {
     /// Changes when a pack is imported, so every seat can reload the library.
     #[serde(default, deserialize_with = "flex_revision")]
     pub catalog_revision: String,
+    /// Why the table will not write, when a save could not be opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notice: Option<String>,
+    /// What an older save kept. Only the GM receives it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub review: Option<String>,
 }
 
 /// One line in the talk panel. The speaker is the character, when one is chosen.
@@ -689,6 +707,9 @@ pub enum ClientMsg {
         name: String,
     },
     DeleteScene {
+        scene_id: String,
+    },
+    DuplicateScene {
         scene_id: String,
     },
 }

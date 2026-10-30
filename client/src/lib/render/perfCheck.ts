@@ -1,9 +1,9 @@
 // ------------------------------------------------------------
 // Module: perfCheck
-// Purpose: Measure the real table engine on a small scene and a
-//          stress scene, then switch scenes thirty times. The
-//          page records the GPU and the drawing buffer. It does
-//          not decide that the table is smooth.
+// Purpose: Measure the real table engine on a small scene, a
+//          stress scene, and a raised scene, then switch scenes
+//          thirty times. The page records the GPU and the drawing
+//          buffer. It does not decide that the table is smooth.
 // ------------------------------------------------------------
 
 import type { Pack } from '../assets/catalog';
@@ -101,6 +101,26 @@ function layout(size: number, objectCount: number, salt: number): MapLayout {
   };
 }
 
+function raisedScene(size: number, objectCount: number, castCount: number): View {
+  const view = sceneOf('raised', size, objectCount, castCount, 9);
+  const map = view.scene?.layout;
+  if (!map) return view;
+  const band = Math.floor(size / 3);
+  const high = Math.floor((size * 2) / 3);
+  let binary = '';
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) binary += String.fromCharCode(x >= high ? 2 : x >= band ? 1 : 0);
+  }
+  const stairs = [];
+  for (let y = 0; y < size; y += 3) {
+    stairs.push({ id: `low-${y}`, asset: 'gate/stair', x: band - 1, y, x2: band, y2: y });
+    stairs.push({ id: `high-${y}`, asset: 'gate/stair', x: high - 1, y, x2: high, y2: y });
+  }
+  map.levels = btoa(binary);
+  map.stairs = stairs;
+  return view;
+}
+
 function sceneOf(id: string, size: number, objectCount: number, castCount: number, salt: number): View {
   const map = layout(size, objectCount, salt);
   const scene: SceneView = {
@@ -137,11 +157,24 @@ function sceneOf(id: string, size: number, objectCount: number, castCount: numbe
   }
   const fog: FogView = { cellsPerSquare: 1, width: size, height: size, explored: '', visiblePolygons: [], mode: 'gm' };
   const doors: DoorView[] = [];
-  return { scene, tokens, doors, fog, role: 'gm', selectedId: null, targetId: null, hoverId: null, tool: 'select', packs: [pack], ghost: [], buildMode: false, viewId: id, cast: {} };
+  return { scene, tokens, doors, fog, role: 'gm', selectedId: null, targetId: null, hoverId: null, tool: 'select', packs: [pack], ghost: [], placeSpan: null, buildMode: false, viewId: id, cast: {} };
 }
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function panFrames(count: number, size: number) {
+  const samples: number[] = [];
+  let last = performance.now();
+  for (let index = 0; index < count; index += 1) {
+    engine.centerOn((index * 3) % size, size / 2);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const now = performance.now();
+    samples.push(now - last);
+    last = now;
+  }
+  return samples.slice(5);
 }
 
 async function activeFrames(count: number) {
@@ -218,6 +251,39 @@ engine.start();
 say('PERF_STEP engine');
 
 try {
+  if (new URLSearchParams(location.search).has('ceiling')) {
+    const ceiling = sceneOf('ceiling', 200, 16, 8, 7);
+    const beforeTerrain = terrainStats.rebuilds;
+    const started = performance.now();
+    engine.sync(ceiling);
+    say('PERF_STEP ceiling');
+    await wait(400);
+    engine.fitMap();
+    const frames = await panFrames(16, 200);
+    const afterTerrain = terrainStats.rebuilds;
+    const moved = { ...ceiling, tokens: ceiling.tokens.map((token, index) => (index === 0 ? { ...token, x: token.x + 1, facing: 'east' } : token)) };
+    engine.sync(moved);
+    await wait(100);
+    if (terrainStats.rebuilds !== afterTerrain) throw new Error('moving one actor on a 200 square map rebuilt the terrain');
+    if (objectStats.instances !== 16) throw new Error(`the 200 square map has ${objectStats.instances} drawn objects`);
+    const sample = engine.sample();
+    say(`PERF_OK ${JSON.stringify({
+      ceiling: {
+        size: 200,
+        objects: 16,
+        cast: 8,
+        buildMs: Math.round(performance.now() - started),
+        terrainRebuilds: afterTerrain - beforeTerrain,
+        frames: summarize(frames),
+        drawingBuffer: sample.drawingBuffer,
+        textures: sample.textures,
+        geometries: sample.geometries,
+        calls: sample.calls,
+        renderer: sample.renderer,
+      },
+      note: 'A 200 square map with a few figures. This is not the crowded 50 square scene.',
+    })}`);
+  } else {
   const small = sceneOf('small', 20, 100, 8, 1);
   const beforeObjects = objectStats.rebuilds;
   const beforeTerrain = terrainStats.rebuilds;
@@ -306,6 +372,28 @@ try {
     frames: summarize(stressFrames),
   };
 
+  const raised = raisedScene(20, 100, 8);
+  const beforeRaisedTerrain = terrainStats.rebuilds;
+  const beforeRaisedObjects = objectStats.rebuilds;
+  engine.sync(raised);
+  say('PERF_STEP raised');
+  engine.fitMap();
+  await wait(200);
+  const raisedFrames = await panFrames(24, 20);
+  const raisedTerrain = terrainStats.rebuilds;
+  const raisedObjects = objectStats.rebuilds;
+  const raisedMoved = { ...raised, tokens: raised.tokens.map((token, index) => (index === 0 ? { ...token, x: token.x + 1, facing: 'east' } : token)) };
+  engine.sync(raisedMoved);
+  await wait(100);
+  if (terrainStats.rebuilds !== raisedTerrain) throw new Error('moving one actor on a raised map rebuilt the terrain');
+  if (objectStats.rebuilds !== raisedObjects) throw new Error('moving one actor on a raised map rebuilt objects');
+  const raisedSample = {
+    ...engine.sample(),
+    terrainRebuilds: raisedTerrain - beforeRaisedTerrain,
+    objectRebuilds: raisedObjects - beforeRaisedObjects,
+    frames: summarize(raisedFrames),
+  };
+
   const first = sceneOf('a', 12, 20, 4, 3);
   const second = sceneOf('b', 16, 24, 4, 4);
   engine.sync(first);
@@ -321,9 +409,11 @@ try {
   say(`PERF_OK ${JSON.stringify({
     small: smallSample,
     stress: stressSample,
+    raised: raisedSample,
     soak: { cycles: 30, texturesAfterOne: memoryAtOne, texturesAfterThirty: memoryAtThirty },
     note: 'These are measurements of this run. They are not a claim that every computer is smooth.',
   })}`);
+  }
 } catch (error) {
   say(`PERF_FAIL ${error instanceof Error ? error.message : String(error)}`);
 } finally {

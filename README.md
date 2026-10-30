@@ -2,7 +2,7 @@
 
 A self-hosted table for a roleplaying game. One Rust process on the GM's machine owns the map, the fog, and the dice. Browsers only draw what that process sends them, so a player cannot peek past a wall or invent a roll. The battle map is the first surface of the game. Characters and rules can be added on this same host.
 
-Tokens are flat discs for now. The server already tells the client which kind of token it is, so a miniature can be added later in the same place. Character sheets, initiative, and rule systems are left out on purpose.
+Figures stand upright on the map. The camera stays at one angle. Character sheets and the dice tray are on this same host.
 
 ## Run it while building
 
@@ -28,7 +28,7 @@ cargo build --release --manifest-path server/Cargo.toml
 
 Start that binary from this directory. It serves `client/dist` and listens on `0.0.0.0:8080`. Copy `config.example.toml` to `config.toml` if you want a passphrase and GM key that survive a restart. An empty `gm_key` is filled in with a new key each launch and printed in the terminal.
 
-Saves land in `data/state.json`, a moment after each change, and again when you stop the process with Ctrl-C. Map images and token portraits live under `data/` as well.
+Saves land in `data/state.json`, a moment after each change, and again when you stop the process with Ctrl-C. Map images and token portraits live under `data/` as well. An older save is copied beside itself before it is opened. The GM then sees what that open kept: the map names, a picture that was not rebuilt into tiles, a wall with no recorded height (treated as 8 units), and a portrait that is not yet a figure. To go back, stop the table and replace `data/state.json` with that `.bak-` copy. Do not replace it while the table is running.
 
 ## Friends on Tailscale
 
@@ -43,11 +43,11 @@ If a player's browser cannot connect, allow inbound TCP 8080 on the GM machine. 
 
 ## At the table
 
-- Drag empty ground to pan. The wheel zooms. The camera angle is fixed. An imported angled scene can be turned in quarter turns, and the GM can switch its lighting.
+- Drag empty ground to pan. The wheel zooms. The camera angle is fixed.
 - Drag a token to a square. The server snaps it to the grid and refuses a move through a wall or a closed door. Players can drag only their own tokens. The GM can drag any of them.
 - Fog starts unexplored. A token with sight paints what it can see, and that memory stays. Explored ground is dim; what the token sees right now is clear. The GM sees the whole map under a veil, and can paint fog in or out. "See as" shows a player's view.
 - Click a door, as the GM, to open or close it. A closed door blocks sight and movement.
-- Import a Dungeon Alchemist **Universal VTT** export (`.dd2vtt`). The file brings the drawing, the grid, the walls, the doors, and the lights. If a wall line sits on top of a door, that wall still blocks when the door opens; draw doors as portals in Dungeon Alchemist rather than as extra walls. A `.ltmap` package from the private exporter brings the same walls and doors plus angled pictures. Fog still hides the view, but it does not stop a seat from downloading the scenery.
+- Build the map in the editor: paint the ground, place objects, and put it on the table. An angled picture already stored with a save stays filed. The table draws the fixed view. Fog hides that view. It does not stop a seat from downloading a picture the map still names.
 - The dice hotbar builds a formula such as `2d6+3` or `1d20`. The server rolls them in a tray and sends every seat the same tumble, played at the same moment. **Everyone** shows the roll. **To the GM** shows it to the roller and the GM. **Secret** is GM-only; other seats get a short notice and never the number.
 
 ## Tests

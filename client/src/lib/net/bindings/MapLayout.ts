@@ -3,6 +3,7 @@ import type { EdgePiece } from "./EdgePiece.ts";
 import type { PlacedDecal } from "./PlacedDecal.ts";
 import type { PlacedLight } from "./PlacedLight.ts";
 import type { PlacedProp } from "./PlacedProp.ts";
+import type { StairLink } from "./StairLink.ts";
 
 export type MapLayout = { width: number, height: number, terrains: Array<string>, cells: string, pieces: Array<EdgePiece>, props: Array<PlacedProp>, decals: Array<PlacedDecal>, lights: Array<PlacedLight>, 
 /**
@@ -12,4 +13,12 @@ levels?: string,
 /**
  * Chooses tile variants. Absent means seed 1, so an old map does not reshuffle.
  */
-seed?: number, };
+seed?: number, 
+/**
+ * One byte per cell, base64. 0 lets the seed choose. 1 is the first picture.
+ */
+variants?: string, 
+/**
+ * Stairs between neighboring squares. Absent means the map has none.
+ */
+stairs?: Array<StairLink>, };

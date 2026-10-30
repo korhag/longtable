@@ -99,6 +99,7 @@ export interface ObjectDef {
   blocksMovement?: boolean;
   blocksVision?: boolean;
   occludesVisually?: boolean;
+  collisionPolygon?: [number, number][];
 }
 
 export interface CastFrame {
@@ -219,6 +220,11 @@ export function findIn<T extends { id: string }>(packs: Pack[], asset: string, l
   const def = pack ? list(pack).find((item) => item.id === parts.local) : undefined;
   if (!pack || !def) return null;
   return { pack, local: parts.local, def };
+}
+
+/** Nine cells. Even places keep the inspected tile. Odd places use the neighbor, so the join is visible. */
+export function seamCells(own: string, neighbor: string): string[] {
+  return Array.from({ length: 9 }, (_, index) => (index % 2 === 0 ? own : neighbor));
 }
 
 export function fileUrl(pack: Pack, file: string | null | undefined): string | null {

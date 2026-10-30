@@ -1,10 +1,48 @@
 <script lang="ts">
   import { send } from '../net/socket';
+  import { cellLevel, tierLabel } from '../render/levels';
   import { table } from '../table.svelte';
 
   const token = $derived(table.tokens.find((item) => item.id === table.selectedTokenId) ?? null);
+  const target = $derived(table.tokens.find((item) => item.id === table.targetTokenId) ?? null);
+  const here = $derived(token ? cellLevel(table.scene?.layout, token.x, token.y) : 0);
+  const there = $derived(target ? cellLevel(table.scene?.layout, target.x, target.y) : here);
+  const heightNote = $derived.by(() => {
+    if (!token) return '';
+    const place = tierLabel(here);
+    if (!target || target.id === token.id || here === there && here === 0 && !table.scene?.layout?.levels) return place === 'On the floor' ? '' : place;
+    if (here === there) return `${place}. Level with ${target.name}`;
+    const steps = Math.abs(here - there) === 1 ? 'One step' : 'Two steps';
+    return `${place}. ${steps} ${here > there ? 'above' : 'below'} ${target.name}`;
+  });
   const gm = $derived(table.role === 'gm' && !table.viewAs);
+  const ownFigure = $derived(!!token && token.ownerId === table.playerId && !table.viewAs);
   const colors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
+  const faces = [
+    { value: 'north', label: 'North' },
+    { value: 'east', label: 'East' },
+    { value: 'south', label: 'South' },
+    { value: 'west', label: 'West' },
+  ];
+
+  function turn(tokenId: string, facing: string) {
+    send({
+      type: 'updateToken',
+      tokenId,
+      name: null,
+      ownerId: null,
+      clearOwner: false,
+      hidden: null,
+      visionRadius: null,
+      grantsVision: null,
+      color: null,
+      characterId: null,
+      clearCharacter: false,
+      setCastAsset: false,
+      castAsset: null,
+      facing,
+    });
+  }
 
   async function portrait(file: File, id: string) {
     const body = new FormData();
@@ -24,7 +62,17 @@
     <p class="text-sm text-[var(--color-parchment)]/60">
       {token.hidden ? 'Hidden from players' : 'On the table'} · sight {token.visionRadius}
     </p>
+    {#if heightNote}
+      <p class="text-sm text-[var(--color-parchment)]/80">{heightNote}</p>
+    {/if}
 
+    {#if gm || ownFigure}
+      <div class="mt-3 grid grid-cols-4 gap-1">
+        {#each faces as face (face.value)}
+          <button class="btn quiet text-sm" class:active={token.facing === face.value} type="button" onclick={() => turn(token.id, face.value)}>{face.label}</button>
+        {/each}
+      </div>
+    {/if}
     {#if gm}
       <label class="mt-3 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Name
         <input

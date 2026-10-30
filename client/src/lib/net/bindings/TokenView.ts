@@ -9,4 +9,8 @@ castAsset?: string,
 /**
  * World facing: north, east, south, or west. The camera does not turn.
  */
-facing: string, };
+facing: string, 
+/**
+ * Gameplay size in cells. Absent means one square.
+ */
+footprint?: [number, number], };

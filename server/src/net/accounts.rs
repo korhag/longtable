@@ -79,8 +79,18 @@ pub async fn open_table(State(app): State<Arc<App>>, headers: HeaderMap, Path(id
         return Ok(Json(json!(house.lobby(&token).map_err(bad)?)));
     }
     let previous = already;
+    let path = app.data_dir.join("tables").join(format!("{id}.json"));
+    if path.is_file() {
+        let mut probe = crate::session::state::Table::new();
+        if let Err(err) = storage::load_file(&mut probe, &path) {
+            return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
+        }
+    }
     {
         let table = app.table.lock().await;
+        if table.save_hold.is_some() {
+            return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, "the open table is on hold, so it was not switched".into()));
+        }
         if let Some(previous) = &previous {
             let path = app.data_dir.join("tables").join(format!("{previous}.json"));
             storage::write_to(&table, &path).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -93,8 +103,10 @@ pub async fn open_table(State(app): State<Arc<App>>, headers: HeaderMap, Path(id
         if !path.is_file() {
             storage::write_fresh(&path, &account.username).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         }
-        if !storage::load_file(&mut table, &path) {
-            return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, "that table could not be opened".into()));
+        match storage::load_file(&mut table, &path) {
+            Ok(true) => {}
+            Ok(false) => return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, "that table could not be opened".into())),
+            Err(err) => return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
         }
         let passphrase = table.passphrase.clone();
         let gm_key = table.gm_key.clone();

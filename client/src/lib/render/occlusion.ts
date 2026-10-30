@@ -3,7 +3,10 @@
 // Purpose: One shared pair of targets for scenery depth and the
 //          authorized cast mask. The outline follows the sprite
 //          alpha and only shows where scenery is closer to the
-//          camera. Hidden cast never enter these targets.
+//          camera. A stand-in with no picture uses the whole card.
+//          The ground depth is kept until the ground or the camera
+//          changes, so moving a figure does not redraw it.
+//          Hidden cast never enter these targets.
 // ------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -12,12 +15,15 @@ import { ALPHA_CUTOFF } from './cutout';
 
 const MASK = `
   uniform sampler2D map;
+  uniform float hasMap;
   uniform vec3 idColor;
   varying vec2 vUv;
   out vec4 fragColor;
   void main() {
-    vec4 tex = texture(map, vUv);
-    if (tex.a < ${ALPHA_CUTOFF.toFixed(2)}) discard;
+    if (hasMap > 0.5) {
+      vec4 tex = texture(map, vUv);
+      if (tex.a < ${ALPHA_CUTOFF.toFixed(2)}) discard;
+    }
     fragColor = vec4(idColor, 1.0);
   }
 `;
@@ -58,6 +64,8 @@ const COMPOSITE = `
 `;
 
 export class OcclusionOutlines {
+  sceneryDraws = 0;
+  private readyStamp = -1;
   private scenery: THREE.WebGLRenderTarget | null = null;
   private cast: THREE.WebGLRenderTarget | null = null;
   private scratch = new THREE.Scene();
@@ -89,6 +97,7 @@ export class OcclusionOutlines {
     bodies: THREE.Mesh[],
     selectedId: string | null,
     hideDuringScenery: THREE.Object3D[],
+    sceneryToken = 0,
   ) {
     if (bodies.length === 0) return;
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -96,16 +105,20 @@ export class OcclusionOutlines {
     const scenery = this.scenery;
     const cast = this.cast;
     if (!scenery || !cast) return;
-    const hidden = hideDuringScenery.map((object) => object.visible);
-    hideDuringScenery.forEach((object) => {
-      object.visible = false;
-    });
-    renderer.setRenderTarget(scenery);
-    renderer.clear();
-    renderer.render(scene, camera);
-    hideDuringScenery.forEach((object, index) => {
-      object.visible = hidden[index] ?? true;
-    });
+    if (this.readyStamp !== sceneryToken) {
+      const hidden = hideDuringScenery.map((object) => object.visible);
+      hideDuringScenery.forEach((object) => {
+        object.visible = false;
+      });
+      renderer.setRenderTarget(scenery);
+      renderer.clear();
+      renderer.render(scene, camera);
+      hideDuringScenery.forEach((object, index) => {
+        object.visible = hidden[index] ?? true;
+      });
+      this.readyStamp = sceneryToken;
+      this.sceneryDraws += 1;
+    }
 
     const parked: { mesh: THREE.Mesh; parent: THREE.Object3D | null; material: THREE.Material | THREE.Material[] }[] = [];
     for (const mesh of bodies) {
@@ -151,24 +164,31 @@ export class OcclusionOutlines {
     this.cast?.dispose();
     this.scenery = target(width, height);
     this.cast = target(width, height);
+    this.readyStamp = -1;
   }
 }
 
 const masks = new Map<string, THREE.ShaderMaterial>();
+const solidMap = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+solidMap.needsUpdate = true;
 
 function maskMaterial(mesh: THREE.Mesh, tokenId: string) {
   const source = mesh.material as THREE.MeshBasicMaterial;
+  const map = source.map ?? solidMap;
+  const hasMap = source.map ? 1 : 0;
   const key = tokenId;
   const existing = masks.get(key);
   if (existing) {
-    existing.uniforms.map!.value = source.map;
+    existing.uniforms.map!.value = map;
+    existing.uniforms.hasMap!.value = hasMap;
     return existing;
   }
   const color = idColor(tokenId);
   const material = new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     uniforms: {
-      map: { value: source.map },
+      map: { value: map },
+      hasMap: { value: hasMap },
       idColor: { value: new THREE.Vector3(color.r, color.g, color.b) },
     },
     vertexShader: VERT,

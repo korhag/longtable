@@ -39,6 +39,8 @@ class TableStore {
   connected = $state(false);
   joined = $state(false);
   error = $state<string | null>(null);
+  review = $state<string | null>(null);
+  private reviewDismissed = '';
   playerId = $state<string | null>(null);
   role = $state<Role>('player');
   sessionToken = $state<string | null>(null);
@@ -70,6 +72,10 @@ class TableStore {
   talk = $state<TalkLine[]>([]);
   tool = $state<Tool>('select');
   viewId = $state('');
+  /** Character waiting for a click on the map. Empty means a new token from the name field. */
+  placingId = $state<string | null>(null);
+  placingToken = $state(false);
+  placingName = $state('Token');
   clock = new ClockSync();
 
   private queue: RollEvent[] = [];
@@ -112,6 +118,9 @@ class TableStore {
         this.strike = message.strike;
         this.talk = message.talk;
         this.catalogRevision = String(message.catalogRevision ?? '');
+        if (message.notice) this.error = message.notice;
+        if (message.review && message.review !== this.reviewDismissed) this.review = message.review;
+        if (!message.review) this.review = null;
         if (this.selectedTokenId && !message.tokens.some((token) => token.id === this.selectedTokenId)) {
           this.selectedTokenId = null;
         }
@@ -166,20 +175,19 @@ class TableStore {
     return;
   }
 
+  dismissReview() {
+    this.reviewDismissed = this.review ?? '';
+    this.review = null;
+  }
+
   private rememberView(scene: SceneView | null) {
-    const presentation = scene?.presentation;
-    if (!scene || !presentation) {
-      this.viewId = '';
-      this.framedScene = scene?.id ?? '';
-      return;
-    }
-    if (scene.id !== this.framedScene || !presentation.viewOrder.includes(this.viewId)) {
-      this.framedScene = scene.id;
-      this.viewId = presentation.defaultView;
-    }
+    this.viewId = '';
+    this.framedScene = scene?.id ?? '';
   }
 
   reset() {
+    this.review = null;
+    this.reviewDismissed = '';
     this.joined = false;
     this.connected = false;
     this.playerId = null;
@@ -211,6 +219,9 @@ class TableStore {
     this.strike = null;
     this.talk = [];
     this.viewId = '';
+    this.placingId = null;
+    this.placingToken = false;
+    this.placingName = 'Token';
     this.framedScene = '';
     this.queue = [];
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { tileUv, tileVariant } from './tileVariant';
+import { pictureIndex, tileUv, tileVariant, nextStoredVariant } from './tileVariant';
 
 describe('tile coverage', () => {
   it('puts the center of a cell at the center of its picture', () => {
@@ -20,5 +20,16 @@ describe('tile coverage', () => {
     expect(once).toBeGreaterThanOrEqual(0);
     expect(once).toBeLessThan(3);
     expect(tileVariant(7, 3, 4, 'demo/floor', 1)).toBe(0);
+  });
+
+  it('keeps a chosen picture until the cycle returns to the seed', () => {
+    const seeded = tileVariant(7, 3, 4, 'demo/floor', 3);
+    expect(pictureIndex(7, 3, 4, 'demo/floor', 3, 0)).toBe(seeded);
+    expect(pictureIndex(7, 3, 4, 'demo/floor', 3, 2)).toBe(1);
+    expect(pictureIndex(7, 3, 4, 'demo/floor', 3, 9)).toBe(seeded);
+    let stored = 0;
+    for (let step = 0; step < 3; step += 1) stored = nextStoredVariant(7, 3, 4, 'demo/floor', 3, stored);
+    expect(stored).toBe(0);
+    expect(nextStoredVariant(7, 3, 4, 'demo/floor', 1, 4)).toBe(0);
   });
 });

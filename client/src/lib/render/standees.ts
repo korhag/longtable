@@ -2,7 +2,8 @@
 // Module: standees
 // Purpose: Props, walls, and doors as cards facing the fixed
 //          camera. A missing picture is a box on the footprint
-//          with the asset's name.
+//          with the asset's name. One door or one reveal changes
+//          that card. The others keep the meshes they already have.
 // ------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -21,10 +22,12 @@ const RIGHT = new THREE.Vector3(right.x, right.y, right.z);
 const UP = new THREE.Vector3(0, 1, 0);
 const TOWARD = new THREE.Vector3().crossVectors(RIGHT, UP).normalize();
 
+type Node = { sig: string; group: THREE.Group };
+
 export class StandeeLayer {
   private group = new THREE.Group();
-  private key = '';
-  private generation = 0;
+  private nodes = new Map<string, Node>();
+  private stamp = 0;
   private onPaint: () => void = () => {};
 
   constructor(scene: THREE.Scene) {
@@ -34,33 +37,60 @@ export class StandeeLayer {
 
   sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}) {
     this.onPaint = onPaint;
-    const doorKey = doors.map((door) => `${door.id}:${door.open ? 1 : 0}`).join(',');
-    const key = layout ? `${layout.pieces.length}:${JSON.stringify(layout.pieces)}:${JSON.stringify(layout.props)}:${doorKey}:${showAll}:${fog?.explored ?? ''}` : '';
-    if (key === this.key) return;
-    this.key = key;
-    this.generation += 1;
-    clear(this.group);
-    if (!layout) return;
-    const generation = this.generation;
-    for (const prop of layout.props) {
-      if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
-      if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
-      if (!showAll && !seen(fog, prop.x + 0.5, prop.y + 0.5)) continue;
-      this.addProp(prop, packs, generation);
+    const wanted = new Map<string, { sig: string; visible: boolean; make: () => THREE.Group }>();
+    if (layout) {
+      for (const prop of layout.props) {
+        if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
+        const found = findIn(packs, prop.asset, (pack) => pack.props);
+        wanted.set(`prop:${prop.id}`, {
+          sig: `${prop.asset}@${prop.x},${prop.y},${prop.mirror ? 1 : 0}:${found?.pack.contentHash ?? ''}`,
+          visible: showAll || seen(fog, prop.x + 0.5, prop.y + 0.5),
+          make: () => this.propGroup(prop, packs),
+        });
+      }
+      for (const piece of layout.pieces) {
+        if (findIn(packs, piece.asset, (pack) => pack.objects ?? [])) continue;
+        const open = doors.find((door) => door.id === piece.id)?.open ?? piece.open;
+        const midX = piece.axis === 'h' ? piece.x + 0.5 : piece.x;
+        const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
+        wanted.set(`piece:${piece.id}`, {
+          sig: `${piece.asset}:${piece.axis}:${piece.x},${piece.y}:${open ? 1 : 0}`,
+          visible: showAll || seen(fog, midX, midY),
+          make: () => this.pieceGroup(piece, packs, open),
+        });
+      }
+      for (const post of cornerPosts(layout)) {
+        wanted.set(`post:${post.x},${post.y}`, {
+          sig: post.asset,
+          visible: showAll || seen(fog, post.x, post.y),
+          make: () => this.postGroup(post.x, post.y, post.asset, packs),
+        });
+      }
     }
-    for (const piece of layout.pieces) {
-      const object = findIn(packs, piece.asset, (pack) => pack.objects ?? []);
-      if (object && (object.def.kind === 'wall' || object.def.kind === 'door')) continue;
-      if (findIn(packs, piece.asset, (pack) => pack.objects ?? [])) continue;
-      const midX = piece.axis === 'h' ? piece.x + 0.5 : piece.x;
-      const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
-      if (!showAll && !seen(fog, midX, midY)) continue;
-      this.addPiece(piece, packs, doors, generation);
+    for (const [id, node] of this.nodes) {
+      if (wanted.has(id)) continue;
+      disposeNode(node.group);
+      node.group.removeFromParent();
+      this.nodes.delete(id);
     }
-    this.addPosts(layout, packs, showAll, fog, generation);
+    for (const [id, spec] of wanted) {
+      const existing = this.nodes.get(id);
+      if (existing && existing.sig === spec.sig) {
+        existing.group.visible = spec.visible;
+        continue;
+      }
+      if (existing) {
+        disposeNode(existing.group);
+        existing.group.removeFromParent();
+      }
+      const group = spec.make();
+      group.visible = spec.visible;
+      this.group.add(group);
+      this.nodes.set(id, { sig: spec.sig, group });
+    }
   }
 
-  private addProp(prop: PlacedProp, packs: Pack[], generation: number) {
+  private propGroup(prop: PlacedProp, packs: Pack[]) {
     const found = findIn(packs, prop.asset, (pack) => pack.props);
     const footprint = found?.def.footprint ?? [1, 1];
     const height = found?.def.height ?? 1;
@@ -68,15 +98,18 @@ export class StandeeLayer {
     const anchor = new THREE.Vector3(prop.x, 0, prop.y + footprint[1]);
     const box = fallback(footprint[0], footprint[1], height, name, found?.def.blocks === 'sight' ? '#8a6233' : '#d4a656');
     box.position.set(prop.x + footprint[0] / 2, height / 2, prop.y + footprint[1] / 2);
-    this.group.add(box);
+    const holder = new THREE.Group();
+    holder.add(box);
     const url = found ? fileUrl(found.pack, found.def.file) : null;
-    if (!url || !found) return;
-    const mirror = prop.mirror && !!found.def.mirror;
-    void this.swap(url, found.pack.filtering, found.pack.pixelsPerCell, footprint[0], footprint[1], height, found.def.anchor ?? null, anchor, mirror, box, generation, found.pack.pixelsPerCell);
+    if (url && found) {
+      const mirror = prop.mirror && !!found.def.mirror;
+      const stamp = this.mark(box);
+      void this.swap(url, found.pack.filtering, found.pack.pixelsPerCell, footprint[0], footprint[1], height, found.def.anchor ?? null, anchor, mirror, box, stamp, found.pack.pixelsPerCell);
+    }
+    return holder;
   }
 
-  private addPiece(piece: MapLayout['pieces'][number], packs: Pack[], doors: DoorView[], generation: number) {
-    const open = doors.find((door) => door.id === piece.id)?.open ?? piece.open;
+  private pieceGroup(piece: MapLayout['pieces'][number], packs: Pack[], open: boolean) {
     const wall = piece.kind === 'wall' ? findIn(packs, piece.asset, (pack) => pack.walls) : null;
     const door = piece.kind === 'door' ? findIn(packs, piece.asset, (pack) => pack.doors) : null;
     const pack = wall?.pack ?? door?.pack;
@@ -88,37 +121,35 @@ export class StandeeLayer {
       : new THREE.Vector3(piece.x - 0.125, 0, piece.y + 1);
     const box = fallback(footprint[0], footprint[1], 1, door?.def.name ?? wall?.def.name ?? piece.asset, open ? '#c6a15a' : '#8d3d32');
     box.position.set(anchor.x + footprint[0] / 2, 0.5, anchor.z - footprint[1] / 2);
-    this.group.add(box);
+    const holder = new THREE.Group();
+    holder.add(box);
     const url = pieceUrl(piece.axis, open, wall?.def, door?.def, pack ?? null);
-    if (!url || !pack) return;
-    void this.swap(url, pack.filtering, pixels, footprint[0], footprint[1], 1, null, anchor, false, box, generation, pixels);
+    if (url && pack) {
+      const stamp = this.mark(box);
+      void this.swap(url, pack.filtering, pixels, footprint[0], footprint[1], 1, null, anchor, false, box, stamp, pixels);
+    }
+    return holder;
   }
 
-  private addPosts(layout: MapLayout, packs: Pack[], showAll: boolean, fog: FogView | null, generation: number) {
-    const corners = new Map<string, string>();
-    for (const horizontal of layout.pieces) {
-      if (horizontal.axis !== 'h' || horizontal.kind !== 'wall') continue;
-      for (const vertical of layout.pieces) {
-        if (vertical.axis !== 'v' || vertical.kind !== 'wall' || vertical.asset !== horizontal.asset) continue;
-        if (vertical.x !== horizontal.x && vertical.x !== horizontal.x + 1) continue;
-        if (horizontal.y !== vertical.y && horizontal.y !== vertical.y + 1) continue;
-        corners.set(`${vertical.x},${horizontal.y}`, horizontal.asset);
-      }
+  private postGroup(x: number, y: number, asset: string, packs: Pack[]) {
+    const found = findIn(packs, asset, (pack) => pack.walls);
+    const anchor = new THREE.Vector3(x - 0.125, 0, y + 0.125);
+    const box = fallback(0.25, 0.25, 1, '', '#8d6a45');
+    box.position.set(x, 0.5, y);
+    const holder = new THREE.Group();
+    holder.add(box);
+    const url = found ? fileUrl(found.pack, found.def.post) : null;
+    if (url && found) {
+      const stamp = this.mark(box);
+      void this.swap(url, found.pack.filtering, found.pack.pixelsPerCell, 0.25, 0.25, 1, null, anchor, false, box, stamp, found.pack.pixelsPerCell);
     }
-    for (const [key, asset] of corners) {
-      const [xText, yText] = key.split(',');
-      const x = Number(xText);
-      const y = Number(yText);
-      if (!showAll && !seen(fog, x, y)) continue;
-      const found = findIn(packs, asset, (pack) => pack.walls);
-      const anchor = new THREE.Vector3(x - 0.125, 0, y + 0.125);
-      const box = fallback(0.25, 0.25, 1, '', '#8d6a45');
-      box.position.set(x, 0.5, y);
-      this.group.add(box);
-      const url = found ? fileUrl(found.pack, found.def.post) : null;
-      if (!url || !found) continue;
-      void this.swap(url, found.pack.filtering, found.pack.pixelsPerCell, 0.25, 0.25, 1, null, anchor, false, box, generation, found.pack.pixelsPerCell);
-    }
+    return holder;
+  }
+
+  private mark(box: THREE.Group) {
+    this.stamp += 1;
+    box.userData.stamp = this.stamp;
+    return this.stamp;
   }
 
   private async swap(
@@ -132,11 +163,11 @@ export class StandeeLayer {
     anchor: THREE.Vector3,
     mirror: boolean,
     box: THREE.Object3D,
-    generation: number,
+    stamp: number,
     packPixels: number,
   ) {
     const texture = await loadTexture(url, filtering);
-    if (!texture || generation !== this.generation || !box.parent) return;
+    if (!texture || box.userData.stamp !== stamp || !box.parent) return;
     const image = texture.image as { width?: number; height?: number } | undefined;
     const expected = uprightPixels(width, depth, height, packPixels);
     const imageWidth = image?.width || expected.width;
@@ -158,10 +189,27 @@ export class StandeeLayer {
   }
 
   clear() {
-    this.generation += 1;
-    clear(this.group);
-    this.key = '';
+    this.stamp += 1;
+    for (const node of this.nodes.values()) {
+      disposeNode(node.group);
+      node.group.removeFromParent();
+    }
+    this.nodes.clear();
   }
+}
+
+function cornerPosts(layout: MapLayout) {
+  const corners = new Map<string, { x: number; y: number; asset: string }>();
+  for (const horizontal of layout.pieces) {
+    if (horizontal.axis !== 'h' || horizontal.kind !== 'wall') continue;
+    for (const vertical of layout.pieces) {
+      if (vertical.axis !== 'v' || vertical.kind !== 'wall' || vertical.asset !== horizontal.asset) continue;
+      if (vertical.x !== horizontal.x && vertical.x !== horizontal.x + 1) continue;
+      if (horizontal.y !== vertical.y && horizontal.y !== vertical.y + 1) continue;
+      corners.set(`${vertical.x},${horizontal.y}`, { x: vertical.x, y: horizontal.y, asset: horizontal.asset });
+    }
+  }
+  return [...corners.values()];
 }
 
 function pieceUrl(axis: 'h' | 'v', open: boolean, wall: WallDef | undefined, door: DoorDef | undefined, pack: Pack | null) {
@@ -204,13 +252,6 @@ function label(name: string) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
-}
-
-function clear(group: THREE.Group) {
-  for (const child of [...group.children]) {
-    disposeNode(child);
-    child.removeFromParent();
-  }
 }
 
 function disposeNode(object: THREE.Object3D) {

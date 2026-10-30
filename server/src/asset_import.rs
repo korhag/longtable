@@ -67,16 +67,14 @@ pub fn validate_v2_shape(pack: &Pack) -> Result<(), String> {
     }
     for object in &pack.objects {
         remember(&mut ids, &pack.id, &object.id)?;
-        if matches!(object.kind.as_str(), "stairs") || matches!(object.placement.as_str(), "connection") {
-            return Err(format!(
-                "object {}/{} uses stairs. Raised terrain and stairs are not available yet",
-                pack.id, object.id
-            ));
+        let stair = object.kind == "stairs" || object.placement == "connection";
+        if stair && (object.kind != "stairs" || object.placement != "connection") {
+            return Err(format!("object {}/{} stairs use a connection between two squares", pack.id, object.id));
         }
-        if !matches!(object.kind.as_str(), "static" | "wall" | "door") {
+        if !stair && !matches!(object.kind.as_str(), "static" | "wall" | "door") {
             return Err(format!("object {}/{} has an unknown kind {}", pack.id, object.id, object.kind));
         }
-        if !matches!(object.placement.as_str(), "cell" | "edge") {
+        if !stair && !matches!(object.placement.as_str(), "cell" | "edge") {
             return Err(format!("object {}/{} has an unknown placement {}", pack.id, object.id, object.placement));
         }
         if object.footprint_cells[0] == 0 || object.footprint_cells[1] == 0 || object.footprint_cells[0] > 8 || object.footprint_cells[1] > 8 {
@@ -114,6 +112,13 @@ pub fn validate_v2_shape(pack: &Pack) -> Result<(), String> {
         remember(&mut ids, &pack.id, &cast.id)?;
         if !(1..=4_096).contains(&cast.pixels_per_world_unit) {
             return Err(format!("cast {}/{} scale must be between 1 and 4096 pixels per world unit", pack.id, cast.id));
+        }
+        if cast.suggested_footprint_cells[0] == 0
+            || cast.suggested_footprint_cells[1] == 0
+            || cast.suggested_footprint_cells[0] > 8
+            || cast.suggested_footprint_cells[1] > 8
+        {
+            return Err(format!("cast {}/{} footprint must be from 1 to 8 cells on a side", pack.id, cast.id));
         }
         for frame in [&cast.views.north, &cast.views.east, &cast.views.south, &cast.views.west] {
             check_path(&pack.id, &frame.file)?;
@@ -200,7 +205,18 @@ fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Resul
     Ok(())
 }
 
-pub fn import_bytes(bytes: &[u8], assets_dir: &Path) -> Result<Pack, String> {
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackReport {
+    pub id: String,
+    pub name: String,
+    pub tiles: usize,
+    pub objects: usize,
+    pub cast: usize,
+    pub warnings: Vec<String>,
+}
+
+fn prepare(bytes: &[u8]) -> Result<(Pack, String, BTreeMap<String, Vec<u8>>, Vec<String>), String> {
     if bytes.len() > MAX_COMPRESSED {
         return Err("that pack is larger than 100 MiB compressed".into());
     }
@@ -209,8 +225,19 @@ pub fn import_bytes(bytes: &[u8], assets_dir: &Path) -> Result<Pack, String> {
     if pack.schema_version != 2 {
         return Err("an imported pack must use schema 2".into());
     }
-    validate_v2_files(&pack, &files, true)?;
+    let warnings = validate_v2_files(&pack, &files, true)?;
     pack.content_hash = content_hash(&manifest, &files);
+    Ok((pack, manifest, files, warnings))
+}
+
+/// Read a zip and report problems. Nothing is written.
+pub fn check_bytes(bytes: &[u8]) -> Result<PackReport, String> {
+    let (pack, _, _, warnings) = prepare(bytes)?;
+    Ok(PackReport { id: pack.id, name: pack.name, tiles: pack.tiles.len(), objects: pack.objects.len(), cast: pack.cast.len(), warnings })
+}
+
+pub fn import_bytes(bytes: &[u8], assets_dir: &Path) -> Result<Pack, String> {
+    let (mut pack, manifest, files, _) = prepare(bytes)?;
     install(&pack, &manifest, &files, assets_dir)?;
     pack.base_url = format!("/packs/{}", pack.id);
     Ok(pack)
@@ -517,6 +544,18 @@ mod tests {
     }
 
     #[test]
+    fn a_check_reports_the_pack_and_installs_nothing() {
+        let report = check_bytes(&zip_with(&manifest(""), &sample_files())).unwrap();
+        assert_eq!(report.id, "demo");
+        assert_eq!(report.tiles, 1);
+        assert_eq!(report.objects, 1);
+        assert_eq!(report.cast, 1);
+        let err = check_bytes(&zip_with(&manifest(""), &[("tiles/floor.png", png(128, 128))])).unwrap_err();
+        assert!(err.contains("missing"), "{err}");
+        assert!(!std::env::temp_dir().join("packs").join("demo").exists());
+    }
+
+    #[test]
     fn a_complete_pack_installs_tiles_objects_and_cast() {
         let dir = temp_assets();
         let bytes = zip_with(&manifest(""), &sample_files());
@@ -759,24 +798,29 @@ mod tests {
             open: false,
         });
         let compiled = crate::map::compile::compile(&layout, &catalog).unwrap();
-        assert!(compiled.walls.iter().all(|wall| (wall.a.x - 3.0).abs() > 0.2 || (wall.a.y - 4.0).abs() > 0.2), "a barrel must not block sight");
-        assert_eq!(compiled.move_blockers.len(), 4, "the barrel blocks walking on its footprint");
-        assert!(compiled.walls.len() >= 4, "the oak trunk blocks sight");
+        assert!(compiled.walls.is_empty(), "objects do not become walls");
+        assert_eq!(compiled.move_blockers.len(), 8, "the barrel and the oak both block walking");
+        assert!(compiled.sight.iter().any(|block| (block.top - 2.0).abs() < 0.01), "the oak blocks sight at its authored height");
+        assert!(compiled.sight.iter().all(|block| block.a.x > 5.0), "the barrel does not block sight");
         assert_eq!(compiled.doors.len(), 1);
         assert!(!compiled.doors[0].open);
 
-        let stairs = r#"{"schemaVersion":2,"id":"steps","name":"Steps","visualProfile":"dimetric-30-v1","pixelsPerCell":128,"filtering":"linear","tiles":[],"objects":[{"id":"stair","name":"Stair","kind":"stairs","placement":"connection","footprintCells":[1,1],"renderLayers":[]}]}"#;
+        let stairs = r#"{"schemaVersion":2,"id":"steps","name":"Steps","visualProfile":"dimetric-30-v1","pixelsPerCell":128,"filtering":"linear","tiles":[],"objects":[{"id":"stair","name":"Stair","kind":"stairs","placement":"connection","footprintCells":[1,1],"pixelsPerWorldUnit":128,"renderLayers":[{"kind":"upright","file":"objects/stair.png","sizePx":[16,32],"pivotPx":[8,30]}]}]}"#;
         let stairs_dir = temp_assets();
-        let err = import_bytes(&zip_with(stairs, &[]), &stairs_dir).unwrap_err();
-        assert!(err.contains("not available yet"), "{err}");
+        import_bytes(&zip_with(stairs, &[("objects/stair.png", png_colored(16, 32, 255))]), &stairs_dir).unwrap();
+        let stair_catalog = crate::assets::load_catalog(&stairs_dir).unwrap();
+        assert!(stair_catalog.object("steps/stair").is_some(), "{:?}", stair_catalog.warnings);
         let _ = std::fs::remove_dir_all(&stairs_dir);
 
         let mut raised = layout.clone();
         let mut levels = vec![0_u8; 144];
         levels[0] = 1;
-        raised.levels = Some(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, levels));
+        raised.levels = Some(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &levels));
+        raised.validate().unwrap();
+        levels[0] = 3;
+        raised.levels = Some(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &levels));
         let err = raised.validate().unwrap_err();
-        assert!(err.contains("raised terrain is not available yet"), "{err}");
+        assert!(err.contains("0, 1, or 2"), "{err}");
 
         let mut table = crate::session::state::Table::new();
         table.passphrase = "table".into();

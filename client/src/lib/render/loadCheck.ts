@@ -132,6 +132,7 @@ function scene(id: string, source: Pack): View {
     tool: 'select',
     packs: [rose, green],
     ghost: [],
+    placeSpan: null,
     buildMode: false,
     viewId: id,
     cast: {},

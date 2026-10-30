@@ -5,6 +5,8 @@
 //          on the edges between cells.
 // ------------------------------------------------------------
 
+use std::collections::HashSet;
+
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -87,6 +89,19 @@ pub struct PlacedLight {
     pub color: String,
 }
 
+/// A stair between two neighboring squares. The squares must differ by one tier.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct StairLink {
+    pub id: String,
+    pub asset: String,
+    pub x: u32,
+    pub y: u32,
+    pub x2: u32,
+    pub y2: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
@@ -111,6 +126,14 @@ pub struct MapLayout {
     #[serde(default)]
     #[ts(optional)]
     pub seed: Option<u32>,
+    /// One byte per cell, base64. 0 lets the seed choose. 1 is the first picture.
+    #[serde(default)]
+    #[ts(optional)]
+    pub variants: Option<String>,
+    /// Stairs between neighboring squares. Absent means the map has none.
+    #[serde(default)]
+    #[ts(optional)]
+    pub stairs: Option<Vec<StairLink>>,
 }
 
 impl MapLayout {
@@ -127,6 +150,8 @@ impl MapLayout {
             lights: Vec::new(),
             levels: None,
             seed: Some(1),
+            variants: None,
+            stairs: None,
         }
     }
 
@@ -144,6 +169,12 @@ impl MapLayout {
         }
         if bytes.iter().any(|index| *index as usize >= self.terrains.len()) {
             return Err("a cell names a terrain that is not on this map".into());
+        }
+        if let Some(variants) = &self.variants {
+            let pictures = decode_cells(variants)?;
+            if pictures.len() != expected {
+                return Err(format!("the picture grid has {} bytes and the map wants {expected}", pictures.len()));
+            }
         }
         if self.pieces.len() > MAX_PIECES || self.props.len() > MAX_PROPS || self.decals.len() > MAX_DECALS || self.lights.len() > MAX_LIGHTS {
             return Err("this map has more pieces than the table will store".into());
@@ -178,17 +209,81 @@ impl MapLayout {
                 return Err("a light needs a color".into());
             }
         }
-        if let Some(levels) = &self.levels {
+        let heights = if let Some(levels) = &self.levels {
             let bytes = decode_cells(levels)?;
             let expected = (self.width as usize) * (self.height as usize);
             if bytes.len() != expected {
                 return Err(format!("the height grid has {} bytes and the map wants {expected}", bytes.len()));
             }
-            if bytes.iter().any(|level| *level != 0) {
-                return Err("raised terrain is not available yet. Keep every square at ground level".into());
+            if bytes.iter().any(|level| *level > 2) {
+                return Err("a square's height is 0, 1, or 2".into());
+            }
+            Some(bytes)
+        } else {
+            None
+        };
+        let stairs = self.stairs.as_deref().unwrap_or(&[]);
+        if stairs.len() > MAX_PROPS {
+            return Err("this map has more stairs than the table will store".into());
+        }
+        let bad: Vec<String> = stairs
+            .iter()
+            .filter(|stair| !self.stair_ok(stair, heights.as_deref()))
+            .map(|stair| format!("({}, {}) to ({}, {})", stair.x, stair.y, stair.x2, stair.y2))
+            .collect();
+        if !bad.is_empty() {
+            return Err(format!("These stairs do not join neighboring squares one step apart: {}.", bad.join("; ")));
+        }
+        let mut ids = HashSet::new();
+        for id in self.pieces.iter().map(|piece| piece.id.as_str())
+            .chain(self.props.iter().map(|prop| prop.id.as_str()))
+            .chain(stairs.iter().map(|stair| stair.id.as_str()))
+        {
+            if id.is_empty() {
+                return Err("a thing on this map has no id".into());
+            }
+            if !ids.insert(id) {
+                return Err(format!("two things on this map use the id {id}"));
             }
         }
         Ok(())
+    }
+
+    fn stair_ok(&self, stair: &StairLink, heights: Option<&[u8]>) -> bool {
+        if stair.x >= self.width || stair.y >= self.height || stair.x2 >= self.width || stair.y2 >= self.height {
+            return false;
+        }
+        let dx = stair.x.abs_diff(stair.x2);
+        let dy = stair.y.abs_diff(stair.y2);
+        if dx + dy != 1 {
+            return false;
+        }
+        let here = self.height_at(stair.x, stair.y, heights);
+        let there = self.height_at(stair.x2, stair.y2, heights);
+        here.abs_diff(there) == 1
+    }
+
+    /// The walkable height at a map point. Missing or off-map ground is 0.
+    pub fn level_at(&self, x: f32, y: f32) -> f32 {
+        let ix = x.floor() as i32;
+        let iy = y.floor() as i32;
+        if ix < 0 || iy < 0 || ix >= self.width as i32 || iy >= self.height as i32 {
+            return 0.0;
+        }
+        let Some(text) = &self.levels else { return 0.0 };
+        let Ok(bytes) = decode_cells(text) else { return 0.0 };
+        let index = (iy as u32 * self.width + ix as u32) as usize;
+        bytes.get(index).copied().unwrap_or(0).min(2) as f32
+    }
+
+    pub fn has_raised_ground(&self) -> bool {
+        let Some(text) = &self.levels else { return false };
+        decode_cells(text).ok().is_some_and(|bytes| bytes.iter().any(|level| *level > 0))
+    }
+
+    fn height_at(&self, x: u32, y: u32, heights: Option<&[u8]>) -> u8 {
+        let Some(heights) = heights else { return 0 };
+        heights[(y * self.width + x) as usize]
     }
 }
 
@@ -217,6 +312,26 @@ mod tests {
         let layout: MapLayout = serde_json::from_value(value).unwrap();
         assert!(layout.lights.is_empty());
         assert!(layout.seed.is_none());
+        assert!(layout.variants.is_none());
         layout.validate().unwrap();
+    }
+
+    #[test]
+    fn a_picture_grid_must_cover_the_map() {
+        let mut layout = MapLayout::blank(5, 5, "core/grass");
+        layout.variants = Some(encode_cells(&[0, 1]));
+        let err = layout.validate().unwrap_err();
+        assert!(err.contains("picture grid"), "{err}");
+        layout.variants = Some(encode_cells(&vec![0_u8; 25]));
+        layout.validate().unwrap();
+    }
+
+    #[test]
+    fn two_props_cannot_share_an_id() {
+        let mut layout = MapLayout::blank(5, 5, "core/grass");
+        layout.props.push(PlacedProp { id: "same".into(), asset: "core/table".into(), x: 1.0, y: 1.0, mirror: false });
+        layout.props.push(PlacedProp { id: "same".into(), asset: "core/table".into(), x: 3.0, y: 1.0, mirror: false });
+        let err = layout.validate().unwrap_err();
+        assert!(err.contains("two things on this map use the id same"), "{err}");
     }
 }

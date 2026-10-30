@@ -4,5 +4,5 @@
 //          CHANGELOG.md carries the same note as its newest entry.
 // ------------------------------------------------------------
 
-export const VERSION = '1.4.0';
-export const VERSION_NOTE = "A pack's tiles, objects, and people can be placed on the map, and a hidden figure stays hidden.";
+export const VERSION = '1.10.0';
+export const VERSION_NOTE = 'Right-click a ground square to keep one picture of that tile.';

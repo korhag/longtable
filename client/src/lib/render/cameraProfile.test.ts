@@ -4,6 +4,7 @@ import {
   acceptedProfile,
   AZIMUTH_DEG,
   cameraDepth,
+  centeredSpan,
   cutoutOffset,
   ELEVATION_DEG,
   framedDistance,
@@ -92,6 +93,28 @@ describe('dimetric-30-v1', () => {
     const docked = framedDistance(span.width, span.height, 1200, 800, { left: 280, right: 320, top: 48, bottom: 220 });
     expect(docked).toBeGreaterThan(open);
     expect(span.height).toBeGreaterThan(projectedSpan(12, 12, 0).height);
+  });
+
+  it('keeps a raised corner inside a frame aimed at the ground', () => {
+    const flat = centeredSpan(12, 12, 0);
+    const floor = projectedSpan(12, 12, 0);
+    expect(flat.width).toBeCloseTo(floor.width, 5);
+    expect(flat.height).toBeCloseTo(floor.height, 5);
+    const raised = centeredSpan(12, 12, 3);
+    expect(raised.height).toBeGreaterThan(flat.height);
+    const { right, up } = sceneBasis();
+    const focus = { x: 6, y: 0, z: 6 };
+    for (const y of [0, 3]) {
+      for (const x of [0, 12]) {
+        for (const z of [0, 12]) {
+          const rel = { x: x - focus.x, y, z: z - focus.z };
+          const alongRight = rel.x * right.x + rel.y * right.y + rel.z * right.z;
+          const alongUp = rel.x * up.x + rel.y * up.y + rel.z * up.z;
+          expect(Math.abs(alongRight)).toBeLessThanOrEqual(raised.width / 2 + 0.001);
+          expect(Math.abs(alongUp)).toBeLessThanOrEqual(raised.height / 2 + 0.001);
+        }
+      }
+    }
   });
 
   it('keeps every corner of a 200 by 200 map between the near and far planes', () => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ensureCatalog, loadCatalog } from './lib/assets/catalog';
+  import { ensureCatalog, findIn, loadCatalog } from './lib/assets/catalog';
   import CampaignPanel from './lib/campaign/CampaignPanel.svelte';
   import RulesPanel from './lib/designer/RulesPanel.svelte';
   import RulesBoard from './lib/designer/RulesBoard.svelte';
@@ -18,6 +18,7 @@
   import { PROFILE_ID } from './lib/render/cameraProfile';
   import { TableEngine } from './lib/render/engine';
   import { castFor } from './lib/render/rings';
+  import { cellLevel, tierLabel } from './lib/render/levels';
   import { measure } from './lib/systems/measure';
   import { systems } from './lib/systems/store.svelte';
   import { overlaysFor, playChromeFor } from './systems';
@@ -62,6 +63,66 @@
       }
     : table.scene);
 
+  const figureColors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
+
+  function spanFor(asset: string | null | undefined): [number, number] {
+    if (!asset) return [1, 1];
+    const found = findIn(editor.packs, asset, (pack) => pack.cast ?? []);
+    return found?.def.suggestedFootprintCells ?? [1, 1];
+  }
+
+  function armedSpan(): [number, number] | null {
+    if (editor.active || table.viewAs || table.role !== 'gm') return null;
+    if (table.placingId) {
+      const character = table.characters.find((item) => item.id === table.placingId);
+      return spanFor(character?.castAssetId);
+    }
+    if (table.placingToken) return spanFor(editor.castId || null);
+    return null;
+  }
+
+  function placeFigure(point: { x: number; y: number }) {
+    const index = table.tokens.length;
+    const color = figureColors[index % figureColors.length] ?? '#d4a656';
+    if (table.placingId) {
+      const character = table.characters.find((item) => item.id === table.placingId);
+      table.placingId = null;
+      if (!character) return;
+      send({
+        type: 'createToken',
+        name: character.name,
+        x: point.x,
+        y: point.y,
+        ownerId: character.ownerId,
+        hidden: character.kind !== 'pc',
+        visionRadius: character.kind === 'pc' ? 12 : 8,
+        grantsVision: character.kind === 'pc',
+        color: character.kind === 'adversary' ? '#c45c4a' : color,
+        characterId: character.id,
+        castAsset: null,
+        facing: 'south',
+      });
+      table.tool = 'select';
+      return;
+    }
+    if (!table.placingToken) return;
+    table.placingToken = false;
+    send({
+      type: 'createToken',
+      name: table.placingName.trim() || 'Token',
+      x: point.x,
+      y: point.y,
+      ownerId: null,
+      hidden: false,
+      visionRadius: 12,
+      grantsVision: true,
+      color,
+      characterId: null,
+      castAsset: editor.castId || null,
+      facing: 'south',
+    });
+  }
+
   onMount(() => {
     engine = new TableEngine(host, {
       onMove: (tokenId, x, y) => send({ type: 'moveToken', tokenId, x, y }),
@@ -93,14 +154,25 @@
       onBrush: (mode, cells) => send({ type: 'fogBrush', mode, cells }),
       onToggleDoor: (doorId, open) => send({ type: 'setDoor', doorId, open }),
       onBuild: (phase, point, button) => editor.pointer(phase, point, button),
+      onPlace: (point) => placeFigure(point),
+      onCancelPlace: () => {
+        table.placingId = null;
+        table.placingToken = false;
+      },
       canDrag: (token) => !table.viewAs && (table.role === 'gm' || token.ownerId === table.playerId),
       onMeasure: (delta) => {
-        if (!delta || (delta.dx === 0 && delta.dy === 0)) {
+        if (!delta) {
           measureLabel = null;
           return;
         }
-        const result = measure(delta.dx, delta.dy, systems.active?.grid ?? null);
-        measureLabel = result.range ? `${result.text} · ${result.range}` : result.text;
+        const ground = tierLabel(cellLevel(table.scene?.layout, delta.landX, delta.landY));
+        if (delta.dx === 0 && delta.dy === 0) {
+          measureLabel = ground;
+        } else {
+          const result = measure(delta.dx, delta.dy, systems.active?.grid ?? null);
+          measureLabel = result.range ? `${result.text} · ${result.range} · ${ground}` : `${result.text} · ${ground}`;
+        }
+        if (delta.note) measureLabel = `${measureLabel}. ${delta.note}`;
         measureAt = { x: delta.x, y: delta.y };
       },
       onWarning: (message) => {
@@ -123,12 +195,14 @@
       doors: editor.active ? [] : table.doors,
       fog: editor.active ? null : table.fog,
       role: table.viewAs ? 'player' : table.role,
+      seatId: table.viewAs ?? table.playerId,
       selectedId: table.selectedTokenId,
       targetId: table.targetTokenId,
       hoverId: table.hoverTokenId,
       tool: editor.active || table.viewAs ? 'select' : table.tool,
       packs: editor.packs,
       ghost: editor.ghost,
+      placeSpan: armedSpan(),
       buildMode: editor.active,
       viewId: editor.active ? '' : table.viewId,
       cast: Object.fromEntries(table.tokens.map((token) => [token.id, castFor(token, table.characters, table.players)])),
@@ -295,6 +369,12 @@
       <p class="glass toast pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm">
         {table.concealedNotice}
       </p>
+    {/if}
+    {#if table.review}
+      <div class="glass fixed top-16 left-1/2 z-[var(--z-float)] w-[min(36rem,calc(100%-2rem))] -translate-x-1/2 rounded-lg px-4 py-3 text-sm">
+        <p>{table.review}</p>
+        <button class="btn quiet mt-2 text-sm" type="button" onclick={() => table.dismissReview()}>Dismiss</button>
+      </div>
     {/if}
     {#if table.error}
       <p class="glass toast pointer-events-none fixed bottom-24 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-[#e7a090]">

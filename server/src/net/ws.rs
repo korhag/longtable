@@ -26,7 +26,7 @@ use crate::app::App;
 use crate::dice::simulate;
 use crate::systems::{rules_for, save_system};
 use crate::map::compile::compile;
-use crate::map::drafts::{safe_id, Draft, DraftStore};
+use crate::map::drafts::{check_revision, safe_id, Draft, DraftStore};
 use crate::map::layout::MapLayout;
 use crate::map::{Scene, DIMETRIC_PROFILE};
 use crate::net::protocol::{dice_meshes, ClientMsg, Keyframe, PlayedDie, RollEvent, ServerMsg};
@@ -39,6 +39,7 @@ pub fn router(app: Arc<App>) -> Router {
         .with_state(app.clone());
     let pack_import = Router::new()
         .route("/api/packs/import", post(import_pack))
+        .route("/api/packs/check", post(check_pack))
         .layer(DefaultBodyLimit::max(crate::asset_import::MAX_COMPRESSED + 1024 * 1024))
         .with_state(app.clone());
     let mut router = Router::new()
@@ -147,9 +148,34 @@ async fn import_pack(State(app): State<Arc<App>>, request: Request) -> Result<Js
     {
         let mut table = app.table.lock().await;
         table.catalog_revision = revision;
+        table.note_cast_footprints(&catalog);
         table.broadcast_state();
     }
     Ok(Json(catalog))
+}
+
+async fn check_pack(State(app): State<Arc<App>>, request: Request) -> Result<Json<crate::asset_import::PackReport>, ApiError> {
+    require_gm(&app, request.headers()).await?;
+    let mut multipart = Multipart::from_request(request, &())
+        .await
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let mut bytes = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?
+    {
+        if field.name() == Some("pack") {
+            bytes = Some(field.bytes().await.map_err(|err| ApiError(StatusCode::BAD_REQUEST, err.to_string()))?);
+        }
+    }
+    let bytes = bytes.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "choose a pack archive".into()))?;
+    let owned = bytes.to_vec();
+    let report = tokio::task::spawn_blocking(move || crate::asset_import::check_bytes(&owned))
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "the checker stopped".into()))?
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    Ok(Json(report))
 }
 
 fn bump_revision(current: &str) -> String {
@@ -235,14 +261,15 @@ async fn write_draft(
     Path(id): Path<String>,
     headers: HeaderMap,
     Json(mut draft): Json<Draft>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     require_gm(&app, &headers).await?;
     draft.id = safe_id(&id).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    let store = DraftStore::new(&app.data_dir);
+    let stored = store.get(&draft.id).ok().map(|existing| existing.updated_at);
+    check_revision(stored, draft.updated_at).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     draft.updated_at = now_ms();
-    DraftStore::new(&app.data_dir)
-        .put(&draft)
-        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
-    Ok(StatusCode::NO_CONTENT)
+    store.put(&draft).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    Ok(Json(serde_json::json!({ "updatedAt": draft.updated_at })))
 }
 
 async fn remove_draft(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Result<StatusCode, ApiError> {
@@ -798,6 +825,7 @@ async fn import_map(
         lights: parsed.lights,
         layout: None,
         move_blockers: Vec::new(),
+        sight: Vec::new(),
         presentation: None,
         schema_version: 1,
         visual_profile: DIMETRIC_PROFILE.to_string(),
@@ -846,11 +874,15 @@ async fn import_package(app: Arc<App>, token: &str, name: &str, bytes: &[u8]) ->
         lights: loaded.parsed.lights,
         layout: None,
         move_blockers: Vec::new(),
+        sight: Vec::new(),
         presentation: Some(loaded.presentation),
         schema_version: 1,
-        visual_profile: String::new(),
+        visual_profile: DIMETRIC_PROFILE.to_string(),
     };
-    let warnings = scene.presentation.as_ref().map(|item| item.warnings.clone()).unwrap_or_default();
+    let mut warnings = vec![crate::map::presentation::FILED_VIEW.to_string()];
+    if let Some(presentation) = scene.presentation.as_ref() {
+        warnings.extend(presentation.warnings.iter().cloned());
+    }
     let mut table = app.table.lock().await;
     if table.viewer_for_session(token).is_none() {
         drop(table);
@@ -1083,6 +1115,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unsigned_pack_check_is_refused() {
+        let (dir, app) = isolated();
+        let response = router(app)
+            .oneshot(HttpRequest::builder().method("POST").uri("/api/packs/check").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn a_player_cannot_import_a_pack() {
         let (dir, app) = isolated();
         let token = session(&app, false).await;
@@ -1142,7 +1185,9 @@ mod tests {
         )
         .await;
         assert_eq!(created.0, 200, "{}", String::from_utf8_lossy(&created.1));
-        let draft_id = serde_json::from_slice::<serde_json::Value>(&created.1).unwrap()["id"].as_str().unwrap().to_string();
+        let created_body = serde_json::from_slice::<serde_json::Value>(&created.1).unwrap();
+        let draft_id = created_body["id"].as_str().unwrap().to_string();
+        let updated_at = created_body["updatedAt"].as_u64().unwrap();
         let layout = crate::map::MapLayout::blank(12, 12, "gate/floor");
         let mut layout = layout;
         layout.props.push(crate::map::layout::PlacedProp {
@@ -1155,7 +1200,7 @@ mod tests {
         let draft = serde_json::json!({
             "id": draft_id,
             "name": "Gate",
-            "updatedAt": 0,
+            "updatedAt": updated_at,
             "sceneId": null,
             "layout": layout,
         });
@@ -1167,7 +1212,17 @@ mod tests {
             &json_body(&serde_json::to_vec(&draft).unwrap()),
         )
         .await;
-        assert_eq!(written.0, 204, "{}", String::from_utf8_lossy(&written.1));
+        assert_eq!(written.0, 200, "{}", String::from_utf8_lossy(&written.1));
+        let stale = http(
+            addr,
+            "PUT",
+            &format!("/api/drafts/{draft_id}"),
+            &token,
+            &json_body(&serde_json::to_vec(&draft).unwrap()),
+        )
+        .await;
+        assert_eq!(stale.0, 400, "{}", String::from_utf8_lossy(&stale.1));
+        assert!(String::from_utf8_lossy(&stale.1).contains("saved somewhere else"));
         let published = http(addr, "POST", &format!("/api/drafts/{draft_id}/publish"), &token, &json_body(b"")).await;
         assert_eq!(published.0, 204, "{}", String::from_utf8_lossy(&published.1));
         let again = http(addr, "POST", &format!("/api/drafts/{draft_id}/publish"), &token, &json_body(b"")).await;
