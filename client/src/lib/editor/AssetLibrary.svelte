@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { fileUrl, loadCatalog, noteCatalogRevision, type CastDef, type CastFrame, type ObjectDef, type Pack, type TileDef } from '../assets/catalog';
+  import { fileUrl, type CastDef, type CastFrame, type ObjectDef, type Pack, type TileDef } from '../assets/catalog';
   import { editor } from './draft.svelte';
+  import { send } from '../net/socket';
+  import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
 
-  let packs = $state<Pack[]>([]);
+  let packs = $derived(editor.packs);
   let tab = $state<'tiles' | 'objects' | 'cast'>('tiles');
   let query = $state('');
   let packId = $state('');
@@ -15,15 +17,6 @@
   const tiles = $derived(visible.flatMap((pack) => (pack.tiles ?? []).map((tile) => ({ pack, tile }))));
   const objects = $derived(visible.flatMap((pack) => (pack.objects ?? []).map((object) => ({ pack, object }))));
   const cast = $derived(visible.flatMap((pack) => (pack.cast ?? []).map((actor) => ({ pack, actor }))));
-
-  $effect(() => {
-    const revision = table.catalogRevision;
-    if (!noteCatalogRevision(revision) && packs.length > 0) return;
-    void loadCatalog().then((next) => {
-      packs = next;
-      void editor.reloadPacks();
-    });
-  });
 
   async function importPack(file: File) {
     error = '';
@@ -39,15 +32,62 @@
       return;
     }
     const payload = (await response.json()) as { packs?: Pack[]; warnings?: string[] };
-    packs = payload.packs ?? packs;
+    editor.packs = payload.packs ?? editor.packs;
     error = payload.warnings?.join(' ') ?? '';
-    void editor.reloadPacks();
   }
 
   function matches(name: string, id: string) {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
     return name.toLowerCase().includes(needle) || id.toLowerCase().includes(needle);
+  }
+
+  function chooseTile(packId: string, tile: TileDef) {
+    const id = `${packId}/${tile.id}`;
+    selected = id;
+    if (tile.kind === 'overlay') {
+      editor.tool = 'decal';
+      editor.decalId = id;
+      return;
+    }
+    editor.tool = 'terrain';
+    editor.terrainId = id;
+  }
+
+  function chooseObject(packId: string, object: ObjectDef) {
+    const id = `${packId}/${object.id}`;
+    selected = id;
+    if (object.kind === 'door') {
+      editor.tool = 'door';
+      editor.doorId = id;
+      return;
+    }
+    if (object.kind === 'wall' || object.placement === 'edge') {
+      editor.tool = 'wall';
+      editor.wallId = id;
+      return;
+    }
+    editor.tool = 'prop';
+    editor.propId = id;
+  }
+
+  function chooseCast(packId: string, actorId: string) {
+    const id = `${packId}/${actorId}`;
+    selected = id;
+    editor.castId = id;
+    if (!systems.selectedId) return;
+    send({
+      type: 'updateCharacter',
+      characterId: systems.selectedId,
+      name: null,
+      kind: null,
+      ownerId: null,
+      clearOwner: false,
+      numbers: {},
+      texts: {},
+      setCastAsset: true,
+      castAssetId: id,
+    });
   }
 
   function castFrame(actor: CastDef, facing: string): CastFrame {
@@ -94,7 +134,7 @@
   <div class="mt-2 flex flex-col gap-1">
     {#if tab === 'tiles'}
       {#each tiles.filter((item) => matches(item.tile.name, item.tile.id)) as item (`${item.pack.id}/${item.tile.id}`)}
-        <button class="btn quiet text-left" type="button" onclick={() => (selected = `${item.pack.id}/${item.tile.id}`)}>
+        <button class="btn quiet text-left" type="button" onclick={() => chooseTile(item.pack.id, item.tile)}>
           {item.tile.name}
         </button>
         {#if selected === `${item.pack.id}/${item.tile.id}`}
@@ -105,7 +145,7 @@
       {/each}
     {:else if tab === 'objects'}
       {#each objects.filter((item) => matches(item.object.name, item.object.id)) as item (`${item.pack.id}/${item.object.id}`)}
-        <button class="btn quiet text-left" type="button" onclick={() => (selected = `${item.pack.id}/${item.object.id}`)}>
+        <button class="btn quiet text-left" type="button" onclick={() => chooseObject(item.pack.id, item.object)}>
           {item.object.name}
         </button>
         {#if selected === `${item.pack.id}/${item.object.id}`}
@@ -116,7 +156,7 @@
       {/each}
     {:else}
       {#each cast.filter((item) => matches(item.actor.name, item.actor.id)) as item (`${item.pack.id}/${item.actor.id}`)}
-        <button class="btn quiet text-left" type="button" onclick={() => (selected = `${item.pack.id}/${item.actor.id}`)}>
+        <button class="btn quiet text-left" type="button" onclick={() => chooseCast(item.pack.id, item.actor.id)}>
           {item.actor.name}
         </button>
         {#if selected === `${item.pack.id}/${item.actor.id}`}
@@ -133,7 +173,11 @@
   <div class="px-2 py-1 text-sm text-[var(--color-parchment)]/80">
     <p>{pack.id}/{tile.id} · {tile.kind} · {tile.sourceSizePx[0]}×{tile.sourceSizePx[1]} · {tile.coverageCells[0]} cell</p>
     {#if tile.files[0]}
-      <img class="mt-1 h-16 w-16" alt="" src={fileUrl(pack, tile.files[0])} />
+      <div class="mt-1 grid w-36 grid-cols-3">
+        {#each [0, 1, 2, 3, 4, 5, 6, 7, 8] as cell (cell)}
+          <img class="h-12 w-12" alt="" src={fileUrl(pack, tile.files[0])} />
+        {/each}
+      </div>
     {/if}
   </div>
 {/snippet}

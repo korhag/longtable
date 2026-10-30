@@ -82,6 +82,9 @@ export interface ObjectLayer {
   file: string;
   sizePx: [number, number];
   pivotPx: [number, number];
+  rootOffsetWorld?: [number, number, number];
+  axis?: string;
+  state?: string;
 }
 
 export interface ObjectDef {
@@ -90,6 +93,7 @@ export interface ObjectDef {
   kind: string;
   placement: string;
   footprintCells: [number, number];
+  originCells?: [number, number] | null;
   pixelsPerWorldUnit?: number;
   renderLayers: ObjectLayer[];
   blocksMovement?: boolean;
@@ -140,24 +144,65 @@ export interface AssetRef<T> {
 }
 
 const textures = new Map<string, Promise<THREE.Texture | null>>();
-let loading: Promise<Pack[]> | null = null;
-let seenRevision = -1;
+const images = new Map<string, Promise<CanvasImageSource | null>>();
+let imageDecodes = 0;
+let loading: { revision: string; promise: Promise<Pack[]> } | null = null;
+let loadedRevision = '';
+let cachedPacks: Pack[] | null = null;
 
-export function loadCatalog(): Promise<Pack[]> {
-  loading ??= fetch('/api/packs')
-    .then((response) => (response.ok ? response.json() : { packs: [] }))
-    .then((body: { packs?: Pack[]; revision?: number }) => {
-      if (typeof body.revision === 'number') seenRevision = body.revision;
-      return body.packs ?? [];
-    })
-    .catch(() => []);
-  return loading;
+export function imageDecodeCount() {
+  return imageDecodes;
 }
 
-export function noteCatalogRevision(revision: number): boolean {
-  if (revision === seenRevision) return false;
-  seenRevision = revision;
-  loading = null;
+/** One decode per URL. Painting does not decode the source again. */
+export function cachedImage(url: string): Promise<CanvasImageSource | null> {
+  const cached = images.get(url);
+  if (cached) return cached;
+  imageDecodes += 1;
+  const pending = fetch(url)
+    .then((response) => (response.ok ? response.blob() : null))
+    .then((blob) => (blob ? createImageBitmap(blob) : null))
+    .catch(() => null);
+  images.set(url, pending);
+  return pending;
+}
+
+/**
+ * Load the library for a revision. A failed request is not stored, so the
+ * next call tries again. An older response cannot replace a newer revision.
+ */
+export function ensureCatalog(revision: string): Promise<Pack[]> {
+  if (cachedPacks && revision === loadedRevision) return Promise.resolve(cachedPacks);
+  if (loading?.revision === revision) return loading.promise;
+  const promise = fetch('/api/packs')
+    .then((response) => {
+      if (!response.ok) throw new Error('the asset library did not load');
+      return response.json() as Promise<{ packs?: Pack[] }>;
+    })
+    .then((body) => {
+      const packs = body.packs ?? [];
+      if (loading?.promise === promise || !loading) {
+        loadedRevision = revision;
+        cachedPacks = packs;
+        loading = null;
+      }
+      return packs;
+    })
+    .catch((error) => {
+      if (loading?.promise === promise) loading = null;
+      throw error;
+    });
+  loading = { revision, promise };
+  return promise;
+}
+
+export function loadCatalog(): Promise<Pack[]> {
+  if (cachedPacks) return Promise.resolve(cachedPacks);
+  return ensureCatalog(loadedRevision);
+}
+
+export function noteCatalogRevision(revision: string): boolean {
+  if (revision === loadedRevision && cachedPacks) return false;
   return true;
 }
 
@@ -178,6 +223,7 @@ export function findIn<T extends { id: string }>(packs: Pack[], asset: string, l
 
 export function fileUrl(pack: Pack, file: string | null | undefined): string | null {
   if (!file) return null;
+  if (/^(blob:|data:|https?:)/.test(file)) return file;
   return `${pack.baseUrl}/${file}`;
 }
 

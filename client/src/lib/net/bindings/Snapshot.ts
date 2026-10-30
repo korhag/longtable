@@ -32,4 +32,4 @@ talk: Array<TalkLine>,
 /**
  * Changes when a pack is imported, so every seat can reload the library.
  */
-catalogRevision: number, };
+catalogRevision: string, };

@@ -313,6 +313,30 @@ fn schema_one() -> u32 {
     1
 }
 
+fn facing_south() -> String {
+    "south".into()
+}
+
+pub(crate) fn flex_revision<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    struct Visit;
+    impl<'de> serde::de::Visitor<'de> for Visit {
+        type Value = String;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a revision string or a small number")
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+    }
+    deserializer.deserialize_any(Visit)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
@@ -330,6 +354,13 @@ pub struct TokenView {
     pub grants_vision: bool,
     #[serde(default)]
     pub character_id: Option<String>,
+    /// Placement override. When set, this wins over the character's cast.
+    #[serde(default)]
+    #[ts(optional)]
+    pub cast_asset: Option<String>,
+    /// World facing: north, east, south, or west. The camera does not turn.
+    #[serde(default = "facing_south")]
+    pub facing: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -432,8 +463,8 @@ pub struct Snapshot {
     #[serde(default)]
     pub talk: Vec<TalkLine>,
     /// Changes when a pack is imported, so every seat can reload the library.
-    #[serde(default)]
-    pub catalog_revision: u64,
+    #[serde(default, deserialize_with = "flex_revision")]
+    pub catalog_revision: String,
 }
 
 /// One line in the talk panel. The speaker is the character, when one is chosen.
@@ -512,6 +543,10 @@ pub enum ClientMsg {
         color: String,
         #[serde(default)]
         character_id: Option<String>,
+        #[serde(default)]
+        cast_asset: Option<String>,
+        #[serde(default)]
+        facing: Option<String>,
     },
     UpdateToken {
         token_id: String,
@@ -533,6 +568,12 @@ pub enum ClientMsg {
         character_id: Option<String>,
         #[serde(default)]
         clear_character: bool,
+        #[serde(default)]
+        set_cast_asset: bool,
+        #[serde(default)]
+        cast_asset: Option<String>,
+        #[serde(default)]
+        facing: Option<String>,
     },
     DeleteToken {
         token_id: String,
@@ -571,6 +612,10 @@ pub enum ClientMsg {
         numbers: std::collections::BTreeMap<String, i32>,
         #[serde(default)]
         texts: std::collections::BTreeMap<String, String>,
+        #[serde(default)]
+        set_cast_asset: bool,
+        #[serde(default)]
+        cast_asset_id: Option<String>,
     },
     DeleteCharacter {
         character_id: String,

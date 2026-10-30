@@ -31,12 +31,12 @@
 
   function setNumber(id: string, value: number) {
     if (preview) onpreview?.({ ...character, numbers: { ...character.numbers, [id]: value } });
-    else send({ type: 'updateCharacter', characterId: character.id, name: null, kind: null, ownerId: null, clearOwner: false, numbers: { [id]: value }, texts: {} });
+    else send({ type: 'updateCharacter', characterId: character.id, name: null, kind: null, ownerId: null, clearOwner: false, numbers: { [id]: value }, texts: {}, setCastAsset: false, castAssetId: null });
   }
 
   function setText(id: string, value: string) {
     if (preview) onpreview?.({ ...character, texts: { ...character.texts, [id]: value } });
-    else send({ type: 'updateCharacter', characterId: character.id, name: null, kind: null, ownerId: null, clearOwner: false, numbers: {}, texts: { [id]: value } });
+    else send({ type: 'updateCharacter', characterId: character.id, name: null, kind: null, ownerId: null, clearOwner: false, numbers: {}, texts: { [id]: value }, setCastAsset: false, castAssetId: null });
   }
 </script>
 

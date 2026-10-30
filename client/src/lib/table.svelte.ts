@@ -63,7 +63,7 @@ class TableStore {
   hoverTokenId = $state<string | null>(null);
   menu = $state<{ tokenId: string; x: number; y: number } | null>(null);
   fear = $state(0);
-  catalogRevision = $state(-1);
+  catalogRevision = $state('');
   figures = $state<Figure[]>([]);
   canUndo = $state(false);
   strike = $state<StrikeOffer | null>(null);
@@ -111,7 +111,7 @@ class TableStore {
         this.canUndo = message.canUndo;
         this.strike = message.strike;
         this.talk = message.talk;
-        this.catalogRevision = message.catalogRevision ?? 0;
+        this.catalogRevision = String(message.catalogRevision ?? '');
         if (this.selectedTokenId && !message.tokens.some((token) => token.id === this.selectedTokenId)) {
           this.selectedTokenId = null;
         }
@@ -205,7 +205,7 @@ class TableStore {
     this.hoverTokenId = null;
     this.menu = null;
     this.fear = 0;
-    this.catalogRevision = -1;
+    this.catalogRevision = '';
     this.figures = [];
     this.canUndo = false;
     this.strike = null;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { loadCatalog } from './lib/assets/catalog';
+  import { ensureCatalog, loadCatalog } from './lib/assets/catalog';
   import CampaignPanel from './lib/campaign/CampaignPanel.svelte';
   import RulesPanel from './lib/designer/RulesPanel.svelte';
   import RulesBoard from './lib/designer/RulesBoard.svelte';
@@ -144,10 +144,19 @@
   });
 
   $effect(() => {
-    if (!table.joined || editor.packs.length > 0) return;
-    void loadCatalog().then((packs) => {
-      if (editor.packs.length === 0) editor.packs = packs;
-    });
+    if (!table.joined) return;
+    const revision = table.catalogRevision;
+    let cancelled = false;
+    void ensureCatalog(revision)
+      .then((packs) => {
+        if (!cancelled && table.catalogRevision === revision) editor.packs = packs;
+      })
+      .catch(() => {
+        if (!cancelled) table.error = 'The asset library did not load. It will try again.';
+      });
+    return () => {
+      cancelled = true;
+    };
   });
 
   $effect(() => {

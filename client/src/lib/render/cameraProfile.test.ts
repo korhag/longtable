@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptedProfile,
   AZIMUTH_DEG,
+  cameraDepth,
   cutoutOffset,
   ELEVATION_DEG,
   framedDistance,
@@ -91,6 +92,36 @@ describe('dimetric-30-v1', () => {
     const docked = framedDistance(span.width, span.height, 1200, 800, { left: 280, right: 320, top: 48, bottom: 220 });
     expect(docked).toBeGreaterThan(open);
     expect(span.height).toBeGreaterThan(projectedSpan(12, 12, 0).height);
+  });
+
+  it('keeps every corner of a 200 by 200 map between the near and far planes', () => {
+    const width = 200;
+    const height = 200;
+    const rise = 4;
+    const depth = cameraDepth(width, height, rise);
+    const { forward } = sceneBasis();
+    const points = [];
+    for (const y of [0, rise]) {
+      for (const x of [0, width]) {
+        for (const z of [0, height]) points.push({ x, y, z });
+      }
+    }
+    for (const focus of points) {
+      if (focus.y !== 0) continue;
+      const camera = {
+        x: focus.x - forward.x * depth.pull,
+        y: focus.y - forward.y * depth.pull,
+        z: focus.z - forward.z * depth.pull,
+      };
+      for (const point of points) {
+        const along =
+          (point.x - camera.x) * forward.x +
+          (point.y - camera.y) * forward.y +
+          (point.z - camera.z) * forward.z;
+        expect(along).toBeGreaterThan(depth.near);
+        expect(along).toBeLessThan(depth.far);
+      }
+    }
   });
 
   it('refuses any other scene camera profile', () => {

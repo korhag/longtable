@@ -17,6 +17,9 @@ pub struct Draft {
     pub name: String,
     pub updated_at: u64,
     pub layout: MapLayout,
+    /// Scene this draft last published. The next publish updates that scene.
+    #[serde(default)]
+    pub scene_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -123,6 +126,7 @@ mod tests {
             name: "Glade".into(),
             updated_at: 5,
             layout: MapLayout::blank(8, 6, "core/grass"),
+            scene_id: None,
         };
         store.put(&draft).unwrap();
         let loaded = store.get("draft-0001").unwrap();

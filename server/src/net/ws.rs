@@ -33,10 +33,13 @@ use crate::net::protocol::{dice_meshes, ClientMsg, Keyframe, PlayedDie, RollEven
 use crate::session::state::{now_ms, CommandEffect};
 
 pub fn router(app: Arc<App>) -> Router {
-    let import = Router::new()
+    let maps = Router::new()
         .route("/api/maps/import", post(import_map))
-        .route("/api/packs/import", post(import_pack))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
+        .with_state(app.clone());
+    let pack_import = Router::new()
+        .route("/api/packs/import", post(import_pack))
+        .layer(DefaultBodyLimit::max(crate::asset_import::MAX_COMPRESSED + 1024 * 1024))
         .with_state(app.clone());
     let mut router = Router::new()
         .route("/api/health", get(health))
@@ -60,7 +63,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/ws", get(websocket))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(app.clone())
-        .merge(import);
+        .merge(maps)
+        .merge(pack_import);
 
     let packs_dir = ServeDir::new(app.assets_dir.join("packs"));
     router = router.nest_service("/packs", packs_dir);
@@ -117,13 +121,28 @@ async fn import_pack(State(app): State<Arc<App>>, request: Request) -> Result<Js
         }
     }
     let bytes = bytes.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "choose a pack archive".into()))?;
-    let pack = crate::asset_import::import_bytes(&bytes, &app.assets_dir).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
-    let mut catalog = crate::assets::load_catalog(&app.assets_dir).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    if bytes.len() > crate::asset_import::MAX_COMPRESSED {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "that pack is larger than 100 MiB compressed".into()));
+    }
+    let assets_dir = app.assets_dir.clone();
+    let owned = bytes.to_vec();
+    let pack = tokio::task::spawn_blocking(move || crate::asset_import::import_bytes(&owned, &assets_dir))
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "the importer stopped".into()))?
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    let assets_dir = app.assets_dir.clone();
+    let mut catalog = tokio::task::spawn_blocking(move || crate::assets::load_catalog_mode(&assets_dir, false))
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "the library could not be read".into()))?
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     if !catalog.packs.iter().any(|item| item.id == pack.id) {
         catalog.packs.push(pack);
-        catalog.revision = crate::asset_import::revision_of(&catalog.packs);
     }
-    let revision = catalog.revision;
+    let revision = {
+        let table = app.table.lock().await;
+        bump_revision(&table.catalog_revision)
+    };
+    catalog.revision = revision.clone();
     *app.catalog.lock().await = catalog.clone();
     {
         let mut table = app.table.lock().await;
@@ -131,6 +150,11 @@ async fn import_pack(State(app): State<Arc<App>>, request: Request) -> Result<Js
         table.broadcast_state();
     }
     Ok(Json(catalog))
+}
+
+fn bump_revision(current: &str) -> String {
+    let number = current.split(':').next().unwrap_or("0").parse::<u32>().unwrap_or(0).saturating_add(1);
+    format!("{number}")
 }
 
 async fn require_gm(app: &App, headers: &HeaderMap) -> Result<String, ApiError> {
@@ -190,6 +214,7 @@ async fn create_draft(
         name: if trimmed.is_empty() { "Untitled map".into() } else { trimmed.chars().take(48).collect() },
         updated_at: now_ms(),
         layout,
+        scene_id: None,
     };
     DraftStore::new(&app.data_dir)
         .put(&draft)
@@ -234,16 +259,20 @@ async fn publish_draft(State(app): State<Arc<App>>, Path(id): Path<String>, head
         .get(&id)
         .map_err(|err| ApiError(StatusCode::NOT_FOUND, err))?;
     let catalog = app.catalog.lock().await.clone();
-    let compiled = compile(&draft.layout, &catalog);
+    let compiled = compile(&draft.layout, &catalog).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     let mut table = app.table.lock().await;
     let viewer = table
         .viewer_for_session(&token)
         .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "sign in again".into()))?;
-    table
-        .publish_built(&viewer, draft.name, draft.layout, compiled)
-        .map_err(|err| ApiError(StatusCode::FORBIDDEN, err))?;
+    let scene_id = table
+        .publish_built(&viewer, draft.name.clone(), draft.layout.clone(), compiled, draft.scene_id.clone())
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     table.broadcast_state();
     drop(table);
+    let mut saved = draft;
+    saved.scene_id = Some(scene_id);
+    saved.updated_at = now_ms();
+    DraftStore::new(&app.data_dir).put(&saved).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     app.request_save();
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1070,5 +1099,350 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Two live sockets: the GM imports and publishes, the player receives the
+    /// scene and the visible cast, and a hidden figure never arrives.
+    #[tokio::test]
+    async fn a_player_joins_the_published_scene_on_a_second_socket() {
+        let (dir, app) = isolated();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = app.clone();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router(served).into_make_service()).await;
+        });
+
+        let mut gm = Socket::connect(addr).await;
+        gm.send_text(r#"{"type":"join","name":"Mina","passphrase":"table","asGm":true,"gmKey":"testkey","resumeId":null}"#)
+            .await;
+        let welcome = gm.until(|value| value["type"] == "welcome").await;
+        let token = welcome["sessionToken"].as_str().unwrap().to_string();
+        assert_eq!(welcome["role"], "gm");
+
+        let mut player = Socket::connect(addr).await;
+        player
+            .send_text(r#"{"type":"join","name":"Ada","passphrase":"table","asGm":false,"gmKey":null,"resumeId":null}"#)
+            .await;
+        let player_welcome = player.until(|value| value["type"] == "welcome").await;
+        let player_id = player_welcome["playerId"].as_str().unwrap().to_string();
+
+        let imported = http(addr, "POST", "/api/packs/import", &token, &multipart(&gate_zip())).await;
+        assert_eq!(imported.0, 200, "{}", String::from_utf8_lossy(&imported.1));
+        let gm_library = gm.until(|value| value["type"] == "snapshot" && value["catalogRevision"] == "2").await;
+        let player_library = player.until(|value| value["type"] == "snapshot" && value["catalogRevision"] == "2").await;
+        assert_eq!(gm_library["catalogRevision"], player_library["catalogRevision"]);
+
+        let created = http(
+            addr,
+            "POST",
+            "/api/drafts",
+            &token,
+            &json_body(br#"{"name":"Gate","width":12,"height":12}"#),
+        )
+        .await;
+        assert_eq!(created.0, 200, "{}", String::from_utf8_lossy(&created.1));
+        let draft_id = serde_json::from_slice::<serde_json::Value>(&created.1).unwrap()["id"].as_str().unwrap().to_string();
+        let layout = crate::map::MapLayout::blank(12, 12, "gate/floor");
+        let mut layout = layout;
+        layout.props.push(crate::map::layout::PlacedProp {
+            id: "barrel".into(),
+            asset: "gate/barrel".into(),
+            x: 3.0,
+            y: 4.0,
+            mirror: false,
+        });
+        let draft = serde_json::json!({
+            "id": draft_id,
+            "name": "Gate",
+            "updatedAt": 0,
+            "sceneId": null,
+            "layout": layout,
+        });
+        let written = http(
+            addr,
+            "PUT",
+            &format!("/api/drafts/{draft_id}"),
+            &token,
+            &json_body(&serde_json::to_vec(&draft).unwrap()),
+        )
+        .await;
+        assert_eq!(written.0, 204, "{}", String::from_utf8_lossy(&written.1));
+        let published = http(addr, "POST", &format!("/api/drafts/{draft_id}/publish"), &token, &json_body(b"")).await;
+        assert_eq!(published.0, 204, "{}", String::from_utf8_lossy(&published.1));
+        let again = http(addr, "POST", &format!("/api/drafts/{draft_id}/publish"), &token, &json_body(b"")).await;
+        assert_eq!(again.0, 204, "{}", String::from_utf8_lossy(&again.1));
+
+        let gm_scene = gm.until(|value| value["type"] == "snapshot" && value["scene"].is_object()).await;
+        let player_scene = player.until(|value| value["type"] == "snapshot" && value["scene"].is_object()).await;
+        let scene_id = gm_scene["scene"]["id"].as_str().unwrap().to_string();
+        assert_eq!(player_scene["scene"]["id"], scene_id);
+        assert_eq!(player_scene["scene"]["layout"]["props"][0]["asset"], "gate/barrel");
+
+        gm.send_text(&format!(
+            r##"{{"type":"createToken","name":"Ada","x":2,"y":2,"ownerId":"{player_id}","hidden":false,"visionRadius":6,"grantsVision":true,"color":"#d4a656","characterId":null,"castAsset":"gate/bandit","facing":"south"}}"##
+        ))
+        .await;
+        gm.send_text(&format!(
+            r##"{{"type":"createToken","name":"Bram","x":6,"y":6,"ownerId":"{player_id}","hidden":false,"visionRadius":6,"grantsVision":true,"color":"#6a8f6a","characterId":null,"castAsset":"gate/scout","facing":"south"}}"##
+        ))
+        .await;
+        gm.send_text(
+            r##"{"type":"createToken","name":"Lurker","x":8,"y":8,"ownerId":null,"hidden":true,"visionRadius":0,"grantsVision":false,"color":"#444444","characterId":null,"castAsset":"gate/bandit","facing":"south"}"##,
+        )
+        .await;
+        let seen = player.until(|value| value["type"] == "snapshot" && value["tokens"].as_array().is_some_and(|tokens| tokens.iter().any(|token| token["name"] == "Bram"))).await;
+        let names: Vec<&str> = seen["tokens"].as_array().unwrap().iter().filter_map(|token| token["name"].as_str()).collect();
+        assert!(names.contains(&"Ada") && names.contains(&"Bram"), "{names:?}");
+        assert!(!names.contains(&"Lurker"), "{names:?}");
+        let ada = seen["tokens"].as_array().unwrap().iter().find(|token| token["name"] == "Ada").unwrap();
+        let bram = seen["tokens"].as_array().unwrap().iter().find(|token| token["name"] == "Bram").unwrap();
+        assert_eq!(ada["castAsset"], "gate/bandit");
+        assert_eq!(bram["castAsset"], "gate/scout");
+        let ada_id = ada["id"].as_str().unwrap();
+
+        gm.send_text(&format!(r#"{{"type":"moveToken","tokenId":"{ada_id}","x":5,"y":2}}"#)).await;
+        let moved = player
+            .until(|value| {
+                value["type"] == "snapshot"
+                    && value["tokens"].as_array().is_some_and(|tokens| {
+                        tokens.iter().any(|token| token["id"] == ada_id && token["facing"] == "east" && token["x"].as_f64().unwrap_or(0.0) > 4.0)
+                    })
+            })
+            .await;
+        assert!(moved["tokens"].as_array().unwrap().iter().all(|token| token["name"] != "Lurker"));
+        assert!(moved["tokens"].as_array().unwrap().iter().any(|token| token["name"] == "Bram" && token["facing"] == "south"));
+
+        gm.send_text(&format!(r##"{{"type":"viewAs","playerId":"{player_id}"}}"##)).await;
+        let looking = gm
+            .until(|value| value["type"] == "snapshot" && value["viewAs"] == player_id)
+            .await;
+        assert!(looking["tokens"].as_array().unwrap().iter().all(|token| token["name"] != "Lurker"));
+        gm.send_text(r##"{"type":"viewAs","playerId":null}"##).await;
+        let restored_view = gm.until(|value| value["type"] == "snapshot" && value["viewAs"].is_null() && value["tokens"].as_array().is_some_and(|tokens| tokens.iter().any(|token| token["name"] == "Lurker"))).await;
+        assert!(restored_view["tokens"].as_array().unwrap().iter().any(|token| token["name"] == "Lurker"));
+
+        {
+            let table = app.table.lock().await;
+            crate::storage::write(&table, &app.data_dir).unwrap();
+        }
+        let mut restored = crate::session::state::Table::new();
+        crate::storage::load_into(&mut restored, &app.data_dir);
+        assert_eq!(restored.scene.as_ref().map(|scene| scene.id.as_str()), Some(scene_id.as_str()));
+        assert!(restored.tokens.iter().any(|token| token.name == "Ada" && token.facing == "east" && token.cast_asset.as_deref() == Some("gate/bandit")));
+        assert!(restored.tokens.iter().any(|token| token.hidden && token.name == "Lurker"));
+
+        server.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    struct Socket {
+        stream: tokio::net::TcpStream,
+    }
+
+    impl Socket {
+        async fn connect(addr: std::net::SocketAddr) -> Self {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let request = format!(
+                "GET /ws HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut header = Vec::new();
+            let mut byte = [0_u8; 1];
+            loop {
+                stream.read_exact(&mut byte).await.unwrap();
+                header.push(byte[0]);
+                if header.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let text = String::from_utf8_lossy(&header);
+            assert!(text.contains("101"), "{text}");
+            Self { stream }
+        }
+
+        async fn send_text(&mut self, text: &str) {
+            use tokio::io::AsyncWriteExt;
+            let mut frame = vec![0x81_u8];
+            let length = text.len();
+            if length < 126 {
+                frame.push(0x80 | length as u8);
+            } else if length <= u16::MAX as usize {
+                frame.push(0x80 | 126);
+                frame.extend_from_slice(&(length as u16).to_be_bytes());
+            } else {
+                frame.push(0x80 | 127);
+                frame.extend_from_slice(&(length as u64).to_be_bytes());
+            }
+            let mask = [9_u8, 8, 7, 6];
+            frame.extend_from_slice(&mask);
+            for (index, byte) in text.as_bytes().iter().enumerate() {
+                frame.push(byte ^ mask[index % 4]);
+            }
+            self.stream.write_all(&frame).await.unwrap();
+        }
+
+        async fn next_text(&mut self) -> String {
+            use tokio::io::AsyncReadExt;
+            loop {
+                let mut header = [0_u8; 2];
+                self.stream.read_exact(&mut header).await.unwrap();
+                let opcode = header[0] & 0x0f;
+                let mut length = (header[1] & 0x7f) as usize;
+                if length == 126 {
+                    let mut extra = [0_u8; 2];
+                    self.stream.read_exact(&mut extra).await.unwrap();
+                    length = u16::from_be_bytes(extra) as usize;
+                } else if length == 127 {
+                    let mut extra = [0_u8; 8];
+                    self.stream.read_exact(&mut extra).await.unwrap();
+                    length = u64::from_be_bytes(extra) as usize;
+                }
+                if header[1] & 0x80 != 0 {
+                    let mut mask = [0_u8; 4];
+                    self.stream.read_exact(&mut mask).await.unwrap();
+                }
+                let mut payload = vec![0_u8; length];
+                self.stream.read_exact(&mut payload).await.unwrap();
+                if opcode == 0x1 {
+                    return String::from_utf8(payload).unwrap();
+                }
+            }
+        }
+
+        async fn until(&mut self, ready: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+            for _ in 0..40 {
+                let text = tokio::time::timeout(Duration::from_secs(5), self.next_text()).await.expect("the socket went quiet");
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+                if ready(&value) {
+                    return value;
+                }
+            }
+            panic!("the expected message did not arrive");
+        }
+    }
+
+    fn json_body(bytes: &[u8]) -> (String, Vec<u8>) {
+        ("application/json".into(), bytes.to_vec())
+    }
+
+    fn multipart(bytes: &[u8]) -> (String, Vec<u8>) {
+        let boundary = "longtable-pack-boundary";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"pack\"; filename=\"pack.zip\"\r\nContent-Type: application/zip\r\n\r\n").as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        (format!("multipart/form-data; boundary={boundary}"), body)
+    }
+
+    async fn http(addr: std::net::SocketAddr, method: &str, path: &str, token: &str, body: &(String, Vec<u8>)) -> (u16, Vec<u8>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let header = format!(
+            "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.0,
+            body.1.len()
+        );
+        stream.write_all(header.as_bytes()).await.unwrap();
+        stream.write_all(&body.1).await.unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        let text = String::from_utf8_lossy(&response);
+        let status = text.split_whitespace().nth(1).unwrap_or("0").parse().unwrap_or(0);
+        let split = response.windows(4).position(|window| window == b"\r\n\r\n").unwrap_or(response.len());
+        let payload = if split + 4 <= response.len() { response[split + 4..].to_vec() } else { Vec::new() };
+        (status, payload)
+    }
+
+    fn gate_zip() -> Vec<u8> {
+        use std::io::Write;
+        let manifest = r#"{
+            "schemaVersion": 2,
+            "id": "gate",
+            "name": "Gate",
+            "visualProfile": "dimetric-30-v1",
+            "pixelsPerCell": 128,
+            "filtering": "linear",
+            "tiles": [{
+                "id": "floor",
+                "name": "Floor",
+                "kind": "ground",
+                "sourceSizePx": [128, 128],
+                "coverageCells": [1, 1],
+                "files": ["tiles/floor.png"]
+            }],
+            "objects": [{
+                "id": "barrel",
+                "name": "Barrel",
+                "kind": "static",
+                "placement": "cell",
+                "footprintCells": [1, 1],
+                "blocksMovement": true,
+                "blocksVision": false,
+                "pixelsPerWorldUnit": 128,
+                "renderLayers": [{
+                    "kind": "upright",
+                    "file": "objects/barrel.png",
+                    "sizePx": [32, 48],
+                    "pivotPx": [16, 46]
+                }]
+            }],
+            "cast": [{
+                "id": "bandit",
+                "name": "Bandit",
+                "pixelsPerWorldUnit": 128,
+                "views": {
+                    "north": {"file": "cast/bandit/north.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "east": {"file": "cast/bandit/east.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "south": {"file": "cast/bandit/south.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "west": {"file": "cast/bandit/west.png", "sizePx": [32, 64], "pivotPx": [16, 60]}
+                }
+            }, {
+                "id": "scout",
+                "name": "Scout",
+                "pixelsPerWorldUnit": 128,
+                "views": {
+                    "north": {"file": "cast/scout/north.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "east": {"file": "cast/scout/east.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "south": {"file": "cast/scout/south.png", "sizePx": [32, 64], "pivotPx": [16, 60]},
+                    "west": {"file": "cast/scout/west.png", "sizePx": [32, 64], "pivotPx": [16, 60]}
+                }
+            }]
+        }"#;
+        let files = [
+            ("tiles/floor.png", rgba_png(128, 128, 255)),
+            ("objects/barrel.png", rgba_png(32, 48, 0)),
+            ("cast/bandit/north.png", rgba_png(32, 64, 0)),
+            ("cast/bandit/east.png", rgba_png(32, 64, 0)),
+            ("cast/bandit/south.png", rgba_png(32, 64, 0)),
+            ("cast/bandit/west.png", rgba_png(32, 64, 0)),
+            ("cast/scout/north.png", rgba_png(32, 64, 0)),
+            ("cast/scout/east.png", rgba_png(32, 64, 0)),
+            ("cast/scout/south.png", rgba_png(32, 64, 0)),
+            ("cast/scout/west.png", rgba_png(32, 64, 0)),
+        ];
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer.start_file("pack.json", zip::write::SimpleFileOptions::default()).unwrap();
+        writer.write_all(manifest.as_bytes()).unwrap();
+        for (name, bytes) in files {
+            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(&bytes).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn rgba_png(width: u32, height: u32, alpha: u8) -> Vec<u8> {
+        let mut pixels = vec![180_u8; (width * height * 4) as usize];
+        for pixel in pixels.chunks_mut(4) {
+            pixel[3] = 255;
+        }
+        pixels[3] = alpha;
+        let mut bytes = Vec::new();
+        use image::ImageEncoder;
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&pixels, width, height, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        bytes
     }
 }

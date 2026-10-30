@@ -107,6 +107,10 @@ pub struct MapLayout {
     #[serde(default)]
     #[ts(optional)]
     pub levels: Option<String>,
+    /// Chooses tile variants. Absent means seed 1, so an old map does not reshuffle.
+    #[serde(default)]
+    #[ts(optional)]
+    pub seed: Option<u32>,
 }
 
 impl MapLayout {
@@ -122,6 +126,7 @@ impl MapLayout {
             decals: Vec::new(),
             lights: Vec::new(),
             levels: None,
+            seed: Some(1),
         }
     }
 
@@ -173,6 +178,16 @@ impl MapLayout {
                 return Err("a light needs a color".into());
             }
         }
+        if let Some(levels) = &self.levels {
+            let bytes = decode_cells(levels)?;
+            let expected = (self.width as usize) * (self.height as usize);
+            if bytes.len() != expected {
+                return Err(format!("the height grid has {} bytes and the map wants {expected}", bytes.len()));
+            }
+            if bytes.iter().any(|level| *level != 0) {
+                return Err("raised terrain is not available yet. Keep every square at ground level".into());
+            }
+        }
         Ok(())
     }
 }
@@ -196,9 +211,12 @@ mod tests {
     #[test]
     fn an_old_layout_without_lights_still_loads() {
         let mut value = serde_json::to_value(MapLayout::blank(5, 5, "core/grass")).unwrap();
-        value.as_object_mut().unwrap().remove("lights");
+        let object = value.as_object_mut().unwrap();
+        object.remove("lights");
+        object.remove("seed");
         let layout: MapLayout = serde_json::from_value(value).unwrap();
         assert!(layout.lights.is_empty());
+        assert!(layout.seed.is_none());
         layout.validate().unwrap();
     }
 }

@@ -44,6 +44,9 @@
               color: null,
               characterId: null,
               clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             })}
         />
       </label>
@@ -65,6 +68,9 @@
               color: null,
               characterId: null,
               clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             });
           }}
         >
@@ -92,6 +98,9 @@
               color: null,
               characterId: characterId || null,
               clearCharacter: characterId === '',
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             });
           }}
         >
@@ -121,6 +130,9 @@
               color: null,
               characterId: null,
               clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             })}
         />
       </label>
@@ -144,6 +156,9 @@
                 color,
                 characterId: null,
                 clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
               })}
           ></button>
         {/each}
@@ -165,6 +180,9 @@
               color: null,
               characterId: null,
               clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             })}
         >{token.hidden ? 'Show' : 'Hide'}</button>
         <button
@@ -183,6 +201,9 @@
               color: null,
               characterId: null,
               clearCharacter: false,
+              setCastAsset: false,
+              castAsset: null,
+              facing: null,
             })}
         >{token.grantsVision ? 'Sight on' : 'Sight off'}</button>
         <button class="btn quiet" type="button" onclick={() => send({ type: 'deleteToken', tokenId: token.id })}>Remove</button>

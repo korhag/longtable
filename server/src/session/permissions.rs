@@ -172,6 +172,8 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
                 vision_radius: token.vision_radius,
                 grants_vision: token.grants_vision,
                 character_id: token.character_id.clone(),
+                cast_asset: resolved_cast(table, token),
+                facing: token.facing.clone(),
             })
             .collect(),
         doors: table
@@ -258,7 +260,7 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         can_undo: table.undo.is_some(),
         strike: strike_offer(table, viewer),
         talk: table.talk.clone(),
-        catalog_revision: table.catalog_revision,
+        catalog_revision: table.catalog_revision.clone(),
     }
 }
 
@@ -356,6 +358,19 @@ fn sight_of(viewer: &Viewer) -> Sight {
     }
 }
 
+fn resolved_cast(table: &Table, token: &super::state::Token) -> Option<String> {
+    if token.cast_override {
+        return token.cast_asset.clone().filter(|asset| !asset.is_empty());
+    }
+    token
+        .character_id
+        .as_ref()
+        .and_then(|id| table.characters.iter().find(|character| &character.id == id))
+        .and_then(|character| character.cast_asset_id.clone())
+        .or_else(|| token.cast_asset.clone())
+        .filter(|asset| !asset.is_empty())
+}
+
 fn token_visible(token: &super::state::Token, viewer_id: &str, polygons: &[Vec<Vec2>]) -> bool {
     if token.hidden {
         return false;
@@ -436,7 +451,10 @@ mod tests {
             vision_radius: 6.0,
             grants_vision: false,
             character_id: Some("lurker".into()),
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         table.tokens.push(Token {
             id: "ada".into(),
             name: "Ada".into(),
@@ -449,7 +467,10 @@ mod tests {
             vision_radius: 8.0,
             grants_vision: true,
             character_id: Some("ada-sheet".into()),
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         table.rolls.push(StoredRoll {
             id: "r".into(),
             roller_id: "gm".into(),
@@ -475,7 +496,8 @@ mod tests {
                 .map(|(key, value)| (key.to_string(), value))
                 .collect(),
             texts: Default::default(),
-        });
+            cast_asset_id: None,
+            });
         table.characters.push(Character {
             id: "lurker".into(),
             name: "Lurker".into(),
@@ -487,7 +509,8 @@ mod tests {
                 .map(|(key, value)| (key.to_string(), value))
                 .collect(),
             texts: [("feature".into(), "SECRET-FEATURE-XYZ".into())].into_iter().collect(),
-        });
+            cast_asset_id: None,
+            });
 
         let player_view = snapshot(&table, &viewer(Role::Player, "p1"));
         assert!(player_view.tokens.iter().all(|token| token.id != "secret"));
@@ -519,6 +542,77 @@ mod tests {
         assert_eq!(lurker.health, "Near Death");
         assert_eq!(lurker.stress, "Spent");
         assert_eq!(lurker.hope, None);
+    }
+
+    #[test]
+    fn a_player_does_not_receive_an_adversary_outside_sight() {
+        use crate::map::{Scene, Segment, DIMETRIC_PROFILE};
+
+        let mut table = Table::new();
+        table.players.push(crate::session::state::Player {
+            id: "gm".into(),
+            name: "Mara".into(),
+            role: Role::Gm,
+            color: "#d4a656".into(),
+            connected: true,
+        });
+        table.players.push(crate::session::state::Player {
+            id: "p1".into(),
+            name: "Ada".into(),
+            role: Role::Player,
+            color: "#7eb8a2".into(),
+            connected: true,
+        });
+        table.scene = Some(Scene {
+            id: "hall".into(),
+            name: "Hall".into(),
+            width: 20.0,
+            height: 20.0,
+            image_file: None,
+            walls: vec![Segment { a: Vec2::new(5.0, 0.0), b: Vec2::new(5.0, 10.0) }],
+            doors: Vec::new(),
+            lights: Vec::new(),
+            layout: None,
+            move_blockers: Vec::new(),
+            presentation: None,
+            schema_version: 2,
+            visual_profile: DIMETRIC_PROFILE.to_string(),
+        });
+        let token = |id: &str, name: &str, x: f32, y: f32, owner: Option<&str>, radius: f32, grants: bool| Token {
+            id: id.into(),
+            name: name.into(),
+            x,
+            y,
+            image_file: None,
+            color: "#d4a656".into(),
+            owner_id: owner.map(str::to_string),
+            hidden: false,
+            vision_radius: radius,
+            grants_vision: grants,
+            character_id: None,
+            cast_override: false,
+            cast_asset: Some("gate/bandit".into()),
+            facing: "south".into(),
+        };
+        table.tokens.push(token("ada", "Ada", 2.0, 5.0, Some("p1"), 20.0, true));
+        table.tokens.push(token("near", "Near", 3.0, 5.0, None, 0.0, false));
+        table.tokens.push(token("shade", "Shade", 7.0, 5.0, None, 0.0, false));
+        table.tokens.push(token("far", "Far", 40.0, 40.0, None, 0.0, false));
+
+        let player_view = snapshot(&table, &viewer(Role::Player, "p1"));
+        let names = player_view.tokens.iter().map(|token| token.name.as_str()).collect::<Vec<_>>();
+        assert!(names.contains(&"Ada") && names.contains(&"Near"), "{names:?}");
+        assert!(!names.contains(&"Shade") && !names.contains(&"Far"), "{names:?}");
+        let player_json = serde_json::to_string(&player_view).unwrap();
+        assert!(!player_json.contains("Shade") && !player_json.contains("\"Far\""));
+        assert!(player_view.figures.iter().all(|figure| figure.name != "Shade"));
+
+        let gm_view = snapshot(&table, &viewer(Role::Gm, "gm"));
+        assert!(gm_view.tokens.iter().any(|token| token.name == "Shade"));
+        let mut eyes = viewer(Role::Gm, "gm");
+        eyes.view_as = Some("p1".into());
+        let as_player = snapshot(&table, &eyes);
+        assert!(as_player.tokens.iter().all(|token| token.name != "Shade" && token.name != "Far"));
     }
 
     #[test]

@@ -105,6 +105,35 @@ export function pan(movementX: number, movementY: number, scale: number) {
   return panGround(right, up, movementX, movementY, scale);
 }
 
+/**
+ * Pull, near, and far for a map the focus can pan across.
+ * The fixed basis does not change. Tall scenery is included in `rise`.
+ */
+export function cameraDepth(width: number, height: number, rise = 0) {
+  const { forward } = sceneBasis();
+  const points: WorldPoint[] = [];
+  for (const y of [0, Math.max(0, rise)]) {
+    for (const x of [0, width]) {
+      for (const z of [0, height]) points.push({ x, y, z });
+    }
+  }
+  let minRel = Infinity;
+  let maxRel = -Infinity;
+  for (const focus of points) {
+    if (focus.y !== 0) continue;
+    for (const point of points) {
+      const rel = (point.x - focus.x) * forward.x + (point.y - focus.y) * forward.y + (point.z - focus.z) * forward.z;
+      minRel = Math.min(minRel, rel);
+      maxRel = Math.max(maxRel, rel);
+    }
+  }
+  const near = 0.05;
+  const margin = 2;
+  const pull = Math.max(8, margin - minRel);
+  const far = pull + maxRel + margin;
+  return { pull, near, far };
+}
+
 /** A world-upright cutout offset from its pixel pivot. `v` grows down the image. */
 export function cutoutOffset(uPx: number, vPx: number, pixelsPerWorldUnit: number) {
   const scale = Math.max(1, pixelsPerWorldUnit);

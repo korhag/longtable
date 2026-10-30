@@ -38,7 +38,7 @@ impl App {
         let _ = std::fs::create_dir_all(data_dir.join("tokens"));
         let _ = std::fs::create_dir_all(data_dir.join("tables"));
         let _ = std::fs::create_dir_all(&systems_dir);
-        let catalog = load_catalog(&assets_dir).unwrap_or_else(|err| {
+        let mut catalog = load_catalog(&assets_dir).unwrap_or_else(|err| {
             tracing::error!("asset packs were not loaded: {err}");
             Catalog::default()
         });
@@ -69,7 +69,8 @@ impl App {
             }
         }
 
-        table.catalog_revision = catalog.revision;
+        table.catalog_revision = "1".into();
+        catalog.revision = "1".into();
         let (save_tx, save_rx) = mpsc::unbounded_channel();
         let app = Arc::new(Self {
             table: Mutex::new(table),

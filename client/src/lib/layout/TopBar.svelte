@@ -148,6 +148,9 @@
       <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>{account.lobby.requests.length} waiting</button>
     {/if}
     <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>Settings</button>
+    {#if table.role === 'gm' && table.viewAs}
+      <button class="btn px-2" type="button" onclick={() => send({ type: 'viewAs', playerId: null })}>Your eyes</button>
+    {/if}
     <span class="shrink-0 text-sm tracking-wide text-[var(--color-parchment)]/55" title={VERSION_NOTE}>v{VERSION}</span>
     <button class="btn quiet px-2" type="button" onclick={() => layout.reset()}>Reset</button>
     <button class="btn quiet px-2" type="button" onclick={() => leaveTable()}>Leave</button>

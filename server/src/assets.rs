@@ -194,6 +194,12 @@ pub struct ObjectLayer {
     pub pivot_px: [u32; 2],
     #[serde(default)]
     pub root_offset_world: [f32; 3],
+    /// "" applies to both wall axes. "h" or "v" picks one grid edge.
+    #[serde(default)]
+    pub axis: String,
+    /// "" applies to both door states. "open" or "closed" picks one.
+    #[serde(default)]
+    pub state: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -212,8 +218,10 @@ pub struct ObjectDef {
     pub kind: String,
     pub placement: String,
     pub footprint_cells: [u32; 2],
+    /// Root inside the footprint, measured from its north-west corner.
+    /// Omitted means the center of the footprint.
     #[serde(default)]
-    pub origin_cells: [f32; 2],
+    pub origin_cells: Option<[f32; 2]>,
     #[serde(default = "default_pixels")]
     pub pixels_per_world_unit: u32,
     #[serde(default)]
@@ -271,9 +279,18 @@ fn one_cell() -> [u32; 2] {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Catalog {
-    pub revision: u64,
+    /// A short revision string. It stays a string so a JavaScript client never
+    /// has to read an unrestricted 64-bit counter.
+    pub revision: String,
     pub packs: Vec<Pack>,
     pub warnings: Vec<String>,
+}
+
+impl ObjectDef {
+    /// The support root, in cells from the footprint's north-west corner.
+    pub fn origin(&self) -> [f32; 2] {
+        self.origin_cells.unwrap_or([self.footprint_cells[0] as f32 / 2.0, self.footprint_cells[1] as f32 / 2.0])
+    }
 }
 
 impl Catalog {
@@ -283,6 +300,51 @@ impl Catalog {
             .iter()
             .find(|pack| pack.id == pack_id)
             .and_then(|pack| pack.props.iter().find(|prop| prop.id == local))
+    }
+
+    pub fn tile(&self, asset: &str) -> Option<&TileDef> {
+        self.find(asset, |pack| &pack.tiles)
+    }
+
+    pub fn object(&self, asset: &str) -> Option<&ObjectDef> {
+        self.find(asset, |pack| &pack.objects)
+    }
+
+    pub fn cast(&self, asset: &str) -> Option<&CastDef> {
+        self.find(asset, |pack| &pack.cast)
+    }
+
+    fn find<'a, T>(&'a self, asset: &str, list: impl Fn(&'a Pack) -> &'a [T]) -> Option<&'a T>
+    where
+        T: HasId,
+    {
+        let (pack_id, local) = split_asset(asset)?;
+        self.packs
+            .iter()
+            .find(|pack| pack.id == pack_id)
+            .and_then(|pack| list(pack).iter().find(|item| item.id() == local))
+    }
+}
+
+trait HasId {
+    fn id(&self) -> &str;
+}
+
+impl HasId for TileDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for ObjectDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for CastDef {
+    fn id(&self) -> &str {
+        &self.id
     }
 }
 
@@ -295,7 +357,14 @@ pub fn split_asset(asset: &str) -> Option<(&str, &str)> {
     Some((pack, local))
 }
 
-pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
+fn is_hidden_dir(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with('.'))
+}
+
+/// Read installed packs. `decode` checks picture bytes. A refresh after a
+/// successful import passes false so packs that were already accepted are
+/// not decoded again.
+pub fn load_catalog_mode(assets_dir: &Path, decode: bool) -> Result<Catalog, String> {
     let packs_dir = assets_dir.join("packs");
     if !packs_dir.is_dir() {
         return Ok(Catalog::default());
@@ -305,7 +374,7 @@ pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&packs_dir)
         .map_err(|err| format!("could not read {}: {err}", packs_dir.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.is_dir())
+        .filter(|path| path.is_dir() && !is_hidden_dir(path))
         .collect();
     entries.sort();
     for dir in entries {
@@ -315,8 +384,11 @@ pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
         }
         let text = std::fs::read_to_string(&manifest)
             .map_err(|err| format!("could not read {}: {err}", manifest.display()))?;
-        match load_pack_dir(&dir, &text) {
-            Ok(pack) => packs.push(pack),
+        match load_pack_dir(&dir, &text, decode) {
+            Ok((pack, notes)) => {
+                warnings.extend(notes);
+                packs.push(pack);
+            }
             Err(err) => {
                 let folder = dir.file_name().and_then(|name| name.to_str()).unwrap_or("pack");
                 let message = format!("pack {folder}: {err}");
@@ -325,23 +397,27 @@ pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
             }
         }
     }
-    let revision = crate::asset_import::revision_of(&packs);
-    Ok(Catalog { revision, packs, warnings })
+    Ok(Catalog { revision: String::new(), packs, warnings })
 }
 
-fn load_pack_dir(dir: &Path, text: &str) -> Result<Pack, String> {
+pub fn load_catalog(assets_dir: &Path) -> Result<Catalog, String> {
+    load_catalog_mode(assets_dir, true)
+}
+
+fn load_pack_dir(dir: &Path, text: &str, decode: bool) -> Result<(Pack, Vec<String>), String> {
     let mut pack = parse_pack(text)?;
     let folder = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
     if pack.id != folder {
         return Err(format!("pack {} is in a folder named {folder}", pack.id));
     }
+    let mut notes = Vec::new();
     if pack.schema_version == 2 {
         let files = crate::asset_import::read_tree(dir)?;
-        crate::asset_import::validate_v2_files(&pack, &files)?;
+        notes = crate::asset_import::validate_v2_files(&pack, &files, decode)?;
         pack.content_hash = crate::asset_import::content_hash(text, &files);
     }
     pack.base_url = format!("/packs/{}", pack.id);
-    Ok(pack)
+    Ok((pack, notes))
 }
 
 pub fn parse_pack(text: &str) -> Result<Pack, String> {

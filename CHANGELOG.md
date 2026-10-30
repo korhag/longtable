@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.0 — 2026-10-29
+
+- A pack's tiles, objects, and people can be placed on the map, and a hidden figure stays hidden.
+- A ground picture covers one cell. An object's pivot is the pixel on its root. Stairs and raised squares are refused.
+- The same scene can be published again without a new id, and a player's view leaves out a hidden figure.
+- A click on the empty part of a figure does not select it.
+- Two people at the table both receive a newly imported pack, and a hidden figure stays off the other person's view.
+- Looking through a player's eyes has a button back to the GM's own view.
+- Putting the same map on the table again keeps that scene.
+- Frame time for a small scene and a crowded scene is recorded on this computer's Intel graphics.
+- Matching objects on a crowded map share one drawing, and that map stays inside the low-power frame budget on this computer.
+- A picture that finishes after the map changes stays off the new map, and a figure behind a wall stays off the other person's view.
+
+## 1.3.0 — 2026-10-29
+
+- A painted tile covers one square, and it stays the same after a reload.
+
+## 1.2.1 — 2026-10-29
+
+- A newly imported pack shows up for everyone already at the table.
+
 ## 1.2.0 — 2026-10-29
 
 - The GM can import an asset pack and browse its tiles, objects, and cast.

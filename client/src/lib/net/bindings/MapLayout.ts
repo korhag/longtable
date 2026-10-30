@@ -8,4 +8,8 @@ export type MapLayout = { width: number, height: number, terrains: Array<string>
 /**
  * One height byte per cell, base64. Absent or empty means every cell is tier 0.
  */
-levels?: string, };
+levels?: string, 
+/**
+ * Chooses tile variants. Absent means seed 1, so an old map does not reshuffle.
+ */
+seed?: number, };

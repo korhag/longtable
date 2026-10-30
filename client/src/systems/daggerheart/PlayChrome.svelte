@@ -137,6 +137,9 @@
       color: null,
       characterId: null,
       clearCharacter: false,
+      setCastAsset: false,
+      castAsset: null,
+      facing: null,
     });
     table.menu = null;
   }

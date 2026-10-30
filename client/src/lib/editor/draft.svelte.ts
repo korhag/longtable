@@ -27,6 +27,7 @@ export interface Draft {
   id: string;
   name: string;
   updatedAt: number;
+  sceneId?: string | null;
   layout: MapLayout;
 }
 
@@ -40,6 +41,7 @@ class EditorStore {
   doorId = $state('core/hedge-gate');
   propId = $state('core/oak');
   decalId = $state('core/tuft');
+  castId = $state('');
   lightRange = $state(6);
   lightColor = $state('#e8a04a');
   mirror = $state(false);
@@ -128,7 +130,13 @@ class EditorStore {
     if (!this.draft) return;
     await this.save();
     const response = await fetch(`/api/drafts/${this.draft.id}/publish`, { method: 'POST', headers: this.headers() });
-    this.note = response.ok ? 'On the table' : await response.text();
+    if (!response.ok) {
+      this.note = await response.text();
+      return;
+    }
+    const fresh = await fetch(`/api/drafts/${this.draft.id}`, { headers: this.headers() });
+    if (fresh.ok) this.draft = normalize((await fresh.json()) as Draft);
+    this.note = 'On the table';
   }
 
   undo() {
@@ -372,6 +380,8 @@ function entriesFor(packs: Pack[], themeId: string): ScatterEntry[] {
 }
 
 function footprintOf(packs: Pack[], asset: string): [number, number] {
+  const object = findIn(packs, asset, (pack) => pack.objects ?? []);
+  if (object) return [object.def.footprintCells[0], object.def.footprintCells[1]];
   return findIn(packs, asset, (pack) => pack.props)?.def.footprint ?? findIn(packs, asset, (pack) => pack.decals)?.def.size ?? [1, 1];
 }
 

@@ -25,13 +25,15 @@ export class StandeeLayer {
   private group = new THREE.Group();
   private key = '';
   private generation = 0;
+  private onPaint: () => void = () => {};
 
   constructor(scene: THREE.Scene) {
     this.group.renderOrder = 3;
     scene.add(this.group);
   }
 
-  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean) {
+  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}) {
+    this.onPaint = onPaint;
     const doorKey = doors.map((door) => `${door.id}:${door.open ? 1 : 0}`).join(',');
     const key = layout ? `${layout.pieces.length}:${JSON.stringify(layout.pieces)}:${JSON.stringify(layout.props)}:${doorKey}:${showAll}:${fog?.explored ?? ''}` : '';
     if (key === this.key) return;
@@ -41,10 +43,15 @@ export class StandeeLayer {
     if (!layout) return;
     const generation = this.generation;
     for (const prop of layout.props) {
+      if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
+      if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
       if (!showAll && !seen(fog, prop.x + 0.5, prop.y + 0.5)) continue;
       this.addProp(prop, packs, generation);
     }
     for (const piece of layout.pieces) {
+      const object = findIn(packs, piece.asset, (pack) => pack.objects ?? []);
+      if (object && (object.def.kind === 'wall' || object.def.kind === 'door')) continue;
+      if (findIn(packs, piece.asset, (pack) => pack.objects ?? [])) continue;
       const midX = piece.axis === 'h' ? piece.x + 0.5 : piece.x;
       const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
       if (!showAll && !seen(fog, midX, midY)) continue;
@@ -147,6 +154,13 @@ export class StandeeLayer {
     box.parent?.add(mesh);
     disposeNode(box);
     box.removeFromParent();
+    this.onPaint();
+  }
+
+  clear() {
+    this.generation += 1;
+    clear(this.group);
+    this.key = '';
   }
 }
 

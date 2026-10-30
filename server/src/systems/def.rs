@@ -300,6 +300,10 @@ pub struct Character {
     pub numbers: BTreeMap<String, i32>,
     #[serde(default)]
     pub texts: BTreeMap<String, String>,
+    /// Default body art. A placed figure can override it. Portraits stay in the sheet.
+    #[serde(default)]
+    #[ts(optional)]
+    pub cast_asset_id: Option<String>,
 }
 
 /// Copy a file that still has one shared sheet onto PC, NPC, and adversary.

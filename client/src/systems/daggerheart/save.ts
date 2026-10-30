@@ -23,6 +23,8 @@ export function writeCharacter(id: string, numbers: Record<string, number> = {},
     clearOwner: false,
     numbers,
     texts,
+    setCastAsset: false,
+    castAssetId: null,
   });
 }
 
@@ -57,6 +59,8 @@ export function placeCharacter(characterId: string, name: string, kind: Characte
     grantsVision: kind === 'pc',
     color: kind === 'adversary' ? '#c45c4a' : (COLORS[index % COLORS.length] ?? '#d4a656'),
     characterId,
+    castAsset: null,
+    facing: 'south',
   });
 }
 

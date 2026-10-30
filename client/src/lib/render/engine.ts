@@ -7,8 +7,7 @@
 
 import * as THREE from 'three';
 
-import type { Pack } from '../assets/catalog';
-import { findIn } from '../assets/catalog';
+import { fileUrl, findIn, loadTexture, type CastDef, type Pack } from '../assets/catalog';
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { Role } from '../net/bindings/Role.ts';
@@ -16,10 +15,13 @@ import type { SceneView } from '../net/bindings/SceneView.ts';
 import type { TokenView } from '../net/bindings/TokenView.ts';
 import { bitAt, decodeBits } from '../fog/bits';
 import type { Tool } from '../table.svelte';
+import { cameraDepth, framedDistance, pan, projectedSpan, sceneBasis } from './cameraProfile';
+import { opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { DecalLayer } from './decals';
+import { OcclusionOutlines } from './occlusion';
 import { PrerenderedLayer } from './prerendered';
-import { framedDistance, pan, projectedSpan, sceneBasis } from './cameraProfile';
 import { ringPaint, type CastPaint, type RingMark } from './rings';
+import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
 import { TerrainLayer } from './terrain';
 
@@ -37,7 +39,7 @@ export interface EngineHooks {
   onPaint?: () => void;
 }
 
-interface View {
+export interface View {
   scene: SceneView | null;
   tokens: TokenView[];
   doors: DoorView[];
@@ -64,6 +66,7 @@ interface TokenNode {
   label: THREE.Sprite;
   card: THREE.Mesh;
   imageUrl: string | null;
+  bodyKey: string;
 }
 
 const EMPTY = { width: 40, height: 30 };
@@ -76,6 +79,9 @@ export class TableEngine {
   private distance = 32;
   private filtering: 'linear' | 'nearest' = 'linear';
   private dirty = true;
+  private queued = false;
+  private lowPower = preferLowPower();
+  readonly stats = { draws: 0, scheduled: 0 };
   private running = false;
   private view: View = {
     scene: null,
@@ -120,6 +126,9 @@ export class TableEngine {
   private terrain: TerrainLayer;
   private decals: DecalLayer;
   private standees: StandeeLayer;
+  private objects: SceneObjects;
+  private outlines = new OcclusionOutlines();
+  private viewKey = '';
   private lastBrush = 0;
   private pointer = { x: 0, y: 0 };
   private mapKey = '';
@@ -134,8 +143,7 @@ export class TableEngine {
     private host: HTMLElement,
     private hooks: EngineHooks,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.lowPower, alpha: false, powerPreference: this.lowPower ? 'low-power' : 'default' });
     this.renderer.setClearColor(0x100e0c, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.host.appendChild(this.renderer.domElement);
@@ -151,6 +159,7 @@ export class TableEngine {
     this.terrain = new TerrainLayer(this.scene3);
     this.decals = new DecalLayer(this.scene3);
     this.standees = new StandeeLayer(this.scene3);
+    this.objects = new SceneObjects(this.scene3);
     this.prerendered = new PrerenderedLayer(this.scene3);
     this.resize();
 
@@ -164,30 +173,79 @@ export class TableEngine {
     window.addEventListener('resize', this.resize);
   }
 
+  sample() {
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const gl = this.renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      drawingBuffer: [size.x, size.y] as [number, number],
+      textures: this.renderer.info.memory.textures,
+      geometries: this.renderer.info.memory.geometries,
+      draws: this.stats.draws,
+      renderer: info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'unavailable',
+    };
+  }
+
   start() {
     this.running = true;
-    const loop = () => {
-      if (!this.running) return;
-      this.frameId = requestAnimationFrame(loop);
-      if (!this.dirty) return;
-      this.renderer.render(this.scene3, this.camera);
-      this.hooks.onPaint?.();
+    document.addEventListener('visibilitychange', this.onVisible);
+    this.invalidate();
+  }
+
+  private onVisible = () => {
+    if (!document.hidden) this.invalidate();
+  };
+
+  invalidate() {
+    this.dirty = true;
+    this.requestFrame();
+  }
+
+  private requestFrame() {
+    if (!this.running || this.queued || !this.dirty) return;
+    this.queued = true;
+    this.stats.scheduled += 1;
+    this.frameId = requestAnimationFrame(() => {
+      this.queued = false;
+      this.frameId = 0;
+      if (!this.running || document.hidden || !this.dirty) return;
+      this.draw();
       this.dirty = false;
-    };
-    loop();
+    });
+  }
+
+  private draw() {
+    this.stats.draws += 1;
+    try {
+      const bodies = [...this.nodes.values()].map((node) => node.card).filter((body) => body.visible);
+      this.renderer.render(this.scene3, this.camera);
+      this.outlines.draw(this.renderer, this.scene3, this.camera, bodies, this.view.selectedId, [this.tokenGroup]);
+      this.hooks.onPaint?.();
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   dispose() {
     this.running = false;
     cancelAnimationFrame(this.frameId);
+    document.removeEventListener('visibilitychange', this.onVisible);
     window.removeEventListener('resize', this.resize);
     this.terrain.clear();
+    this.objects.clear();
+    this.standees.clear?.();
+    this.outlines.dispose();
+    for (const node of this.nodes.values()) disposeToken(node);
+    this.nodes.clear();
     this.prerendered.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
 
   sync(view: View) {
+    const nextKey = viewSignature(view);
+    const changed = nextKey !== this.viewKey;
+    this.viewKey = nextKey;
     this.view = view;
     this.standing = false;
     this.ensureMap();
@@ -202,7 +260,7 @@ export class TableEngine {
     if (this.standing) {
       for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
     }
-    this.dirty = true;
+    if (changed) this.invalidate();
   }
 
   private bounds() {
@@ -246,7 +304,7 @@ export class TableEngine {
         material.map = texture;
         material.color.set(0xffffff);
         material.needsUpdate = true;
-        this.dirty = true;
+        this.invalidate();
       });
     }
 
@@ -356,9 +414,10 @@ export class TableEngine {
       this.placeCamera();
     }
     const showAll = this.view.buildMode || this.view.role === 'gm' || this.view.fog?.mode === 'gm';
-    this.terrain.sync(layout, this.view.packs);
-    this.decals.sync(layout, this.view.packs, showAll ? null : this.view.fog, showAll);
-    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll);
+    this.terrain.sync(layout, this.view.packs, () => this.invalidate());
+    this.decals.sync(layout, this.view.packs, showAll ? null : this.view.fog, showAll, () => this.invalidate());
+    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.invalidate());
+    this.objects.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.invalidate());
   }
 
   private syncGhost() {
@@ -398,11 +457,12 @@ export class TableEngine {
       }
       const dragging = this.dragging?.id === token.id;
       if (!dragging) node.group.position.set(token.x, 0, token.y);
-      paintToken(node, token, ringMark(token.id, this.view), this.standing, this.view);
+      paintToken(node, token, ringMark(token.id, this.view), this.standing, this.view, () => this.invalidate());
     }
     for (const [id, node] of this.nodes) {
       if (seen.has(id)) continue;
       node.group.removeFromParent();
+      disposeToken(node);
       this.nodes.delete(id);
     }
   }
@@ -458,7 +518,7 @@ export class TableEngine {
   setGrid(style: 'off' | 'faint' | 'strong') {
     this.gridStyle = style;
     this.applyGrid();
-    this.dirty = true;
+    this.invalidate();
   }
 
   cycleGrid() {
@@ -482,16 +542,16 @@ export class TableEngine {
     this.focus.y = 0;
     this.distance = this.snap(this.distance);
     const { forward, up } = sceneBasis();
-    const pull = 48;
+    const depth = cameraDepth(width, Math.max(height, 1), 4);
     this.camera.position.set(
-      this.focus.x - forward.x * pull,
-      this.focus.y - forward.y * pull,
-      this.focus.z - forward.z * pull,
+      this.focus.x - forward.x * depth.pull,
+      this.focus.y - forward.y * depth.pull,
+      this.focus.z - forward.z * depth.pull,
     );
     this.camera.up.set(up.x, up.y, up.z);
     this.camera.lookAt(this.focus);
-    this.camera.near = 0.05;
-    this.camera.far = 400;
+    this.camera.near = depth.near;
+    this.camera.far = Math.max(depth.far, 80);
     const canvas = this.renderer.domElement;
     const canvasW = canvas.clientWidth || 1;
     const canvasH = canvas.clientHeight || 1;
@@ -510,7 +570,7 @@ export class TableEngine {
     if (this.standing) {
       for (const node of this.nodes.values()) node.card.quaternion.copy(this.camera.quaternion);
     }
-    this.dirty = true;
+    this.invalidate();
   }
 
   private snap(distance: number) {
@@ -523,6 +583,10 @@ export class TableEngine {
   private resize = () => {
     const width = this.host.clientWidth || 1;
     const height = this.host.clientHeight || 1;
+    const cap = this.lowPower ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
+    const longest = Math.max(width, height, 1);
+    const limit = this.lowPower ? 1920 : 2560;
+    this.renderer.setPixelRatio(Math.min(cap, limit / longest));
     this.renderer.setSize(width, height, false);
     this.placeCamera();
   };
@@ -554,6 +618,21 @@ export class TableEngine {
     return this.raycaster.ray.intersectPlane(this.ground, hit) ? hit : null;
   }
 
+  tokenAtPoint(clientX: number, clientY: number): string | null {
+    return this.tokenAt({ clientX, clientY } as PointerEvent);
+  }
+
+  projectClient(x: number, y: number, z: number): { x: number; y: number } | null {
+    const point = new THREE.Vector3(x, y, z);
+    point.project(this.camera);
+    if (point.z < -1 || point.z > 1) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + (point.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-point.y * 0.5 + 0.5) * rect.height,
+    };
+  }
+
   private tokenAt(event: PointerEvent): string | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
@@ -563,6 +642,12 @@ export class TableEngine {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hits = this.raycaster.intersectObjects(this.tokenGroup.children, true);
     for (const hit of hits) {
+      if (!shown(hit.object)) continue;
+      const mesh = hit.object as THREE.Mesh;
+      if (mesh.userData.body && hit.uv) {
+        const map = (mesh.material as THREE.MeshBasicMaterial).map;
+        if (!opaqueTexel(map?.image as CanvasImageSource | undefined, hit.uv.x, hit.uv.y)) return null;
+      }
       let object: THREE.Object3D | null = hit.object;
       while (object) {
         if (typeof object.userData.tokenId === 'string') return object.userData.tokenId;
@@ -673,7 +758,7 @@ export class TableEngine {
         y: event.clientY,
       });
     }
-    this.dirty = true;
+    this.invalidate();
   };
 
   private onUp = (event: PointerEvent) => {
@@ -721,13 +806,13 @@ export class TableEngine {
     }
     this.hoverCell.position.set(x, 0, y);
     this.hoverCell.visible = true;
-    this.dirty = true;
+    this.invalidate();
   }
 
   private hideCell() {
     if (this.hoverCell?.visible) {
       this.hoverCell.visible = false;
-      this.dirty = true;
+      this.invalidate();
     }
   }
 
@@ -864,9 +949,10 @@ function createToken(token: TokenView): TokenNode {
   card.visible = false;
   card.renderOrder = 2;
   card.userData.tokenId = token.id;
+  card.userData.body = true;
   group.add(disc, ring, halo, ticks, label, card);
   group.position.set(token.x, 0, token.y);
-  return { id: token.id, group, disc, ring, halo, ticks, label, card, imageUrl: '' };
+  return { id: token.id, group, disc, ring, halo, ticks, label, card, imageUrl: '', bodyKey: '' };
 }
 
 function tickRing(): THREE.Group {
@@ -890,7 +976,7 @@ function ringMark(id: string, view: View): RingMark {
   return null;
 }
 
-function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean, view: View) {
+function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing: boolean, view: View, onPaint: () => void) {
   const cast = view.cast[token.id] ?? { tone: 'other' as const, color: token.color };
   const paint = ringPaint(cast.tone, cast.color, mark, view.role === 'gm');
   const ring = node.ring.material as THREE.MeshBasicMaterial;
@@ -901,6 +987,69 @@ function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing:
   if (paint.halo) halo.color.set(paint.halo);
   node.halo.scale.setScalar(Math.max(paint.scale, 1.08));
   node.ticks.visible = paint.ticks;
+  const built = Boolean(view.scene?.layout);
+  if (built) {
+    node.disc.visible = false;
+    node.card.visible = true;
+    paintBody(node, token, view.packs, onPaint);
+    node.label.position.y = 1.7;
+  } else {
+    paintDisc(node, token, standing);
+    node.label.position.y = standing ? 1.7 : 0.2;
+  }
+  const material = node.label.material as THREE.SpriteMaterial;
+  const previous = material.userData.name as string | undefined;
+  if (previous !== token.name) {
+    material.map?.dispose();
+    material.map = labelTexture(token.name);
+    material.userData.name = token.name;
+    material.needsUpdate = true;
+  }
+}
+
+function paintBody(node: TokenNode, token: TokenView, packs: View['packs'], onPaint: () => void) {
+  const facing = token.facing || 'south';
+  const asset = token.castAsset ?? '';
+  const key = `${asset}:${facing}:${token.color}`;
+  if (node.bodyKey === key) return;
+  node.bodyKey = key;
+  const found = asset ? findIn(packs, asset, (pack) => pack.cast ?? []) : null;
+  const frame = found ? castFrame(found.def, facing) : null;
+  const size = frame?.sizePx ?? [64, 128];
+  const pivot = frame?.pivotPx ?? [32, 120];
+  const pixels = found?.def.pixelsPerWorldUnit ?? 128;
+  node.card.geometry.dispose();
+  node.card.geometry = uprightGeometry(size, pivot, pixels);
+  orientUpright(node.card);
+  const material = node.card.material as THREE.MeshBasicMaterial;
+  material.color.set(token.color);
+  material.alphaTest = 0.5;
+  material.depthWrite = true;
+  material.depthTest = true;
+  material.transparent = false;
+  const url = found ? fileUrl(found.pack, frame?.file) : null;
+  if (!url || !found) {
+    material.map = null;
+    material.needsUpdate = true;
+    return;
+  }
+  void loadTexture(url, found.pack.filtering).then((texture) => {
+    if (!texture || node.bodyKey !== key || !node.group.parent) return;
+    material.map = texture;
+    material.color.set('#ffffff');
+    material.needsUpdate = true;
+    onPaint();
+  });
+}
+
+function castFrame(actor: CastDef, facing: string) {
+  if (facing === 'east') return actor.views.east;
+  if (facing === 'west') return actor.views.west;
+  if (facing === 'north') return actor.views.north;
+  return actor.views.south;
+}
+
+function paintDisc(node: TokenNode, token: TokenView, standing: boolean) {
   const disc = node.disc.material as THREE.MeshLambertMaterial;
   disc.opacity = token.hidden ? 0.45 : 1;
   disc.transparent = token.hidden;
@@ -925,14 +1074,46 @@ function paintToken(node: TokenNode, token: TokenView, mark: RingMark, standing:
   }
   node.disc.visible = !standing;
   node.card.visible = standing;
-  node.label.position.y = standing ? 1.7 : 0.2;
-  const material = node.label.material as THREE.SpriteMaterial;
-  const previous = material.userData.name as string | undefined;
-  if (previous !== token.name) {
-    material.map?.dispose();
-    material.map = labelTexture(token.name);
-    material.userData.name = token.name;
-    material.needsUpdate = true;
+}
+
+function disposeToken(node: TokenNode) {
+  node.group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose();
+      const material = child.material as THREE.Material;
+      material.dispose();
+    } else if (child instanceof THREE.Sprite) {
+      child.material.map?.dispose();
+      child.material.dispose();
+    }
+  });
+}
+
+function shown(object: THREE.Object3D) {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (!current.visible) return false;
+    current = current.parent;
+  }
+  return true;
+}
+
+function viewSignature(view: View) {
+  const scene = view.scene;
+  const layout = scene?.layout;
+  const tokens = view.tokens.map((token) => `${token.id}@${token.x},${token.y},${token.facing},${token.castAsset ?? ''},${token.hidden ? 1 : 0},${token.name}`).join(';');
+  const doors = view.doors.map((door) => `${door.id}:${door.open ? 1 : 0}`).join(';');
+  const props = layout?.props.map((prop) => `${prop.id}@${prop.x},${prop.y},${prop.asset}`).join(';') ?? '';
+  const pieces = layout?.pieces.map((piece) => `${piece.id}:${piece.asset}:${piece.open ? 1 : 0}:${piece.axis}`).join(';') ?? '';
+  const packs = view.packs.map((pack) => `${pack.id}:${pack.contentHash ?? ''}`).join(',');
+  return [scene?.id, scene?.width, scene?.height, layout?.cells, tokens, doors, props, pieces, packs, view.selectedId, view.targetId, view.role, view.fog?.mode, view.buildMode, view.tool].join('|');
+}
+
+function preferLowPower() {
+  try {
+    return globalThis.localStorage?.getItem('longtable-power') !== 'standard';
+  } catch {
+    return true;
   }
 }
 

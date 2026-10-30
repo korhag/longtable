@@ -56,6 +56,42 @@ pub struct Token {
     pub grants_vision: bool,
     #[serde(default)]
     pub character_id: Option<String>,
+    /// When true, `cast_asset` replaces the character default, even if it is empty.
+    #[serde(default)]
+    pub cast_override: bool,
+    #[serde(default)]
+    pub cast_asset: Option<String>,
+    #[serde(default = "facing_south")]
+    pub facing: String,
+}
+
+fn facing_south() -> String {
+    "south".into()
+}
+
+pub fn cardinal_facing(from_x: f32, from_y: f32, to_x: f32, to_y: f32, previous: &str) -> String {
+    let dx = to_x - from_x;
+    let dy = to_y - from_y;
+    let ax = dx.abs();
+    let ay = dy.abs();
+    let previous = match previous {
+        "north" | "east" | "south" | "west" => previous,
+        _ => "south",
+    };
+    if ax < 0.01 && ay < 0.01 {
+        return previous.to_string();
+    }
+    // A tie keeps the current facing so a diagonal step does not flicker.
+    if (ax - ay).abs() <= 0.01 {
+        return previous.to_string();
+    }
+    if ax > ay {
+        if dx > 0.0 { "east".into() } else { "west".into() }
+    } else if dy > 0.0 {
+        "south".into()
+    } else {
+        "north".into()
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -175,7 +211,7 @@ pub struct Table {
     pub strike: Option<PendingStrike>,
     pub undo: Option<UndoStep>,
     pub talk: Vec<TalkLine>,
-    pub catalog_revision: u64,
+    pub catalog_revision: String,
     voices: HashMap<String, String>,
     clients: Vec<ClientConn>,
     sessions: HashMap<String, String>,
@@ -227,7 +263,7 @@ impl Table {
             strike: None,
             undo: None,
             talk: Vec::new(),
-            catalog_revision: 0,
+            catalog_revision: String::new(),
             voices: HashMap::new(),
             clients: Vec::new(),
             sessions: HashMap::new(),
@@ -419,8 +455,8 @@ impl Table {
                 self.fog_brush(viewer, mode, &cells)?;
                 Ok(CommandEffect::Refresh)
             }
-            ClientMsg::CreateToken { name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id } => {
-                self.create_token(viewer, name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id)?;
+            ClientMsg::CreateToken { name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id, cast_asset, facing } => {
+                self.create_token(viewer, name, x, y, owner_id, hidden, vision_radius, grants_vision, color, character_id, cast_asset, facing)?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::UpdateToken {
@@ -434,6 +470,9 @@ impl Table {
                 color,
                 character_id,
                 clear_character,
+                set_cast_asset,
+                cast_asset,
+                facing,
             } => {
                 self.update_token(
                     viewer,
@@ -447,6 +486,9 @@ impl Table {
                     color,
                     character_id,
                     clear_character,
+                    set_cast_asset,
+                    cast_asset,
+                    facing,
                 )?;
                 Ok(CommandEffect::Refresh)
             }
@@ -485,8 +527,21 @@ impl Table {
                 clear_owner,
                 numbers,
                 texts,
+                set_cast_asset,
+                cast_asset_id,
             } => {
-                self.update_character(viewer, &character_id, name, kind, owner_id, clear_owner, numbers, texts)?;
+                self.update_character(
+                    viewer,
+                    &character_id,
+                    name,
+                    kind,
+                    owner_id,
+                    clear_owner,
+                    numbers,
+                    texts,
+                    set_cast_asset,
+                    cast_asset_id,
+                )?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::DeleteCharacter { character_id } => {
@@ -747,8 +802,10 @@ impl Table {
             }
         }
         let token = &mut self.tokens[index];
+        let facing = cardinal_facing(token.x, token.y, x, y, &token.facing);
         token.x = x;
         token.y = y;
+        token.facing = facing;
         self.reveal_from_tokens();
         Ok(true)
     }
@@ -803,6 +860,8 @@ impl Table {
         grants_vision: bool,
         color: String,
         character_id: Option<String>,
+        cast_asset: Option<String>,
+        facing: Option<String>,
     ) -> Result<(), String> {
         self.require_gm(viewer)?;
         let (width, height) = self.bounds();
@@ -832,6 +891,9 @@ impl Table {
             vision_radius: vision_radius.clamp(0.0, 80.0),
             grants_vision,
             character_id,
+            cast_override: cast_asset.is_some(),
+            cast_asset,
+            facing: facing.unwrap_or_else(|| "south".into()),
         });
         self.reveal_from_tokens();
         Ok(())
@@ -850,6 +912,9 @@ impl Table {
         color: Option<String>,
         character_id: Option<String>,
         clear_character: bool,
+        set_cast_asset: bool,
+        cast_asset: Option<String>,
+        facing: Option<String>,
     ) -> Result<(), String> {
         self.require_gm(viewer)?;
         let owner_id = self.known_owner(owner_id)?;
@@ -892,6 +957,13 @@ impl Table {
             token.character_id = None;
         } else if let Some(id) = character_id {
             token.character_id = Some(id);
+        }
+        if set_cast_asset {
+            token.cast_override = true;
+            token.cast_asset = cast_asset.filter(|asset| !asset.is_empty());
+        }
+        if let Some(facing) = facing {
+            token.facing = cardinal_facing(0.0, 0.0, 0.0, 0.0, &facing);
         }
         self.reveal_from_tokens();
         Ok(())
@@ -973,30 +1045,64 @@ impl Table {
         Ok(())
     }
 
-    /// Put a built map on the table. Only the GM can, and the layout is checked first.
-    pub fn publish_built(&mut self, viewer: &Viewer, name: String, layout: MapLayout, compiled: Compiled) -> Result<(), String> {
+    /// Put a built map on the table. `update_id` keeps that scene when it is the one open.
+    pub fn publish_built(
+        &mut self,
+        viewer: &Viewer,
+        name: String,
+        layout: MapLayout,
+        compiled: Compiled,
+        update_id: Option<String>,
+    ) -> Result<String, String> {
         self.require_gm(viewer)?;
         layout.validate()?;
         let name = {
             let trimmed = name.trim();
             if trimmed.is_empty() { "Built map".into() } else { trimmed.chars().take(48).collect() }
         };
+        let id = if let Some(id) = update_id {
+            if self.scene.as_ref().is_some_and(|scene| scene.id == id) {
+                id
+            } else {
+                return Err("that scene is not the one on the table".into());
+            }
+        } else {
+            Uuid::new_v4().to_string()
+        };
+        let mut doors = compiled.doors;
+        let preserve = self.scene.as_ref().is_some_and(|scene| {
+            scene.id == id && (scene.width - layout.width as f32).abs() < 0.01 && (scene.height - layout.height as f32).abs() < 0.01
+        });
+        if let Some(existing) = self.scene.as_ref().filter(|scene| scene.id == id) {
+            for door in &mut doors {
+                if let Some(previous) = existing.doors.iter().find(|item| item.id == door.id) {
+                    door.open = previous.open;
+                }
+            }
+        }
+        let memory = if preserve { Some(self.explored.clone()) } else { None };
+        let width = layout.width as f32;
+        let height = layout.height as f32;
         self.install_scene(Scene {
-            id: Uuid::new_v4().to_string(),
+            id: id.clone(),
             name,
-            width: layout.width as f32,
-            height: layout.height as f32,
+            width,
+            height,
             image_file: None,
             walls: compiled.walls,
-            doors: compiled.doors,
+            doors,
             lights: compiled.lights,
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
             presentation: None,
-            schema_version: 1,
+            schema_version: 2,
             visual_profile: DIMETRIC_PROFILE.to_string(),
         });
-        Ok(())
+        if let Some(memory) = memory {
+            self.explored = memory;
+            self.reveal_from_tokens();
+        }
+        Ok(id)
     }
 
     pub fn install_scene(&mut self, scene: Scene) {
@@ -1452,6 +1558,7 @@ impl Table {
             system_id: system.map(|system| system.id.clone()),
             numbers,
             texts,
+            cast_asset_id: None,
         });
         Ok(())
     }
@@ -1466,6 +1573,8 @@ impl Table {
         clear_owner: bool,
         numbers: BTreeMap<String, i32>,
         texts: BTreeMap<String, String>,
+        set_cast_asset: bool,
+        cast_asset_id: Option<String>,
     ) -> Result<(), String> {
         let gm = viewer.role == crate::net::protocol::Role::Gm;
         let owner_id = if gm { self.known_owner(owner_id)? } else { None };
@@ -1498,6 +1607,15 @@ impl Table {
                 return Err("that note is too long".into());
             }
             character.texts.insert(key, value);
+        }
+        if set_cast_asset {
+            let asset = cast_asset_id.filter(|asset| !asset.is_empty());
+            if let Some(asset) = &asset {
+                if crate::assets::split_asset(asset).is_none() {
+                    return Err("cast art is named pack/id".into());
+                }
+            }
+            character.cast_asset_id = asset;
         }
         Ok(())
     }
@@ -1983,7 +2101,10 @@ mod tests {
             vision_radius: 6.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
 
         let gm_viewer = table.viewer(&gm_seat.player_id, gm_epoch).unwrap();
         table
@@ -2055,7 +2176,10 @@ mod tests {
             vision_radius: 6.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         let blocked = table.move_token(&player, "ada", 1.5, 6.5);
         assert!(blocked.is_err());
@@ -2100,7 +2224,10 @@ mod tests {
             vision_radius: 4.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         assert!(table.move_token(&player, "ada", 2.5, 7.5).is_err());
         table.set_door(&gm(), "door-0", true).unwrap();
@@ -2149,7 +2276,10 @@ mod tests {
             vision_radius: 8.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         assert!(table.move_token(&player, "ada", 2.5, 7.5).is_err());
         let south = table
@@ -2166,10 +2296,10 @@ mod tests {
         let mut table = Table::new();
         let layout = MapLayout::blank(8, 8, "core/grass");
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
-        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() });
+        let err = table.publish_built(&player, "Glade".into(), layout.clone(), Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() }, None);
         assert!(err.is_err());
         table
-            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() })
+            .publish_built(&gm(), "Glade".into(), layout, Compiled { walls: Vec::new(), doors: Vec::new(), move_blockers: Vec::new(), lights: Vec::new() }, None)
             .unwrap();
         assert_eq!(table.scene.as_ref().unwrap().name, "Glade");
         assert!(table.scene.as_ref().unwrap().layout.is_some());
@@ -2217,7 +2347,8 @@ mod tests {
             system_id: None,
             numbers: Default::default(),
             texts: Default::default(),
-        });
+            cast_asset_id: None,
+            });
         let err = table.command(
             &player,
             ClientMsg::UpdateCharacter {
@@ -2228,6 +2359,8 @@ mod tests {
                 clear_owner: false,
                 numbers: Default::default(),
                 texts: Default::default(),
+                set_cast_asset: false,
+                cast_asset_id: None,
             },
             Some(system),
         );
@@ -2400,7 +2533,10 @@ mod tests {
             vision_radius: 8.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         table.explored.set(0, 0, true);
         table
             .command(&gm(), ClientMsg::CreateScene { name: "Cellar".into(), width: 10, height: 10 }, None)
@@ -2451,6 +2587,8 @@ mod tests {
                     grants_vision: false,
                     color: "#d4a656".into(),
                     character_id: None,
+                    cast_asset: None,
+                    facing: None,
                 },
                 None,
             )
@@ -2553,7 +2691,10 @@ mod tests {
             vision_radius: 2.0,
             grants_vision: true,
             character_id: None,
-        });
+            cast_override: false,
+            cast_asset: None,
+            facing: "south".into(),
+            });
         table.explored.set(19, 19, true);
         let player = Viewer {
             player_id: "p".into(),

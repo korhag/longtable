@@ -75,6 +75,8 @@
       grantsVision: character.kind === 'pc',
       color: colors[table.tokens.length % colors.length] ?? '#d4a656',
       characterId: character.id,
+      castAsset: character.castAssetId ?? null,
+      facing: 'south',
     });
   }
 </script>
@@ -187,6 +189,8 @@
                   clearOwner: !event.currentTarget.value,
                   numbers: {},
                   texts: {},
+                  setCastAsset: false,
+                  castAssetId: null,
                 })}
               >
                 <option value="">No owner</option>

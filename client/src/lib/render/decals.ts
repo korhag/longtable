@@ -19,8 +19,8 @@ export class DecalLayer {
     scene.add(this.group);
   }
 
-  sync(layout: MapLayout | null, packs: Pack[], fog: FogView | null, showAll: boolean) {
-    const key = layout ? `${layout.decals.map((decal) => `${decal.asset}@${decal.x},${decal.y}`).join(';')}:${showAll}` : '';
+  sync(layout: MapLayout | null, packs: Pack[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}) {
+    const key = layout ? `${layout.decals.map((decal) => `${decal.asset}@${decal.x},${decal.y},${decal.scale},${decal.angle}`).join(';')}:${showAll}:${fog?.mode ?? ''}:${fog?.explored ?? ''}` : '';
     if (key === this.key) return;
     this.key = key;
     clear(this.group);
@@ -28,8 +28,9 @@ export class DecalLayer {
     for (const decal of layout.decals) {
       if (!showAll && !seen(fog, decal.x, decal.y)) continue;
       const found = findIn(packs, decal.asset, (pack) => pack.decals);
-      const width = (found?.def.size[0] ?? 1) * (decal.scale || 1);
-      const depth = (found?.def.size[1] ?? 1) * (decal.scale || 1);
+      const overlay = findIn(packs, decal.asset, (pack) => (pack.tiles ?? []).filter((tile) => tile.kind === 'overlay'));
+      const width = (overlay?.def.coverageCells[0] ?? found?.def.size[0] ?? 1) * (decal.scale || 1);
+      const depth = (overlay?.def.coverageCells[1] ?? found?.def.size[1] ?? 1) * (decal.scale || 1);
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(width, depth),
         new THREE.MeshBasicMaterial({ color: 0xc6b18a, transparent: true, opacity: 0.45, depthWrite: false }),
@@ -39,16 +40,18 @@ export class DecalLayer {
       mesh.position.set(decal.x, 0.02, decal.y);
       mesh.renderOrder = 1;
       this.group.add(mesh);
-      const url = found ? fileUrl(found.pack, found.def.file) : null;
-      if (!url || !found) continue;
-      void loadTexture(url, found.pack.filtering).then((texture) => {
+      const source = overlay ? { pack: overlay.pack, file: overlay.def.files[0] } : found ? { pack: found.pack, file: found.def.file } : null;
+      const url = source ? fileUrl(source.pack, source.file) : null;
+      if (!url || !source) continue;
+      void loadTexture(url, source.pack.filtering).then((texture) => {
         if (!texture || !mesh.parent) return;
         const material = mesh.material as THREE.MeshBasicMaterial;
         material.map = texture;
         material.color.set(0xffffff);
         material.opacity = 1;
-        material.alphaTest = 0.4;
+        material.alphaTest = 0.05;
         material.needsUpdate = true;
+        onPaint();
       });
     }
   }

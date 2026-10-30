@@ -101,6 +101,7 @@ mod tests {
             system_id: None,
             numbers,
             texts,
+            cast_asset_id: None,
         }
     }
 
@@ -139,7 +140,8 @@ mod tests {
             system_id: None,
             numbers: BTreeMap::new(),
             texts,
-        };
+            cast_asset_id: None,
+            };
         assert_eq!(damage_formula(&foe), "1d8");
     }
 
@@ -155,7 +157,8 @@ mod tests {
             system_id: None,
             numbers: BTreeMap::new(),
             texts,
-        };
+            cast_asset_id: None,
+            };
         assert_eq!(damage_formula(&foe), "flat:2");
     }
 }

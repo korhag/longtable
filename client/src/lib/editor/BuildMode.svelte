@@ -1,6 +1,7 @@
 <script lang="ts">
   import { send } from '../net/socket';
   import { table } from '../table.svelte';
+  import type { Pack } from '../assets/catalog';
   import { BRUSH_SIZES } from './brush';
   import AssetLibrary from './AssetLibrary.svelte';
   import { editor, type BuildTool } from './draft.svelte';
@@ -48,11 +49,33 @@
   const lightColors = ['#e8a04a', '#f2e2b0', '#d45a3c', '#7eb6e0', '#9d7ad6'];
 
   const themes = $derived(editor.packs.flatMap((pack) => pack.themes.map((theme) => ({ id: `${pack.id}/${theme.id}`, name: theme.name }))));
-  const terrains = $derived(editor.packs.flatMap((pack) => pack.terrains.map((terrain) => ({ id: `${pack.id}/${terrain.id}`, name: terrain.name, swatch: terrain.swatch }))));
-  const walls = $derived(editor.packs.flatMap((pack) => pack.walls.map((wall) => ({ id: `${pack.id}/${wall.id}`, name: wall.name }))));
-  const doors = $derived(editor.packs.flatMap((pack) => pack.doors.map((door) => ({ id: `${pack.id}/${door.id}`, name: door.name }))));
-  const props = $derived(editor.packs.flatMap((pack) => pack.props.map((prop) => ({ id: `${pack.id}/${prop.id}`, name: prop.name }))));
-  const decals = $derived(editor.packs.flatMap((pack) => pack.decals.map((decal) => ({ id: `${pack.id}/${decal.id}`, name: decal.name }))));
+  const terrains = $derived(brushList(editor.packs, 'terrain'));
+  const walls = $derived(brushList(editor.packs, 'wall'));
+  const doors = $derived(brushList(editor.packs, 'door'));
+  const props = $derived(brushList(editor.packs, 'prop'));
+  const decals = $derived(brushList(editor.packs, 'decal'));
+
+  function brushList(packs: Pack[], kind: 'terrain' | 'wall' | 'door' | 'prop' | 'decal') {
+    const fromTiles = packs.flatMap((pack) =>
+      (pack.tiles ?? [])
+        .filter((tile) => (kind === 'terrain' && (tile.kind === 'ground' || tile.kind === 'side')) || (kind === 'decal' && tile.kind === 'overlay'))
+        .map((tile) => ({ id: `${pack.id}/${tile.id}`, name: tile.name, swatch: '#6e675f' })),
+    );
+    const fromObjects = packs.flatMap((pack) =>
+      (pack.objects ?? [])
+        .filter((object) => (kind === 'wall' && object.kind === 'wall') || (kind === 'door' && object.kind === 'door') || (kind === 'prop' && object.kind === 'static' && object.placement !== 'edge'))
+        .map((object) => ({ id: `${pack.id}/${object.id}`, name: object.name, swatch: '#6e675f' })),
+    );
+    const legacy = packs.flatMap((pack) => {
+      if (kind === 'terrain') return pack.terrains.map((terrain) => ({ id: `${pack.id}/${terrain.id}`, name: terrain.name, swatch: terrain.swatch }));
+      if (kind === 'wall') return pack.walls.map((wall) => ({ id: `${pack.id}/${wall.id}`, name: wall.name, swatch: '#6e675f' }));
+      if (kind === 'door') return pack.doors.map((door) => ({ id: `${pack.id}/${door.id}`, name: door.name, swatch: '#6e675f' }));
+      if (kind === 'prop') return pack.props.map((prop) => ({ id: `${pack.id}/${prop.id}`, name: prop.name, swatch: '#6e675f' }));
+      return pack.decals.map((decal) => ({ id: `${pack.id}/${decal.id}`, name: decal.name, swatch: '#6e675f' }));
+    });
+    const seen = new Set([...fromTiles, ...fromObjects].map((item) => item.id));
+    return [...fromTiles, ...fromObjects, ...legacy.filter((item) => !seen.has(item.id))];
+  }
 
   function onKey(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null;

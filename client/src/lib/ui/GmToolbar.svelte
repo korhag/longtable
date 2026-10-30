@@ -1,6 +1,7 @@
 <script lang="ts">
   import { send } from '../net/socket';
   import { openCreation, overlaysFor } from '../../systems';
+  import { editor } from '../editor/draft.svelte';
   import { table, type Tool } from '../table.svelte';
 
   let tokenName = $state('Hero');
@@ -26,6 +27,8 @@
       grantsVision: true,
       color: colors[table.tokens.length % colors.length] ?? '#d4a656',
       characterId: null,
+      castAsset: editor.castId || null,
+      facing: 'south',
     });
   }
 
@@ -43,6 +46,8 @@
       grantsVision: character.kind === 'pc',
       color: character.kind === 'adversary' ? '#c45c4a' : (colors[index % colors.length] ?? '#d4a656'),
       characterId: character.id,
+      castAsset: character.castAssetId ?? (editor.castId || null),
+      facing: 'south',
     });
     table.tool = 'select';
   }
