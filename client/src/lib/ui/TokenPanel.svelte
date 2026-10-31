@@ -3,6 +3,8 @@
   import { cellLevel, tierLabel } from '../render/levels';
   import { table } from '../table.svelte';
 
+  let detailsOpen = $state(false);
+  $effect(() => { table.selectedTokenId; detailsOpen = false; });
   const token = $derived(table.tokens.find((item) => item.id === table.selectedTokenId) ?? null);
   const target = $derived(table.tokens.find((item) => item.id === table.targetTokenId) ?? null);
   const here = $derived(token ? cellLevel(table.scene?.layout, token.x, token.y) : 0);
@@ -57,8 +59,14 @@
 </script>
 
 {#if token}
-  <section class="glass pointer-events-auto w-full rounded-2xl p-3">
-    <p class="display text-lg">{token.name}</p>
+  <section class="selection-card" aria-label="Selected figure">
+    <div class="selection-heading">
+      <span class="selection-avatar" style={`--ring:${token.color}`}>{token.name.slice(0, 2).toUpperCase()}</span>
+      <div class="min-w-0 flex-1"><p class="display text-lg truncate">{token.name}</p>
+      <p class="selection-caption">{token.hidden ? 'Hidden from players' : 'Selected figure'}</p></div>
+      <button class="selection-icon" type="button" aria-label="Deselect figure" title="Deselect figure" onclick={() => table.selectedTokenId = null}>×</button>
+    </div>
+    <div class="selection-quick">
     <p class="text-sm text-[var(--color-parchment)]/60">
       {token.hidden ? 'Hidden from players' : 'On the table'} · sight {token.visionRadius}
     </p>
@@ -67,12 +75,18 @@
     {/if}
 
     {#if gm || ownFigure}
-      <div class="mt-3 grid grid-cols-4 gap-1">
+      <div class="mt-2 grid grid-cols-4 gap-1">
         {#each faces as face (face.value)}
           <button class="btn quiet text-sm" class:active={token.facing === face.value} type="button" onclick={() => turn(token.id, face.value)}>{face.label}</button>
         {/each}
       </div>
     {/if}
+    </div>
+    {#if gm || ownFigure}
+      <button class="selection-details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{detailsOpen ? 'Hide details' : 'Figure details'} <span aria-hidden="true">{detailsOpen ? '⌃' : '⌄'}</span></button>
+    {/if}
+    {#if detailsOpen}
+    <div class="selection-details">
     {#if gm}
       <label class="mt-3 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Name
         <input
@@ -272,6 +286,8 @@
           }}
         />
       </label>
+    {/if}
+    </div>
     {/if}
   </section>
 {/if}

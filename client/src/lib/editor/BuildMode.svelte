@@ -12,6 +12,8 @@
   let blankWidth = $state(30);
   let blankHeight = $state(20);
   let name = $state('New map');
+  let loadingSample = $state(false);
+  async function loadSample() { loadingSample = true; try { await editor.loadForestSample(); } finally { loadingSample = false; } }
   const publishLabel = $derived(
     editor.draft?.sceneId && editor.draft.sceneId === table.scene?.id ? 'Update this map' : 'Put on the table as a new map',
   );
@@ -27,7 +29,7 @@
   const held = $derived(Boolean(repair || objects || stairs));
 
   const tools: { id: BuildTool; name: string }[] = [
-    { id: 'theme', name: 'Theme' },
+    { id: 'theme', name: 'Biome' },
     { id: 'terrain', name: 'Terrain' },
     { id: 'wall', name: 'Walls' },
     { id: 'door', name: 'Doors' },
@@ -90,8 +92,15 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex flex-col gap-1 text-sm">
+  <section class="sample-card">
+    <span class="sample-eyebrow">A ready-to-play encounter</span>
+    <strong>The Old Road</strong>
+    <p>A winding forest road, a timber refuge, and a bandit ambush. Explore three heights with four adventurers.</p>
+    <button class="btn" type="button" disabled={loadingSample || !editor.packs.some((pack) => pack.id === 'forest')} onclick={() => void loadSample()}>{loadingSample ? 'Preparing woodland…' : 'Load forest encounter'}</button>
+    <small>Creates a new scene. Your existing scenes stay in the campaign.</small>
+  </section>
   <AssetLibrary />
-  <p class="text-sm text-[var(--color-parchment)]/65">Brush a theme, draw walls, and click a square to place a light. Put the map on the table, then place tokens in Play and drag them. Middle-drag pans. Right-click a ground square to keep the next picture of that tile. R or right-click mirrors a prop that has a mirrored picture. An upright picture stays as drawn. Erase lifts a wall, a prop, or a light.</p>
+  <p class="text-sm text-[var(--color-parchment)]/65">Paint a biome to grow a landscape automatically. Drag to draw walls or a room. Middle-drag pans; wheel zooms. Undo reverses the whole stroke.</p>
   <div class="mt-2 flex items-end gap-1.5">
     <input class="field w-16" type="number" min="5" max="200" bind:value={blankWidth} aria-label="Blank width" />
     <input class="field w-16" type="number" min="5" max="200" bind:value={blankHeight} aria-label="Blank height" />
@@ -122,6 +131,15 @@
     {/each}
   </div>
 
+  {#if editor.tool === 'theme' || editor.tool === 'terrain'}
+    <div class="mt-3 grid grid-cols-2 gap-1.5" aria-label="Ground painting mode">
+      <button class="btn quiet" class:active={editor.paintMode === 'brush'} type="button" onclick={() => editor.paintMode = 'brush'}>Brush</button>
+      <button class="btn quiet" class:active={editor.paintMode === 'fill'} type="button" onclick={() => editor.paintMode = 'fill'}>Bucket</button>
+    </div>
+    <button class="btn quiet mt-1.5" type="button" disabled={!editor.draft} onclick={() => editor.fillMap()}>Fill entire map</button>
+    <p class="mt-1 text-xs text-[var(--color-parchment)]/60">{editor.paintMode === 'fill' ? 'Click to fill connected ground at the same height.' : 'Drag to paint. Tile variations and soft borders are automatic.'} {editor.tool === 'theme' ? 'Biomes also scatter matching trees and objects.' : ''}</p>
+  {/if}
+
   {#if editor.tool === 'theme' || editor.tool === 'terrain' || editor.tool === 'erase' || editor.tool === 'raise'}
     <div class="mt-3 flex gap-1.5">
       {#each BRUSH_SIZES as size (size)}
@@ -132,6 +150,7 @@
 
   {#if editor.tool === 'raise'}
     <div class="mt-3 flex gap-1.5">
+      <button class="btn quiet flex-1 text-sm" class:active={editor.tier === 0} type="button" onclick={() => (editor.tier = 0)}>Ground</button>
       <button class="btn quiet flex-1 text-sm" class:active={editor.tier === 1} type="button" onclick={() => (editor.tier = 1)}>Step</button>
       <button class="btn quiet flex-1 text-sm" class:active={editor.tier === 2} type="button" onclick={() => (editor.tier = 2)}>Rise</button>
     </div>
@@ -153,6 +172,12 @@
       {/each}
     </div>
   {:else if editor.tool === 'wall'}
+    <div class="mt-3 grid grid-cols-3 gap-1.5">
+      {#each ['line', 'room', 'freehand'] as mode}
+        <button class="btn quiet" class:active={editor.wallMode === mode} type="button" onclick={() => editor.wallMode = mode as 'line' | 'room' | 'freehand'}>{mode === 'line' ? 'Line' : mode === 'room' ? 'Room' : 'Freehand'}</button>
+      {/each}
+    </div>
+    <p class="mt-1 text-xs text-[var(--color-parchment)]/60">{editor.wallMode === 'room' ? 'Drag between two corners to build a complete room. Use Doors to replace an edge with an entrance.' : editor.wallMode === 'line' ? 'Drag from a grid corner to draw a continuous straight wall.' : 'Drag along grid edges to trace a wall.'}</p>
     <div class="mt-3 flex flex-col gap-1">
       {#each walls as wall (wall.id)}
         <button class="btn quiet text-left text-sm" class:active={editor.wallId === wall.id} type="button" onclick={() => (editor.wallId = wall.id)}>{wall.name}</button>
@@ -213,3 +238,12 @@
     <p class="mt-2 text-sm text-[var(--color-parchment)]/70">{editor.note}</p>
   {/if}
 </div>
+
+<style>
+  .sample-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; margin-bottom: 12px; border: 1px solid #b9914e55; border-radius: 12px; background: linear-gradient(135deg, #283328, #181e18); }
+  .sample-eyebrow { color: #c7a66e; text-transform: uppercase; letter-spacing: .12em; font-size: 10px; }
+  .sample-card strong { font-family: Cinzel, serif; font-size: 20px; color: #ead7b1; }
+  .sample-card p, .sample-card small { color: #d3c7adad; line-height: 1.5; }
+  .sample-card p { font-size: 13px; }
+  .sample-card small { font-size: 11px; }
+</style>

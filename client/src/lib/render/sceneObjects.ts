@@ -14,6 +14,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { CUTOUT_RIGHT, CUTOUT_TOWARD, CUTOUT_UP, cutoutMaterial, orientUpright, uprightGeometry } from './cutout';
 import { cellLevel, SUPPORT_CLEARANCE, supportHeight } from './levels';
 import { seen } from './seen';
+import { setWallCutaway } from './wallCutaway';
 
 export const objectStats = { rebuilds: 0, instances: 0 };
 
@@ -38,7 +39,7 @@ export class SceneObjects {
     scene.add(this.group);
   }
 
-  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void) {
+  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void, lowered: Set<string> = new Set()) {
     const generation = this.generation;
     const wanted = new Map<string, { sig: string; visible: boolean; make: () => THREE.Group }>();
     const placed = new Map<string, { sig: string; matrices: THREE.Matrix4[]; layer: ObjectLayer; pack: Pack; pixels: number }>();
@@ -66,7 +67,7 @@ export class SceneObjects {
         const midX = piece.axis === 'h' ? piece.x + 0.5 : piece.x;
         const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
         const height = edgeLevel(layout, piece.axis, piece.x, piece.y);
-        const sig = `${piece.asset}:${piece.axis}:${open ? 1 : 0}:${height}:${found.pack.contentHash ?? ''}`;
+        const sig = `${piece.asset}:${piece.axis}:${piece.x},${piece.y}:${open ? 1 : 0}:${height}:${found.pack.contentHash ?? ''}`;
         wanted.set(piece.id, {
           sig,
           visible: showAll || seen(fog, midX, midY),
@@ -85,6 +86,7 @@ export class SceneObjects {
       const existing = this.nodes.get(id);
       if (existing && existing.sig === spec.sig) {
         existing.group.visible = spec.visible;
+        setWallCutaway(existing.group, lowered.has(id));
         continue;
       }
       if (existing) {
@@ -93,6 +95,7 @@ export class SceneObjects {
       }
       const group = spec.make();
       group.visible = spec.visible;
+      setWallCutaway(group, lowered.has(id));
       this.group.add(group);
       this.nodes.set(id, { sig: spec.sig, group });
       objectStats.rebuilds += 1;

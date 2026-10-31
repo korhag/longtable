@@ -23,6 +23,7 @@ import { inSight } from './seen';
 import { opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { DecalLayer } from './decals';
 import { OcclusionOutlines } from './occlusion';
+import { roomCutaway } from './roomCutaway';
 import { ringPaint, type CastPaint, type RingMark } from './rings';
 import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
@@ -158,6 +159,7 @@ export class TableEngine {
     this.renderer = new THREE.WebGLRenderer({ antialias: !this.lowPower, alpha: false, powerPreference: this.lowPower ? 'low-power' : 'default' });
     this.renderer.setClearColor(0x100e0c, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.localClippingEnabled = true;
     this.host.appendChild(this.renderer.domElement);
 
     this.scene3 = new THREE.Scene();
@@ -457,6 +459,8 @@ export class TableEngine {
     }
   }
 
+  private cutawayKey = '';
+
   private syncBuilt() {
     const layout = this.view.scene?.layout ?? null;
     const pack = layout?.terrains[0] ? findIn(this.view.packs, layout.terrains[0], (item) => item.terrains)?.pack : undefined;
@@ -466,10 +470,18 @@ export class TableEngine {
       this.placeCamera();
     }
     const showAll = this.view.buildMode || this.view.role === 'gm' || this.view.fog?.mode === 'gm';
+    const candidates = this.visibleTokens().filter((token) => !token.hidden);
+    const selected = candidates.find((token) => token.id === this.view.selectedId);
+    const lowered = this.view.buildMode ? new Set<string>() : roomCutaway(layout, selected ? [selected] : candidates);
+    const cutawayKey = [...lowered].sort().join(';');
+    if (cutawayKey !== this.cutawayKey) {
+      this.cutawayKey = cutawayKey;
+      this.sceneryToken += 1;
+    }
     this.terrain.sync(layout, this.view.packs, () => this.bumpScenery());
     this.decals.sync(layout, this.view.packs, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
-    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
-    this.objects.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery());
+    this.standees.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery(), lowered);
+    this.objects.sync(layout, this.view.packs, this.view.doors, showAll ? null : this.view.fog, showAll, () => this.bumpScenery(), lowered);
   }
 
   private syncGhost() {
@@ -1092,7 +1104,7 @@ function createToken(token: TokenView): TokenNode {
     new THREE.PlaneGeometry(0.9, 1.55),
     new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.35, depthTest: true, depthWrite: true, side: THREE.DoubleSide }),
   );
-  card.position.y = 0.78;
+  card.position.y = 0;
   card.visible = false;
   card.renderOrder = 2;
   card.userData.tokenId = token.id;
@@ -1152,11 +1164,13 @@ function paintToken(node: TokenNode, token: TokenView, mark: RingMark, view: Vie
 function paintBody(node: TokenNode, token: TokenView, packs: View['packs'], onPaint: () => void) {
   const facing = token.facing || 'south';
   const asset = token.castAsset ?? '';
-  const key = `${asset}:${facing}:${token.color}`;
-  if (node.bodyKey === key) return;
-  node.bodyKey = key;
   const found = asset ? findIn(packs, asset, (pack) => pack.cast ?? []) : null;
   const frame = found ? castFrame(found.def, facing) : null;
+  // A snapshot can arrive before the asynchronous catalog. The resolved frame
+  // must participate in the key so a placeholder is replaced when packs arrive.
+  const key = `${asset}:${facing}:${token.color}:${found?.pack.contentHash ?? ''}:${frame?.file ?? ''}`;
+  if (node.bodyKey === key) return;
+  node.bodyKey = key;
   const size = frame?.sizePx ?? [64, 128];
   const pivot = frame?.pivotPx ?? [32, 120];
   const pixels = found?.def.pixelsPerWorldUnit ?? 128;
@@ -1373,8 +1387,8 @@ function drawFog(fog: FogView, mapWidth: number, mapHeight: number) {
   const image = context.createImageData(canvas.width, canvas.height);
   const bits = decodeBits(fog.explored || 'AA==');
   const gm = fog.mode === 'gm';
-  const hidden = gm ? 150 : 255;
-  const remembered = gm ? 64 : 148;
+  const hidden = gm ? 58 : 255;
+  const remembered = gm ? 24 : 148;
   const count = canvas.width * canvas.height;
   for (let index = 0; index < count; index += 1) {
     const alpha = bitAt(bits, index) ? remembered : hidden;

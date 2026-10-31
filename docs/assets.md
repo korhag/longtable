@@ -1,8 +1,16 @@
 # How to draw assets for the table
 
+The illustrated [Old Forest Road sample](forest-sample.md) is bundled in `assets/packs/forest`. Load it from Map to try the three elevations, cabin, woodland biome, and eight figures. For a small import exercise, use `docs/examples/forest-floor-sheet.png` as four 128 × 128 ground variants.
+
 The live scene uses one camera, `dimetric-30-v1`. It is orthographic, 30° above the ground, and looks from the south-west. Pan and zoom do not turn it. A new pack uses schema 2. The GM imports one zip. The same records paint the ground, place objects, and dress the cast. Do not copy a new picture into the old terrain or prop lists.
 
 An example manifest is `docs/schemas/pack-v2.example.json`. The same file is the template. `docs/schemas/pack-v2.schema.json` lists the fields. Map → Check pack runs the table's rules on a zip and installs nothing. Import pack is the step that adds it. A playable diagnostic pack is `assets/packs/ruin`. Its pictures are colored blocks, not finished art. The 12 by 12 scene in the server test uses that pack: four grounds, a transparent overlay, an oak, a barrel, a table, walls on both axes, a door, tiers 0, 1, and 2, and two stairs.
+
+## Import a sprite sheet
+
+**Map → Import sheet** crops a PNG grid and installs the individual assets directly into the library. No external cutting or ZIP authoring is required. Choose ground, overlay, object, wall, door, or cast; set the cell dimensions, margin and gutter; inspect the numbered crop preview; optionally provide names. Ground sheets can become one terrain with multiple stable variants for automatic painting. Cast rows use four directional columns. Walls use horizontal/vertical pairs; doors use four axis/state frames. The importer exposes scale, footprint, pivot, and movement/sight blocking.
+
+Download the **Asset guide** in the importer for a generation-ready specification and prompt example. The maintained guide is [sheet-guide.md](../client/src/lib/editor/sheet-guide.md). Art must follow a regular grid; this importer does not identify arbitrary objects in a moodboard or remove an opaque background. For trees needing separate trunk/canopy layers or precise collision polygons, use the full ZIP format below.
 
 ## What a pack is
 

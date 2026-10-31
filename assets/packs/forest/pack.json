@@ -1,0 +1,1055 @@
+{
+  "schemaVersion": 2,
+  "id": "forest",
+  "name": "The Old Forest Road",
+  "visualProfile": "dimetric-30-v1",
+  "pixelsPerCell": 128,
+  "filtering": "linear",
+  "tiles": [
+    {
+      "id": "forest-floor",
+      "name": "Forest floor",
+      "kind": "ground",
+      "sourceSizePx": [
+        128,
+        128
+      ],
+      "coverageCells": [
+        1,
+        1
+      ],
+      "files": [
+        "tiles/forest-floor-0.png",
+        "tiles/forest-floor-1.png",
+        "tiles/forest-floor-2.png",
+        "tiles/forest-floor-3.png"
+      ],
+      "transitionPolicy": "organic"
+    },
+    {
+      "id": "road",
+      "name": "Old cobbled road",
+      "kind": "ground",
+      "sourceSizePx": [
+        128,
+        128
+      ],
+      "coverageCells": [
+        1,
+        1
+      ],
+      "files": [
+        "tiles/road-0.png",
+        "tiles/road-1.png",
+        "tiles/road-2.png",
+        "tiles/road-3.png"
+      ],
+      "transitionPolicy": "organic"
+    },
+    {
+      "id": "cabin-floor",
+      "name": "Cabin boards",
+      "kind": "ground",
+      "sourceSizePx": [
+        128,
+        128
+      ],
+      "coverageCells": [
+        1,
+        1
+      ],
+      "files": [
+        "tiles/cabin-floor-0.png"
+      ],
+      "transitionPolicy": "rigid"
+    },
+    {
+      "id": "cliff",
+      "name": "Mossy rock face",
+      "kind": "side",
+      "sourceSizePx": [
+        128,
+        128
+      ],
+      "coverageCells": [
+        1,
+        1
+      ],
+      "files": [
+        "tiles/cliff-0.png"
+      ],
+      "transitionPolicy": "none"
+    }
+  ],
+  "objects": [
+    {
+      "id": "oak",
+      "name": "Ancient oak",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        2
+      ],
+      "originCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/oak.png",
+          "sizePx": [
+            320,
+            440
+          ],
+          "pivotPx": [
+            160,
+            420
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          0.22
+        ],
+        [
+          -0.22,
+          0.22
+        ]
+      ],
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              0.22
+            ],
+            [
+              -0.22,
+              0.22
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 3
+        }
+      ]
+    },
+    {
+      "id": "pine",
+      "name": "Silver fir",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        2
+      ],
+      "originCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/pine.png",
+          "sizePx": [
+            320,
+            440
+          ],
+          "pivotPx": [
+            160,
+            420
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          0.22
+        ],
+        [
+          -0.22,
+          0.22
+        ]
+      ],
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              0.22
+            ],
+            [
+              -0.22,
+              0.22
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 3
+        }
+      ]
+    },
+    {
+      "id": "birch",
+      "name": "Golden birch",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        2
+      ],
+      "originCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/birch.png",
+          "sizePx": [
+            320,
+            440
+          ],
+          "pivotPx": [
+            160,
+            420
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          0.22
+        ],
+        [
+          -0.22,
+          0.22
+        ]
+      ],
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              0.22
+            ],
+            [
+              -0.22,
+              0.22
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 3
+        }
+      ]
+    },
+    {
+      "id": "dead-tree",
+      "name": "Hollow elder",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        2
+      ],
+      "originCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/dead-tree.png",
+          "sizePx": [
+            320,
+            440
+          ],
+          "pivotPx": [
+            160,
+            420
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          -0.22
+        ],
+        [
+          0.22,
+          0.22
+        ],
+        [
+          -0.22,
+          0.22
+        ]
+      ],
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              -0.22
+            ],
+            [
+              0.22,
+              0.22
+            ],
+            [
+              -0.22,
+              0.22
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 3
+        }
+      ]
+    },
+    {
+      "id": "boulder",
+      "name": "Mossback boulder",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        2
+      ],
+      "originCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/boulder.png",
+          "sizePx": [
+            256,
+            220
+          ],
+          "pivotPx": [
+            128,
+            195
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.8,
+              -0.8
+            ],
+            [
+              0.8,
+              -0.8
+            ],
+            [
+              0.8,
+              0.8
+            ],
+            [
+              -0.8,
+              0.8
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 1.5
+        }
+      ]
+    },
+    {
+      "id": "cabin-wall",
+      "name": "Timber & plaster wall",
+      "kind": "wall",
+      "placement": "edge",
+      "footprintCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/wall-h.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "v"
+        },
+        {
+          "kind": "upright",
+          "file": "objects/wall-v.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "h"
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true
+    },
+    {
+      "id": "cabin-door",
+      "name": "Oak cabin door",
+      "kind": "door",
+      "placement": "edge",
+      "footprintCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/door-h-closed.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "v",
+          "state": "closed"
+        },
+        {
+          "kind": "upright",
+          "file": "objects/door-h-open.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "v",
+          "state": "open"
+        },
+        {
+          "kind": "upright",
+          "file": "objects/door-v-closed.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "h",
+          "state": "closed"
+        },
+        {
+          "kind": "upright",
+          "file": "objects/door-v-open.png",
+          "sizePx": [
+            96,
+            160
+          ],
+          "pivotPx": [
+            48,
+            136
+          ],
+          "axis": "h",
+          "state": "open"
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true
+    },
+    {
+      "id": "stairs",
+      "name": "Mossy stone steps",
+      "kind": "stairs",
+      "placement": "connection",
+      "footprintCells": [
+        1,
+        1
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/stairs.png",
+          "sizePx": [
+            128,
+            128
+          ],
+          "pivotPx": [
+            64,
+            116
+          ]
+        }
+      ]
+    }
+  ],
+  "cast": [
+    {
+      "id": "bandit-scout",
+      "name": "Bandit Scout",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/bandit-scout/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/bandit-scout/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/bandit-scout/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/bandit-scout/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "bandit-archer",
+      "name": "Bandit Archer",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/bandit-archer/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/bandit-archer/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/bandit-archer/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/bandit-archer/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "bandit-brute",
+      "name": "Bandit Brute",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/bandit-brute/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/bandit-brute/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/bandit-brute/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/bandit-brute/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "bandit-captain",
+      "name": "Bandit Captain",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/bandit-captain/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/bandit-captain/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/bandit-captain/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/bandit-captain/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "human",
+      "name": "Human",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/human/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/human/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/human/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/human/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "elf",
+      "name": "Elf",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/elf/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/elf/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/elf/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/elf/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "dwarf",
+      "name": "Dwarf",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/dwarf/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/dwarf/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/dwarf/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/dwarf/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "id": "orc",
+      "name": "Orc",
+      "pixelsPerWorldUnit": 128,
+      "suggestedFootprintCells": [
+        1,
+        1
+      ],
+      "views": {
+        "north": {
+          "file": "cast/orc/north.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "east": {
+          "file": "cast/orc/east.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "south": {
+          "file": "cast/orc/south.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        },
+        "west": {
+          "file": "cast/orc/west.png",
+          "sizePx": [
+            160,
+            256
+          ],
+          "pivotPx": [
+            80,
+            245
+          ]
+        }
+      }
+    }
+  ],
+  "themes": [
+    {
+      "id": "woodland",
+      "name": "Ancient woodland",
+      "terrain": "forest/forest-floor",
+      "wall": "forest/cabin-wall",
+      "door": "forest/cabin-door",
+      "scatter": [
+        {
+          "asset": "forest/oak",
+          "density": 0.25,
+          "spacing": 3
+        },
+        {
+          "asset": "forest/pine",
+          "density": 0.2,
+          "spacing": 3
+        },
+        {
+          "asset": "forest/birch",
+          "density": 0.18,
+          "spacing": 3
+        },
+        {
+          "asset": "forest/dead-tree",
+          "density": 0.1,
+          "spacing": 3
+        },
+        {
+          "asset": "forest/boulder",
+          "density": 0.06,
+          "spacing": 3
+        }
+      ]
+    }
+  ]
+}

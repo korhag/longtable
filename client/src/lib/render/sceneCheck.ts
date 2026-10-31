@@ -12,6 +12,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { cameraDepth, sceneBasis } from './cameraProfile';
 import { cutoutMaterial, orientUpright, uprightGeometry } from './cutout';
 import { TerrainLayer } from './terrain';
+import { checkOrganicTransitions } from './organicCheck';
 
 const out = document.querySelector('#out');
 const canvas = document.querySelector('#view') as HTMLCanvasElement;
@@ -113,6 +114,8 @@ camera.updateProjectionMatrix();
 
 const terrain = new TerrainLayer(scene);
 let paints = 0;
+let transitionsReady = false;
+void checkOrganicTransitions().then(() => { transitionsReady = true; draw(); }).catch((error) => report(`SCENE_FAIL ${String(error)}`));
 terrain.sync(layout, [pack], () => {
   paints += 1;
   draw();
@@ -152,7 +155,7 @@ function draw() {
     report(`SCENE_FAIL center is ${pixels[0]},${pixels[1]},${pixels[2]} after ${paints} paint(s)`);
     return;
   }
-  report('SCENE_OK');
+  if (transitionsReady) report('SCENE_OK');
 }
 
 draw();

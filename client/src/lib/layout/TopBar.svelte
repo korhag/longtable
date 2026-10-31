@@ -33,10 +33,21 @@
     return designer.dirty ? `${base} · unsaved` : `${base}.`;
   });
 
-  const editTabs: { id: TableMode; name: string }[] = [
-    { id: 'map', name: 'Map' },
-    { id: 'campaign', name: 'Campaign' },
+  const tabs: { id: TableMode; name: string }[] = [
+    { id: 'play', name: 'Play' }, { id: 'map', name: 'Map' },
+    { id: 'campaign', name: 'Campaign' }, { id: 'rules', name: 'Rules' },
   ];
+  function selectMode(next: TableMode) {
+    modes.set(next);
+    layout.focusMode = false;
+    layout.leftOpen = next !== 'play';
+    if (window.innerWidth < 1000) layout.rightOpen = false;
+  }
+  function shortcuts(event: KeyboardEvent) {
+    if ((event.target as HTMLElement)?.closest('input, textarea, select, [contenteditable=true]') || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key.toLowerCase() === 'f') layout.focusMode = !layout.focusMode;
+    if (event.key === 'Escape') layout.focusMode = false;
+  }
 
   let seatMenu = $state<{ id: string; name: string; anchor: Anchor } | null>(null);
 
@@ -95,64 +106,58 @@
   });
 </script>
 
+<svelte:window onkeydown={shortcuts} />
+
 <header class="topbar" data-mode={mode}>
-  <div class="min-w-0">
-    <div class="flex min-w-0 items-center gap-2">
-      <span class="mode-badge {mode}">{mode}</span>
-      <p class="truncate text-sm">{expectation}</p>
+  <div class="table-identity" title={`${table.campaign.name || 'Campaign'} · ${systemName} · ${expectation}`}>
+    <span class="brand-mark" aria-hidden="true">L</span>
+    <div class="min-w-0">
+      <p class="display brand-name">LONGTABLE <span class="mode-indicator">{mode}</span></p>
+      <p class="scene-name">{sceneName}</p>
     </div>
-    <p class="truncate text-sm text-[var(--color-parchment)]/60">
-      {table.campaign.name || 'Campaign'} · {sceneName} · {systemName}
-    </p>
   </div>
-
   {#if gm}
-    <div class="flex shrink-0 items-center gap-2">
-      <button class="btn quiet px-2" class:active={modes.current === 'play'} type="button" onclick={() => modes.set('play')}>Play</button>
-      <span class="text-sm tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Edit</span>
-      {#each editTabs as tab (tab.id)}
-        <button class="btn quiet px-2" class:active={modes.current === tab.id} type="button" onclick={() => modes.set(tab.id)}>{tab.name}</button>
+    <nav class="mode-nav" aria-label="Table mode">
+      {#each tabs as tab (tab.id)}
+        <button class:active={modes.current === tab.id} aria-current={modes.current === tab.id ? 'page' : undefined} type="button" onclick={() => selectMode(tab.id)}>{tab.name}</button>
       {/each}
-      <span class="text-sm tracking-[0.14em] text-[var(--color-parchment)]/45 uppercase">Design</span>
-      <button class="btn quiet px-2" class:active={modes.current === 'rules'} type="button" onclick={() => modes.set('rules')}>Rules</button>
-    </div>
+    </nav>
   {/if}
-
-  <div class="ml-auto flex min-w-0 items-center gap-2">
-    <ViewControls {onZoom} {onFit} {onMe} {onCycle} {onSetGrid} />
-    <div class="flex items-center gap-1">
-      {#each table.players as player (player.id)}
-        <button
-          class="portrait portrait-sm"
-          style={`--ring:${player.color}`}
-          type="button"
-          title={seatTitle(player)}
-          onclick={() => dismiss(player.id)}
-          oncontextmenu={(event) => openSeat(event, player)}
-        >
-          {player.name.slice(0, 2).toUpperCase()}
-          <span class={`seat-dot ${player.connected ? 'bg-emerald-400' : 'bg-stone-500'}`}></span>
-        </button>
-      {/each}
-    </div>
-    {#if seatMenu}
-      <SeatMenu
-        name={seatMenu.name}
-        anchor={seatMenu.anchor}
-        onkick={() => seatMenu && kick(seatMenu.id)}
-        onclose={() => (seatMenu = null)}
-      />
-    {/if}
-    <button class="btn quiet px-2" type="button" onclick={() => openPanel('talk')}>Talk</button>
-    {#if account.lobby && account.lobby.requests.length > 0}
-      <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>{account.lobby.requests.length} waiting</button>
-    {/if}
-    <button class="btn quiet px-2" type="button" onclick={() => openPanel('settings')}>Settings</button>
+  <div class="topbar-actions">
+    <details class="topbar-menu view-menu">
+      <summary class="btn quiet">View <span aria-hidden="true">⌄</span></summary>
+      <div class="topbar-menu-body">
+        <ViewControls {onZoom} {onFit} {onMe} {onCycle} {onSetGrid} />
+        <p class="shortcut-hint">Wheel to zoom · middle-drag to pan</p>
+        <p class="shortcut-hint">0 fit · C your figure · G grid</p>
+      </div>
+    </details>
+    <button class="btn quiet focus-control" class:active={layout.focusMode} aria-pressed={layout.focusMode} title="Focus on the scene (F)" type="button" onclick={() => layout.focusMode = !layout.focusMode}>{layout.focusMode ? 'Show tools' : 'Focus'}</button>
+    <button class="btn quiet" class:active={chrome.talk} type="button" onclick={() => openPanel('talk')}>Talk</button>
+    <button class="btn quiet" class:active={chrome.settings} type="button" onclick={() => openPanel('settings')}>Settings{account.lobby && account.lobby.requests.length > 0 ? ` · ${account.lobby.requests.length}` : ''}</button>
     {#if table.role === 'gm' && table.viewAs}
-      <button class="btn px-2" type="button" onclick={() => send({ type: 'viewAs', playerId: null })}>Your eyes</button>
+      <button class="btn" type="button" onclick={() => send({ type: 'viewAs', playerId: null })}>Your eyes</button>
     {/if}
-    <span class="shrink-0 text-sm tracking-wide text-[var(--color-parchment)]/55" title={VERSION_NOTE}>v{VERSION}</span>
-    <button class="btn quiet px-2" type="button" onclick={() => layout.reset()}>Reset</button>
-    <button class="btn quiet px-2" type="button" onclick={() => leaveTable()}>Leave</button>
+    <details class="topbar-menu">
+      <summary class="btn quiet" aria-label="Table menu">•••</summary>
+      <div class="topbar-menu-body table-options">
+        <p class="display">{table.campaign.name || 'Your table'}</p>
+        <p class="shortcut-hint">{systemName}</p>
+        <div class="flex flex-wrap items-center gap-1 py-2" aria-label="Players">
+          {#each table.players as player (player.id)}
+            <button class="portrait portrait-sm" style={`--ring:${player.color}`} type="button" title={seatTitle(player)} aria-label={seatTitle(player)} onclick={() => dismiss(player.id)} oncontextmenu={(event) => openSeat(event, player)}>
+              {player.name.slice(0, 2).toUpperCase()}
+              <span class={`seat-dot ${player.connected ? 'bg-emerald-400' : 'bg-stone-500'}`}></span>
+            </button>
+          {/each}
+        </div>
+        <button class="btn quiet" type="button" onclick={() => layout.reset()}>Reset layout</button>
+        <button class="btn quiet" type="button" onclick={() => leaveTable()}>Leave</button>
+        <span class="shortcut-hint" title={VERSION_NOTE}>Longtable v{VERSION}</span>
+      </div>
+    </details>
+    {#if seatMenu}
+      <SeatMenu name={seatMenu.name} anchor={seatMenu.anchor} onkick={() => seatMenu && kick(seatMenu.id)} onclose={() => (seatMenu = null)} />
+    {/if}
   </div>
 </header>

@@ -44,6 +44,7 @@ pub fn router(app: Arc<App>) -> Router {
         .with_state(app.clone());
     let mut router = Router::new()
         .route("/api/health", get(health))
+        .route("/api/samples/forest", post(load_forest_sample))
         .route("/api/host", get(host_info))
         .route("/api/register", post(crate::net::accounts::register))
         .route("/api/login", post(crate::net::accounts::login))
@@ -302,6 +303,22 @@ async fn publish_draft(State(app): State<Arc<App>>, Path(id): Path<String>, head
     DraftStore::new(&app.data_dir).put(&saved).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     app.request_save();
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A new playable sample, with the previous live scene kept on the campaign shelf.
+async fn load_forest_sample(State(app): State<Arc<App>>, headers: HeaderMap) -> Result<Json<Draft>, ApiError> {
+    let token = require_gm(&app, &headers).await?;
+    let catalog = app.catalog.lock().await.clone();
+    let mut table = app.table.lock().await;
+    let viewer = table.viewer_for_session(&token)
+        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "sign in again".into()))?;
+    let draft = crate::forest_scene::install(&mut table, &viewer, &catalog)
+        .map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
+    DraftStore::new(&app.data_dir).put(&draft).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    table.broadcast_state();
+    drop(table);
+    app.request_save();
+    Ok(Json(draft))
 }
 
 /// The computer running the game can read its own key. Other machines cannot.

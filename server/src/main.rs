@@ -6,6 +6,7 @@
 
 mod app;
 mod ruin_scene;
+mod forest_scene;
 mod asset_import;
 mod assets;
 mod house;

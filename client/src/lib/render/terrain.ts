@@ -82,21 +82,44 @@ const FRAG = `
     return vec2(p.x, 1.0 - p.y);
   }
 
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+
   void main() {
     vec2 cell = vec2(vUv.x, 1.0 - vUv.y) * mapSize;
     vec4 centerSample = texture(cells, lookup(cell));
-    float index = centerSample.r * 255.0;
-    if (centerSample.a > 0.5) {
-      vec2 nudged = cell + vec2(hash(floor(cell)) - 0.5, hash(floor(cell) + 19.0) - 0.5);
-      vec4 other = texture(cells, lookup(clamp(nudged, vec2(0.001), mapSize - 0.001)));
-      float pick = hash(floor(cell) + 4.0);
-      float centerLayer = centerSample.g * 255.0;
-      float otherLayer = other.g * 255.0;
-      float threshold = otherLayer > centerLayer + 0.5 ? 0.35 : 0.72;
-      index = pick > threshold ? other.r * 255.0 : index;
-    }
     vec2 tileUv = fract(cell);
-    fragColor = texture(tiles, vec3(tileUv, index));
+    vec4 centerColor = texture(tiles, vec3(tileUv, centerSample.r * 255.0));
+    if (centerSample.a < 0.5) {
+      fragColor = linearToOutputTexel(centerColor);
+      return;
+    }
+    // The same continuous world-space noise is used from both sides of an edge.
+    // A narrow feather blends forest into road while keeping a readable path center.
+    vec2 wander = vec2(noise(cell * 3.2), noise(cell * 3.2 + 37.0)) - 0.5;
+    vec2 sampleAt = cell + wander * 0.24;
+    vec4 color = vec4(0.0);
+    float total = 0.0;
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec2 neighbor = floor(cell) + vec2(float(x), float(y));
+        if (any(lessThan(neighbor, vec2(0.0))) || any(greaterThanEqual(neighbor, mapSize))) continue;
+        vec4 candidate = texture(cells, lookup(neighbor));
+        // Buildings retain crisp edges; a cliff never borrows the lower floor.
+        if (candidate.a < 0.5 || abs(candidate.b - centerSample.b) > 0.001) continue;
+        vec2 distanceToCenter = abs(sampleAt - (neighbor + 0.5));
+        vec2 feather = vec2(1.0) - smoothstep(vec2(0.22), vec2(0.78), distanceToCenter);
+        float weight = feather.x * feather.y;
+        color += texture(tiles, vec3(tileUv, candidate.r * 255.0)) * weight;
+        total += weight;
+      }
+    }
+    fragColor = linearToOutputTexel(total > 0.001 ? color / total : centerColor);
   }
 `;
 
@@ -155,7 +178,7 @@ export class TerrainLayer {
       this.rebuildChunk(id, layout, packs, heights, generation);
       terrainStats.rebuilds += 1;
     }
-    this.replaceRamps(layout);
+    this.replaceRamps(layout, packs, generation);
     this.shape = shape;
     this.heights = heights ? new Uint8Array(heights) : null;
     if (painted) void paintFiles(painted.data, painted.tiles, built.slices, generation, () => this.generation, () => this.onPaint());
@@ -177,7 +200,7 @@ export class TerrainLayer {
     this.chunks = [];
     if (this.ramps) {
       this.ramps.geometry.dispose();
-      (this.ramps.material as THREE.Material).dispose();
+      disposeRampMaterials(this.ramps.material);
       this.ramps.removeFromParent();
       this.ramps = null;
     }
@@ -284,16 +307,31 @@ export class TerrainLayer {
     }
   }
 
-  private replaceRamps(layout: MapLayout) {
+  private replaceRamps(layout: MapLayout, packs: Pack[], generation: number) {
     if (this.ramps) {
       this.ramps.geometry.dispose();
-      (this.ramps.material as THREE.Material).dispose();
+      disposeRampMaterials(this.ramps.material);
       this.ramps.removeFromParent();
       this.ramps = null;
     }
     const slopes = ramps(layout);
     if (!slopes) return;
-    this.ramps = new THREE.Mesh(slopes, new THREE.MeshBasicMaterial({ color: 0xc4b49a, side: THREE.DoubleSide }));
+    const stairs = (layout.stairs ?? []).filter((stair) => Math.abs(cellLevel(layout, stair.x, stair.y) - cellLevel(layout, stair.x2, stair.y2)) === 1);
+    const materials = stairs.map((stair) => {
+      const material = new THREE.MeshBasicMaterial({ color: 0x817157, side: THREE.DoubleSide });
+      const found = findIn(packs, stair.asset, (pack) => pack.objects ?? []);
+      const layer = found?.def.renderLayers.find((layer) => layer.kind === 'ground') ?? found?.def.renderLayers[0];
+      const url = found && layer ? fileUrl(found.pack, layer.file) : null;
+      if (url && found) void loadTexture(url, found.pack.filtering).then((texture) => {
+        if (!texture || generation !== this.generation) return;
+        material.map = texture;
+        material.color.set(0xffffff);
+        material.needsUpdate = true;
+        this.onPaint();
+      });
+      return material;
+    });
+    this.ramps = new THREE.Mesh(slopes, materials);
     this.ramps.userData.kind = 'stair';
     this.ramps.renderOrder = 1;
     this.scene.add(this.ramps);
@@ -327,7 +365,7 @@ function buildGround(layout: MapLayout, packs: Pack[]) {
     layers[index] = def.layer;
   }
   if (slices.length === 0) slices.push({ url: null, swatch: '#6e675f', filtering: 'linear' });
-  return { slices, chosen, organic, layers };
+  return { slices, chosen, organic, layers, heights: heightBytes(layout) };
 }
 
 function variantBytes(layout: MapLayout): Uint8Array {
@@ -551,7 +589,17 @@ function ramps(layout: MapLayout) {
   if (positions.length === 0) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const uvs: number[] = [];
+  for (let i = 0; i < positions.length / 18; i += 1) {
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1);
+    geometry.addGroup(i * 6, 6, i);
+  }
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   return geometry;
+}
+
+function disposeRampMaterials(material: THREE.Material | THREE.Material[]) {
+  for (const item of Array.isArray(material) ? material : [material]) item.dispose();
 }
 
 function fill(data: Uint8Array, layer: number, swatch: string) {
@@ -570,6 +618,7 @@ function writeCells(image: Uint8Array, built: ReturnType<typeof buildGround>) {
   for (let index = 0; index < built.chosen.length; index += 1) {
     image[index * 4] = built.chosen[index] ?? 0;
     image[index * 4 + 1] = built.layers[index] ?? 0;
+    image[index * 4 + 2] = built.heights?.[index] ?? 0;
     image[index * 4 + 3] = built.organic[index] ?? 0;
   }
 }

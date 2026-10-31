@@ -397,6 +397,11 @@ async function tablePass() {
   try {
     const ada = token('ada', 'Ada', 4.5, 4.5, '#d4a656');
     const lurker = token('lurker', 'Lurker', 8.5, 8.5, '#2244ff');
+    // WebSocket snapshots can precede the asynchronous asset catalog.
+    const beforeCatalog = view([ada, lurker], 12);
+    beforeCatalog.packs = [];
+    engine.sync(beforeCatalog);
+    await wait(40);
     engine.sync(view([ada, lurker], 12));
     engine.centerOn(4.5, 4.5);
     await wait(250);

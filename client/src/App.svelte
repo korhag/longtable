@@ -34,10 +34,14 @@
   import TokenPanel from './lib/ui/TokenPanel.svelte';
 
   let host: HTMLDivElement;
+  let viewportWidth = $state(1400);
+  let topHeight = $state(60);
+  let bottomHeight = $state(0);
   let topBar = $state<HTMLElement | undefined>();
   let bottomStrip = $state<HTMLElement | undefined>();
   let engine: TableEngine | undefined;
   let ready = $state(false);
+  let autoSelectedSeat = $state<string | null>(null);
   let measureLabel = $state<string | null>(null);
   let measureAt = $state({ x: 0, y: 0 });
   let aimPoint = $state<{ x: number; y: number } | null>(null);
@@ -242,6 +246,18 @@
   });
 
   $effect(() => {
+    const elements = [topBar, bottomStrip].filter((element): element is HTMLElement => !!element);
+    const update = () => {
+      topHeight = topBar?.offsetHeight ?? 60;
+      bottomHeight = bottomStrip?.offsetHeight ?? 0;
+    };
+    const observer = new ResizeObserver(update);
+    elements.forEach((element) => observer.observe(element));
+    update();
+    return () => observer.disconnect();
+  });
+
+  $effect(() => {
     if (!ready || !engine) return;
     layout.leftWidth;
     layout.rightWidth;
@@ -251,10 +267,10 @@
     table.joined;
     const gmTools = table.role === 'gm' && !table.viewAs;
     engine.setInsets({
-      left: gmTools ? layout.leftWidth : 0,
-      right: layout.rightWidth,
-      top: topBar?.offsetHeight ?? 52,
-      bottom: bottomStrip?.offsetHeight ?? 0,
+      left: layout.focusMode || !gmTools ? 0 : layout.leftOpen && viewportWidth >= 760 ? Math.min(layout.leftWidth, viewportWidth - 104) : 44,
+      right: layout.focusMode ? 0 : layout.rightOpen && viewportWidth >= 760 ? Math.min(layout.rightWidth, viewportWidth - 104) : 44,
+      top: topHeight,
+      bottom: layout.focusMode ? 0 : bottomHeight,
     });
   });
 
@@ -267,13 +283,18 @@
   const PlayChrome = $derived(playChromeFor(table.campaign.systemId));
 
   $effect(() => {
-    if (table.role !== 'player' || table.viewAs || table.selectedTokenId) return;
+    if (table.role !== 'player' || table.viewAs || table.selectedTokenId || autoSelectedSeat === table.playerId) return;
     const owned = table.tokens.filter((token) => token.ownerId === table.playerId);
     if (owned.length !== 1) return;
     const token = owned[0];
     if (!token) return;
+    autoSelectedSeat = table.playerId;
     table.selectedTokenId = token.id;
     if (token.characterId) systems.selectedId = token.characterId;
+  });
+
+  $effect(() => {
+    if (viewportWidth < 1000 && layout.leftOpen && layout.rightOpen) layout.rightOpen = false;
   });
 
   function mine() {
@@ -283,6 +304,8 @@
       ?? null;
   }
 </script>
+
+<svelte:window bind:innerWidth={viewportWidth} />
 
 <div class="relative h-full w-full">
   <div class="absolute inset-0" bind:this={host}></div>
@@ -300,7 +323,7 @@
         />
       </div>
       <div class="flex min-h-0 flex-1">
-        {#if table.role === 'gm' && !table.viewAs}
+        {#if table.role === 'gm' && !table.viewAs && !layout.focusMode}
           <Dock side="left">
             {#if modes.current === 'play'}
               <Panel id="play" title="Play" grow><GmToolbar /></Panel>
@@ -314,31 +337,31 @@
           </Dock>
         {/if}
         <div class="relative min-w-0 flex-1">
-          {#if PlayChrome && modes.current === 'play' && !editor.active}
+          {#if PlayChrome && modes.current === 'play' && !editor.active && !layout.focusMode}
             <PlayChrome {aimPoint} onCenter={(x, y) => engine?.centerOn(x, y)} />
           {/if}
-          {#if modes.current === 'rules' && table.role === 'gm' && !table.viewAs}
+          {#if modes.current === 'rules' && table.role === 'gm' && !table.viewAs && !layout.focusMode}
             <div class="pointer-events-none absolute inset-0 z-10 flex p-3">
               <RulesBoard />
             </div>
           {/if}
-          {#if !(modes.current === 'rules' && table.role === 'gm' && !table.viewAs)}
-          <div bind:this={bottomStrip} class="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-2 p-2">
+          {#if !layout.focusMode && !(modes.current === 'rules' && table.role === 'gm' && !table.viewAs)}
+          <div bind:this={bottomStrip} class="scene-command-strip">
             {#if table.selectedTokenId}
-              <div class="pointer-events-auto w-[min(22rem,40%)]">
-                <Panel id="token" title="Token"><TokenPanel /></Panel>
-              </div>
+              <div class="selection-slot"><TokenPanel /></div>
             {/if}
-            <div class="pointer-events-auto min-w-0 flex-1">
-              <Panel id="character" title="Character"><CharacterBar /></Panel>
-            </div>
+            {#if !editor.active && systems.active && (systems.chosen || table.role === 'gm' && !table.viewAs)}
+              <div class="character-slot"><CharacterBar /></div>
+            {/if}
           </div>
           {/if}
         </div>
+        {#if !layout.focusMode}
         <Dock side="right">
           <Panel id="rolls" title="Rolls" grow><RollLog /></Panel>
           <Panel id="dice" title="Dice"><DiceBar /></Panel>
         </Dock>
+        {/if}
       </div>
     </div>
 

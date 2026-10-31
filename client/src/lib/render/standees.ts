@@ -15,6 +15,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
 import { COS_ELEVATION, sceneBasis } from './cameraProfile';
 import { seen } from './seen';
+import { setWallCutaway } from './wallCutaway';
 import { standeeWorldSize, uprightPixels } from './view';
 
 const { right } = sceneBasis();
@@ -35,7 +36,7 @@ export class StandeeLayer {
     scene.add(this.group);
   }
 
-  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}) {
+  sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}, lowered: Set<string> = new Set()) {
     this.onPaint = onPaint;
     const wanted = new Map<string, { sig: string; visible: boolean; make: () => THREE.Group }>();
     if (layout) {
@@ -77,6 +78,7 @@ export class StandeeLayer {
       const existing = this.nodes.get(id);
       if (existing && existing.sig === spec.sig) {
         existing.group.visible = spec.visible;
+        setWallCutaway(existing.group, id.startsWith('piece:') && lowered.has(id.slice(6)));
         continue;
       }
       if (existing) {
@@ -85,6 +87,7 @@ export class StandeeLayer {
       }
       const group = spec.make();
       group.visible = spec.visible;
+      setWallCutaway(group, id.startsWith('piece:') && lowered.has(id.slice(6)));
       this.group.add(group);
       this.nodes.set(id, { sig: spec.sig, group });
     }

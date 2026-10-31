@@ -130,7 +130,7 @@
 </script>
 
 {#if system && (character || gm)}
-  <section class="glass pointer-events-auto rounded-2xl px-3 py-2">
+  <section class="character-command-bar glass pointer-events-auto rounded-2xl px-3 py-2">
     {#if !preview && strikeReady && table.strike}
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <p class="text-sm">{table.strike.targetName} takes {table.strike.step} damage, {table.strike.marks} HP.</p>

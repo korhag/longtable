@@ -64,20 +64,30 @@ export function fillTheme(
   next.cells = encodeCells(bytes);
 
   const rng = mulberry32(seed);
+  const brushedSet = new Set(brushed.map((cell) => cell.y * layout.width + cell.x));
+  const levels = layout.levels ? decodeCells(layout.levels) : new Uint8Array(layout.width * layout.height);
   const occupied: Mark[] = next.props.map((prop) => {
     const [w, d] = footprintOf(prop.asset);
     return { x: prop.x, y: prop.y, w, d, asset: prop.asset };
   });
   let serial = 0;
+  const ids = new Set(next.props.map((prop) => prop.id));
   for (const entry of entries) {
     const exact = (entry.density * brushed.length) / 10;
     let count = Math.floor(exact);
     if (rng() < exact - count) count += 1;
+    // A second pass fills gaps instead of piling another population on the same biome.
+    const existing = entry.kind === 'prop'
+      ? next.props.filter((prop) => prop.asset === entry.asset && brushedSet.has(Math.floor(prop.y) * layout.width + Math.floor(prop.x))).length
+      : next.decals.filter((decal) => decal.asset === entry.asset && brushedSet.has(Math.floor(decal.y) * layout.width + Math.floor(decal.x))).length;
+    count = Math.max(0, count - existing);
     for (let placed = 0; placed < count; placed += 1) {
-      const spot = place(next, brushed, entry, occupied, rng);
+      const spot = place(next, brushed, brushedSet, levels, entry, occupied, rng);
       if (!spot) continue;
       occupied.push({ ...spot, asset: entry.asset });
       if (entry.kind === 'prop') {
+        while (ids.has(`s${seed}-${serial}`)) serial += 1;
+        ids.add(`s${seed}-${serial}`);
         const prop: PlacedProp = { id: `s${seed}-${serial}`, asset: entry.asset, x: spot.x, y: spot.y, mirror: false };
         serial += 1;
         next.props.push(prop);
@@ -105,7 +115,7 @@ function ensureTerrain(layout: MapLayout, terrain: string) {
   return index;
 }
 
-function place(layout: MapLayout, brushed: Cell[], entry: ScatterEntry, occupied: Mark[], rng: () => number): Footprint | null {
+function place(layout: MapLayout, brushed: Cell[], brushedSet: Set<number>, levels: Uint8Array, entry: ScatterEntry, occupied: Mark[], rng: () => number): Footprint | null {
   const [w, d] = entry.footprint;
   for (let attempt = 0; attempt < 16; attempt += 1) {
     const cell = brushed[Math.floor(rng() * brushed.length)];
@@ -113,6 +123,19 @@ function place(layout: MapLayout, brushed: Cell[], entry: ScatterEntry, occupied
     const foot = { x: cell.x, y: cell.y, w, d };
     if (foot.x + w > layout.width || foot.y + d > layout.height) continue;
     if (blocksDoor(foot, layout)) continue;
+    // Keep the complete footprint inside the painted biome and on one tier.
+    let supported = true;
+    const level = levels[cell.y * layout.width + cell.x] ?? 0;
+    for (let y = foot.y; y < foot.y + d; y += 1) {
+      for (let x = foot.x; x < foot.x + w; x += 1) {
+        if (!brushedSet.has(y * layout.width + x) || (levels[y * layout.width + x] ?? 0) !== level) supported = false;
+      }
+    }
+    if (!supported) continue;
+    if (entry.kind === 'prop' && (layout.stairs ?? []).some((stair) => [ [stair.x, stair.y], [stair.x2, stair.y2] ].some(([x, y]) => x! >= foot.x && x! < foot.x + w && y! >= foot.y && y! < foot.y + d))) continue;
+    if (entry.kind === 'prop' && layout.pieces.some((piece) => piece.axis === 'h'
+      ? piece.y > foot.y && piece.y < foot.y + d && piece.x < foot.x + w && piece.x + 1 > foot.x
+      : piece.x > foot.x && piece.x < foot.x + w && piece.y < foot.y + d && piece.y + 1 > foot.y)) continue;
     if (entry.kind === 'prop' && occupied.some((other) => footprintsOverlap(foot, other))) continue;
     if (entry.spacing > 0 && occupied.some((other) => other.asset === entry.asset && Math.hypot(other.x - foot.x, other.y - foot.y) < entry.spacing)) {
       continue;

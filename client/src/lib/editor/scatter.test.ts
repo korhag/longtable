@@ -39,3 +39,27 @@ describe('scatter', () => {
     }
   });
 });
+
+it('keeps large objects inside the painted region and off split elevations', () => {
+  const layout = empty(8, 8);
+  const levels = new Uint8Array(64);
+  for (let y = 0; y < 8; y += 1) levels[y * 8 + 3] = 1;
+  layout.levels = encodeCells(levels);
+  const cells = Array.from({ length: 32 }, (_, i) => ({ x: i % 4, y: Math.floor(i / 4) }));
+  const painted = fillTheme(layout, cells, 'forest/forest-floor', [{ asset: 'forest/oak', density: 8, spacing: 0, kind: 'prop', footprint: [2, 2], rotate: false }], 9);
+  expect(painted.props.length).toBeGreaterThan(0);
+  for (const prop of painted.props) {
+    expect(prop.x).toBeLessThanOrEqual(1);
+    expect(prop.y).toBeLessThanOrEqual(6);
+  }
+});
+
+it('repainting a complete biome does not accumulate extra objects', () => {
+  const layout = empty(20, 20);
+  const cells = Array.from({ length: 400 }, (_, i) => ({ x: i % 20, y: Math.floor(i / 20) }));
+  const entries = [{ asset: 'forest/birch', density: 0.2, spacing: 2, kind: 'prop' as const, footprint: [1, 1] as [number, number], rotate: false }];
+  const once = fillTheme(layout, cells, 'forest/forest-floor', entries, 7);
+  expect(once.props).toHaveLength(8);
+  const twice = fillTheme(once, cells, 'forest/forest-floor', entries, 19);
+  expect(twice.props).toEqual(once.props);
+});

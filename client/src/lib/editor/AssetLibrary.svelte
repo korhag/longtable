@@ -4,6 +4,9 @@
   import { send } from '../net/socket';
   import { systems } from '../systems/store.svelte';
   import { table } from '../table.svelte';
+  import SheetImport from './SheetImport.svelte';
+
+  let showSheet = $state(false);
 
   let packs = $derived(editor.packs);
   let tab = $state<'tiles' | 'objects' | 'cast'>('tiles');
@@ -19,7 +22,7 @@
   const objects = $derived(visible.flatMap((pack) => (pack.objects ?? []).map((object) => ({ pack, object }))));
   const cast = $derived(visible.flatMap((pack) => (pack.cast ?? []).map((actor) => ({ pack, actor }))));
 
-  async function importPack(file: File) {
+  async function importPack(file: File): Promise<boolean> {
     error = '';
     const body = new FormData();
     body.append('pack', file);
@@ -30,11 +33,12 @@
     });
     if (!response.ok) {
       error = await response.text();
-      return;
+      return false;
     }
     const payload = (await response.json()) as { packs?: Pack[]; warnings?: string[] };
     editor.packs = payload.packs ?? editor.packs;
     error = payload.warnings?.join(' ') ?? '';
+    return true;
   }
 
   async function checkPack(file: File) {
@@ -153,6 +157,8 @@
       }}
     />
   </div>
+  <button class="btn quiet mt-2 w-full" type="button" aria-expanded={showSheet} onclick={() => (showSheet = !showSheet)}>{showSheet ? 'Close sheet importer' : 'Import sheet · automatic slicing'}</button>
+  {#if showSheet}<div class="mt-2"><SheetImport onimport={importPack} /></div>{/if}
   {#if error}
     <p class="mt-2 text-sm text-[var(--color-parchment)]">{error}</p>
   {/if}

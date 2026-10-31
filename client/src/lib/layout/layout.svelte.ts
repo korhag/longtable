@@ -19,6 +19,8 @@ interface SavedLayout {
   leftWidth?: number;
   rightWidth?: number;
   panels?: Record<string, PanelPlace>;
+  leftOpen?: boolean;
+  rightOpen?: boolean;
 }
 
 function read(): SavedLayout {
@@ -44,6 +46,9 @@ const EMPTY: PanelPlace = { floating: false, collapsed: false, x: 96, y: 72, w: 
 class LayoutStore {
   leftWidth = $state(clamp(saved.leftWidth, 240, 520, 320));
   rightWidth = $state(clamp(saved.rightWidth, 260, 520, 340));
+  leftOpen = $state(saved.leftOpen ?? false);
+  rightOpen = $state(saved.rightOpen ?? false);
+  focusMode = $state(false);
   panels = $state<Record<string, PanelPlace>>({ ...(saved.panels ?? {}) });
 
   place(id: string): PanelPlace {
@@ -62,11 +67,25 @@ class LayoutStore {
     this.save();
   }
 
+  toggleDock(side: 'left' | 'right') {
+    this.focusMode = false;
+    if (side === 'left') this.leftOpen = !this.leftOpen;
+    else this.rightOpen = !this.rightOpen;
+    if (window.innerWidth < 1000) {
+      if (side === 'left' && this.leftOpen) this.rightOpen = false;
+      if (side === 'right' && this.rightOpen) this.leftOpen = false;
+    }
+    this.save();
+  }
+
   reset() {
-    localStorage.removeItem(STORAGE_KEY);
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* Storage may be disabled. */ }
     this.leftWidth = 320;
     this.rightWidth = 340;
     this.panels = {};
+    this.leftOpen = false;
+    this.rightOpen = false;
+    this.focusMode = false;
   }
 
   private save() {
@@ -74,8 +93,10 @@ class LayoutStore {
       leftWidth: this.leftWidth,
       rightWidth: this.rightWidth,
       panels: this.panels,
+      leftOpen: this.leftOpen,
+      rightOpen: this.rightOpen,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch { /* Private browsing can disable storage. */ }
   }
 }
 

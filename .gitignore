@@ -13,5 +13,7 @@ config.toml
 assets/**/*.*
 !assets/**/*.json
 !assets/packs/ruin/**/*.png
+!assets/packs/forest/**/*.png
+!assets/packs/forest/README.md
 
 .DS_Store

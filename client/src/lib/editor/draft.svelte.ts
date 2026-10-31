@@ -9,7 +9,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedDecal } from '../net/bindings/PlacedDecal.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
 import { table } from '../table.svelte';
-import { brushCells, nearestEdge, type BrushSize, type Cell } from './brush';
+import { brushCells, floodCells, wallEdges, nearestEdge, type BrushSize, type Cell } from './brush';
 import { propMirror } from './placementRepair';
 import { clearVariantPins, pinVariant } from './variants';
 import { decodeCells, encodeCells } from './cells';
@@ -38,6 +38,8 @@ class EditorStore {
   active = $state(false);
   tool = $state<BuildTool>('theme');
   brush = $state<BrushSize>(3);
+  paintMode = $state<'brush' | 'fill'>('brush');
+  wallMode = $state<'freehand' | 'line' | 'room'>('line');
   themeId = $state('core/grassland');
   terrainId = $state('core/grass');
   wallId = $state('core/hedge');
@@ -45,7 +47,7 @@ class EditorStore {
   propId = $state('core/oak');
   decalId = $state('core/tuft');
   stairId = $state('');
-  tier = $state<1 | 2>(1);
+  tier = $state<0 | 1 | 2>(1);
   castId = $state('');
   lightRange = $state(6);
   lightColor = $state('#e8a04a');
@@ -63,6 +65,8 @@ class EditorStore {
   private stroke: Cell[] = [];
   private base: MapLayout | null = null;
   private painting = false;
+  private startPoint: Cell | null = null;
+  private lastPoint: Cell | null = null;
 
   async reloadPacks() {
     this.packs = await loadCatalog();
@@ -101,6 +105,32 @@ class EditorStore {
     this.past = [];
     this.future = [];
     await this.refresh();
+  }
+
+  async loadForestSample() {
+    if (this.draft && !(await this.save())) return;
+    try {
+      const response = await fetch('/api/samples/forest', { method: 'POST', headers: this.headers() });
+      if (!response.ok) { this.note = await response.text(); return; }
+      this.draft = normalize((await response.json()) as Draft);
+      this.past = [];
+      this.future = [];
+      this.ghost = [];
+      this.chooseTheme('forest/woodland');
+      this.stairId = 'forest/stairs';
+      this.note = 'The Old Road is on the table: four adventurers, four bandits, a cabin, and three connected heights. Switch to Play to explore.';
+      await this.refresh();
+    } catch { this.note = 'The forest encounter could not be loaded. Check the server connection.'; }
+  }
+
+  fillMap() {
+    if (!this.draft) return;
+    this.base = cloneLayout(this.draft.layout);
+    this.stroke = Array.from({ length: this.draft.layout.width * this.draft.layout.height }, (_, index) => ({ x: index % this.draft!.layout.width, y: Math.floor(index / this.draft!.layout.width) }));
+    if (this.tool === 'terrain') this.draft.layout = paintTerrain(this.base, this.stroke, this.terrainId);
+    this.finish();
+    this.base = null;
+    this.stroke = [];
   }
 
   async copyLive() {
@@ -185,6 +215,8 @@ class EditorStore {
       } else this.ghost = [];
       return;
     }
+    // PointerEvent.button is -1 during movement; the down event owns this stroke.
+    if (phase === 'move' && this.painting) button = 0;
     if (button === 2) {
       if (phase === 'down' && this.tool === 'prop') this.mirror = !this.mirror;
       if (phase === 'down' && this.tool === 'terrain') this.pinPicture(point);
@@ -195,14 +227,19 @@ class EditorStore {
       this.base = cloneLayout(current);
       this.stroke = [];
       this.painting = true;
+      this.startPoint = { ...point };
+      this.lastPoint = null;
       this.step(point);
     } else if (phase === 'move' && this.painting) {
       this.step(point);
     } else if (phase === 'up' && this.painting) {
+      this.step(point);
       this.finish();
       this.painting = false;
       this.base = null;
       this.stroke = [];
+      this.startPoint = null;
+      this.lastPoint = null;
     }
   }
 
@@ -239,17 +276,34 @@ class EditorStore {
     const base = this.base;
     if (!layout || !base || !this.draft) return;
     if (this.paints()) {
-      for (const cell of brushCells(point.x, point.y, this.brush, layout.width, layout.height)) {
-        if (!this.stroke.some((item) => item.x === cell.x && item.y === cell.y)) this.stroke.push(cell);
+      const bucket = this.paintMode === 'fill' && (this.tool === 'theme' || this.tool === 'terrain');
+      if (bucket && this.stroke.length > 0) return;
+      const cells = bucket
+        ? floodCells(point.x, point.y, base.width, base.height, decodeCells(base.cells), base.levels ? decodeCells(base.levels) : undefined)
+        : this.strokeCells(point, layout);
+      const marked = new Set(this.stroke.map((cell) => cell.y * layout.width + cell.x));
+      for (const cell of cells) {
+        if (!marked.has(cell.y * layout.width + cell.x)) { this.stroke.push(cell); marked.add(cell.y * layout.width + cell.x); }
       }
+      this.lastPoint = { ...point };
       this.ghost = this.stroke;
       if (this.tool === 'terrain') this.draft.layout = paintTerrain(base, this.stroke, this.terrainId);
       if (this.tool === 'raise') this.draft.layout = paintLevels(base, this.stroke, this.tier);
       return;
     }
     if (this.tool === 'wall') {
-      const edge = nearestEdge(point.x, point.y, layout.width, layout.height);
-      if (edge) this.draft.layout = addPiece(this.draft.layout, edge, 'wall', this.wallId);
+      if (this.wallMode === 'freehand') {
+        const start = this.lastPoint ?? point;
+        const steps = Math.max(1, Math.ceil(Math.hypot(point.x - start.x, point.y - start.y) * 3));
+        for (let i = 0; i <= steps; i += 1) {
+          const edge = nearestEdge(start.x + (point.x - start.x) * i / steps, start.y + (point.y - start.y) * i / steps, layout.width, layout.height);
+          if (edge) this.draft.layout = addPiece(this.draft.layout, edge, 'wall', this.wallId);
+        }
+      } else {
+        const edges = wallEdges(this.startPoint ?? point, point, this.wallMode, layout.width, layout.height);
+        this.draft.layout = edges.reduce((current, edge) => addPiece(current, edge, 'wall', this.wallId), base);
+      }
+      this.lastPoint = { ...point };
       return;
     }
     if (this.stroke.length > 0) return;
@@ -272,6 +326,16 @@ class EditorStore {
     } else if (this.tool === 'light') {
       this.draft.layout = addLight(layout, point.x, point.y, this.lightRange, this.lightColor);
     }
+  }
+
+  private strokeCells(point: Cell, layout: MapLayout): Cell[] {
+    const start = this.lastPoint ?? point;
+    const steps = Math.max(1, Math.ceil(Math.hypot(point.x - start.x, point.y - start.y) * 2));
+    const cells: Cell[] = [];
+    for (let i = 0; i <= steps; i += 1) {
+      cells.push(...brushCells(start.x + (point.x - start.x) * i / steps, start.y + (point.y - start.y) * i / steps, this.brush, layout.width, layout.height));
+    }
+    return cells;
   }
 
   private finish() {
@@ -365,7 +429,7 @@ function addPiece(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | '
   const index = next.pieces.findIndex((piece) => piece.x === edge.x && piece.y === edge.y && piece.axis === edge.axis);
   if (index >= 0) {
     const existing = next.pieces[index];
-    if (!existing || existing.kind === kind) return layout;
+    if (!existing || (existing.kind === kind && existing.asset === asset) || (kind === 'wall' && existing.kind === 'door')) return layout;
     next.pieces[index] = { ...existing, kind, asset, open: false };
     return next;
   }
@@ -509,6 +573,14 @@ function entriesFor(packs: Pack[], themeId: string): ScatterEntry[] {
   const theme = findIn(packs, themeId, (pack) => pack.themes);
   if (!theme) return [];
   return theme.def.scatter.flatMap((entry): ScatterEntry[] => {
+    const object = findIn(packs, entry.asset, (pack) => pack.objects ?? []);
+    if (object && object.def.kind === 'static') {
+      return [{ asset: entry.asset, density: entry.density, spacing: entry.spacing, kind: 'prop' as const, footprint: object.def.footprintCells, rotate: false }];
+    }
+    const tile = findIn(packs, entry.asset, (pack) => pack.tiles ?? []);
+    if (tile?.def.kind === 'overlay') {
+      return [{ asset: entry.asset, density: entry.density, spacing: entry.spacing, kind: 'decal' as const, footprint: [1, 1], rotate: true }];
+    }
     const prop = findIn(packs, entry.asset, (pack) => pack.props);
     if (prop) {
       return [{ asset: entry.asset, density: entry.density, spacing: entry.spacing, kind: 'prop' as const, footprint: prop.def.footprint, rotate: false }];

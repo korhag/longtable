@@ -52,7 +52,10 @@ const COMPOSITE = `
     for (int y = -1; y <= 1; y++) {
       for (int x = -1; x <= 1; x++) {
         if (x == 0 && y == 0) continue;
-        vec4 neighbor = texelFetch(castColor, here + ivec2(x, y), 0);
+        ivec2 sampleAt = here + ivec2(x, y);
+        ivec2 bounds = textureSize(castColor, 0);
+        vec4 neighbor = any(lessThan(sampleAt, ivec2(0))) || any(greaterThanEqual(sampleAt, bounds))
+          ? vec4(0.0) : texelFetch(castColor, sampleAt, 0);
         if (neighbor.a < 0.5 || neighbor.rgb != id.rgb) edge = true;
       }
     }
@@ -130,8 +133,14 @@ export class OcclusionOutlines {
       mesh.material = maskMaterial(mesh, mesh.userData.tokenId as string);
     }
     renderer.setRenderTarget(cast);
+    // The ID mask must have transparent background. An opaque clear color makes
+    // empty pixels look like a far-away character and outlines every visible body.
+    const clearColor = renderer.getClearColor(new THREE.Color());
+    const clearAlpha = renderer.getClearAlpha();
+    renderer.setClearColor(0x000000, 0);
     renderer.clear();
     renderer.render(this.scratch, camera);
+    renderer.setClearColor(clearColor, clearAlpha);
     for (const item of parked) {
       item.mesh.material = item.material;
       item.mesh.matrixAutoUpdate = true;
