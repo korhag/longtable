@@ -649,7 +649,7 @@
     },
     {
       "id": "cabin-desk",
-      "name": "Captain’s writing desk",
+      "name": "Captain\u2019s writing desk",
       "kind": "static",
       "placement": "cell",
       "footprintCells": [
@@ -876,6 +876,85 @@
             245
           ]
         }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/bandit-scout/animation-north.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              104,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/bandit-scout/animation-east.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              81,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/bandit-scout/animation-south.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              105,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/bandit-scout/animation-west.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              143,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
+        }
       }
     },
     {
@@ -930,6 +1009,85 @@
             80,
             245
           ]
+        }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/bandit-archer/animation-north.png",
+            "pixelsPerWorldUnit": 105.00000000000001,
+            "pivotPx": [
+              89,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/bandit-archer/animation-east.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              95,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/bandit-archer/animation-south.png",
+            "pixelsPerWorldUnit": 101.84965082842668,
+            "pivotPx": [
+              87,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/bandit-archer/animation-west.png",
+            "pixelsPerWorldUnit": 103.8091743119266,
+            "pivotPx": [
+              137,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
         }
       }
     },
@@ -986,6 +1144,85 @@
             245
           ]
         }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/bandit-brute/animation-north.png",
+            "pixelsPerWorldUnit": 98.10203651191676,
+            "pivotPx": [
+              119,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/bandit-brute/animation-east.png",
+            "pixelsPerWorldUnit": 99.63227147821283,
+            "pivotPx": [
+              85,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/bandit-brute/animation-south.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              117,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/bandit-brute/animation-west.png",
+            "pixelsPerWorldUnit": 101.55207892882311,
+            "pivotPx": [
+              155,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
+        }
       }
     },
     {
@@ -1040,6 +1277,85 @@
             80,
             245
           ]
+        }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/bandit-captain/animation-north.png",
+            "pixelsPerWorldUnit": 98.20351268469473,
+            "pivotPx": [
+              117,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/bandit-captain/animation-east.png",
+            "pixelsPerWorldUnit": 90.78843226788432,
+            "pivotPx": [
+              99,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/bandit-captain/animation-south.png",
+            "pixelsPerWorldUnit": 101.29177489177489,
+            "pivotPx": [
+              118,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/bandit-captain/animation-west.png",
+            "pixelsPerWorldUnit": 89.02721461187215,
+            "pivotPx": [
+              158,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
         }
       }
     },
@@ -1096,6 +1412,85 @@
             245
           ]
         }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/human/animation-north.png",
+            "pixelsPerWorldUnit": 103.92051534010263,
+            "pivotPx": [
+              102,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/human/animation-east.png",
+            "pixelsPerWorldUnit": 76.2280078243381,
+            "pivotPx": [
+              93,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/human/animation-south.png",
+            "pixelsPerWorldUnit": 99.68930686172064,
+            "pivotPx": [
+              101,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/human/animation-west.png",
+            "pixelsPerWorldUnit": 99.91382651316539,
+            "pivotPx": [
+              162,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
+        }
       }
     },
     {
@@ -1150,6 +1545,85 @@
             80,
             245
           ]
+        }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/elf/animation-north.png",
+            "pixelsPerWorldUnit": 94.63507109004739,
+            "pivotPx": [
+              104,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/elf/animation-east.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              94,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/elf/animation-south.png",
+            "pixelsPerWorldUnit": 98.44016282225238,
+            "pivotPx": [
+              91,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/elf/animation-west.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              161,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
         }
       }
     },
@@ -1206,6 +1680,85 @@
             245
           ]
         }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/dwarf/animation-north.png",
+            "pixelsPerWorldUnit": 105.00000000000001,
+            "pivotPx": [
+              86,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/dwarf/animation-east.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              82,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/dwarf/animation-south.png",
+            "pixelsPerWorldUnit": 105.00000000000001,
+            "pivotPx": [
+              79,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/dwarf/animation-west.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              142,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
+        }
       }
     },
     {
@@ -1260,6 +1813,85 @@
             80,
             245
           ]
+        }
+      },
+      "animations": {
+        "frameSizePx": [
+          256,
+          256
+        ],
+        "pivotPx": [
+          128,
+          224
+        ],
+        "pixelsPerWorldUnit": 105,
+        "columns": 4,
+        "rows": 6,
+        "views": {
+          "north": {
+            "file": "cast/orc/animation-north.png",
+            "pixelsPerWorldUnit": 105.00000000000001,
+            "pivotPx": [
+              102,
+              224
+            ]
+          },
+          "east": {
+            "file": "cast/orc/animation-east.png",
+            "pixelsPerWorldUnit": 96.94556926188068,
+            "pivotPx": [
+              108,
+              224
+            ]
+          },
+          "south": {
+            "file": "cast/orc/animation-south.png",
+            "pixelsPerWorldUnit": 105.0,
+            "pivotPx": [
+              120,
+              224
+            ]
+          },
+          "west": {
+            "file": "cast/orc/animation-west.png",
+            "pixelsPerWorldUnit": 99.76777429467084,
+            "pivotPx": [
+              153,
+              224
+            ]
+          }
+        },
+        "clips": {
+          "idle": {
+            "row": 0,
+            "frames": 4,
+            "fps": 4
+          },
+          "melee": {
+            "row": 1,
+            "frames": 4,
+            "fps": 8
+          },
+          "ranged": {
+            "row": 2,
+            "frames": 4,
+            "fps": 8
+          },
+          "move": {
+            "row": 3,
+            "frames": 4,
+            "fps": 8
+          },
+          "hurt": {
+            "row": 4,
+            "frames": 4,
+            "fps": 8
+          },
+          "spell": {
+            "row": 5,
+            "frames": 4,
+            "fps": 8
+          }
         }
       }
     }

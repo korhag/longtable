@@ -48,6 +48,95 @@
         }
       }
     },
-    "cast": { "type": "array" }
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "views"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "pixelsPerWorldUnit": { "type": "integer", "minimum": 1, "maximum": 4096 },
+          "suggestedFootprintCells": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 8 } },
+          "views": {
+            "type": "object",
+            "required": ["north", "east", "south", "west"],
+            "properties": {
+              "north": { "$ref": "#/$defs/castFrame" },
+              "east": { "$ref": "#/$defs/castFrame" },
+              "south": { "$ref": "#/$defs/castFrame" },
+              "west": { "$ref": "#/$defs/castFrame" }
+            }
+          },
+          "portrait": { "type": ["string", "null"] },
+          "animations": { "anyOf": [{ "$ref": "#/$defs/castAnimations" }, { "type": "null" }] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sizePx": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 2048 } },
+    "pivotPx": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 0, "maximum": 2047 }, "description": "Frame-local foot pixel. Check pack also requires each coordinate to be smaller than its frame dimension." },
+    "castFrame": {
+      "type": "object",
+      "required": ["file", "sizePx", "pivotPx"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "description": "Safe pack-relative PNG path." },
+        "sizePx": { "$ref": "#/$defs/sizePx" },
+        "pivotPx": { "$ref": "#/$defs/pivotPx" }
+      }
+    },
+    "animationClip": {
+      "type": "object",
+      "required": ["row", "frames", "fps"],
+      "properties": {
+        "row": { "type": "integer", "minimum": 0, "maximum": 15, "description": "Zero-based action row; must be less than atlas rows." },
+        "frames": { "type": "integer", "minimum": 1, "maximum": 16, "description": "Frames from column zero; must not exceed atlas columns." },
+        "fps": { "type": "number", "minimum": 1, "maximum": 30 }
+      }
+    },
+    "castAnimationView": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "description": "Safe pack-relative directional atlas PNG path." },
+        "pixelsPerWorldUnit": { "type": "number", "minimum": 1, "maximum": 4096, "description": "Optional fractional density; inherits the animation default when omitted." },
+        "pivotPx": { "$ref": "#/$defs/pivotPx", "description": "Optional frame-local foot pivot; inherits the animation default when omitted. Must be inside one frame." }
+      }
+    },
+    "castAnimations": {
+      "type": "object",
+      "description": "Four directional atlases with identical cells. Check pack requires PNG dimensions equal frameSizePx multiplied by columns/rows, each side at most 2048 pixels, and counts every atlas against the 256 MiB decoded pack budget.",
+      "required": ["frameSizePx", "pivotPx", "pixelsPerWorldUnit", "columns", "rows", "views", "clips"],
+      "properties": {
+        "frameSizePx": { "$ref": "#/$defs/sizePx" },
+        "pivotPx": { "$ref": "#/$defs/pivotPx" },
+        "pixelsPerWorldUnit": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "rows": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "views": {
+          "type": "object",
+          "required": ["north", "east", "south", "west"],
+          "properties": {
+            "north": { "$ref": "#/$defs/castAnimationView" },
+            "east": { "$ref": "#/$defs/castAnimationView" },
+            "south": { "$ref": "#/$defs/castAnimationView" },
+            "west": { "$ref": "#/$defs/castAnimationView" }
+          }
+        },
+        "clips": {
+          "type": "object",
+          "required": ["idle", "melee", "ranged", "move", "hurt", "spell"],
+          "properties": {
+            "idle": { "$ref": "#/$defs/animationClip" },
+            "melee": { "$ref": "#/$defs/animationClip" },
+            "ranged": { "$ref": "#/$defs/animationClip" },
+            "move": { "$ref": "#/$defs/animationClip" },
+            "hurt": { "$ref": "#/$defs/animationClip" },
+            "spell": { "$ref": "#/$defs/animationClip" }
+          }
+        }
+      }
+    }
   }
 }

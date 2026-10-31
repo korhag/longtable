@@ -12,6 +12,8 @@ The cabin has full-height log walls and a framed oak door taller than the human 
 
 Load a fresh forest encounter after pulling an update to see the revised layout and furnishings. Previously saved scenes keep their existing placements.
 
+The fresh cast includes editable Daggerheart demonstration stats: attacks, damage, thresholds and marked HP. A campaign without a chosen rules system starts using Daggerheart; an existing rules choice is preserved. These are showroom builds, not official adversary stat blocks.
+
 ## Paint a woodland
 
 Select **Ancient woodland** under Biomes. Brush paints a continuous stroke and places spaced trees; Bucket fills the connected ground region; Whole map fills the draft. Variant selection is deterministic, and repeated biome painting respects existing objects. For an unobstructed path, choose **Old cobbled road** under Ground and paint with a wide brush. Forest and road edges blend organically; cabin boards stay crisp.
@@ -49,3 +51,21 @@ Click clear ground to move the selected figure, or drag it to a destination. Wal
 Right-click a character for the action dial. It shows selection, targeting, character sheet and available rules actions for that character and the selected actor. Right-click ground for **Move here**, **Center view**, and the GM's explicit **Teleport** option. Teleport bypasses the route; use ordinary movement to walk through the scene. Escape or a click outside closes the dial.
 
 Movement animates locally along the route. Reduced-motion preferences keep movement immediate. Rendering reuses scenery, textures, elevation grids and silhouette masks; stationary lighting updates are capped, and hidden tabs stop drawing. See [performance notes](rendering-performance.md) for the measured checks and limits.
+
+## Character animation
+
+All eight characters have newly drawn frames for idle, melee attack, ranged attack, movement, taking damage and spellcasting in all four directions. The pack includes 32 animation sheets containing 768 frames. Right-click a controllable character and open **Animations** to preview each state; previews do not roll dice or change game stats. Walking and combat also trigger animations. Spellcasting currently runs through the preview menu. Reduced-motion preferences hold a still pose.
+
+See [asset size measurements](animation-assets.md) for the before/after count and download size.
+
+## Roll and apply damage
+
+In Daggerheart, attack a targeted character through the action dial. Once the attack dice settle on a hit, **Roll damage** appears directly below the dice. Nothing damages the target until that button is pressed. A miss has no damage button.
+
+The damage result shows the target's thresholds and the HP actually marked. Damage below Major marks 1 HP, meeting Major marks 2, and meeting Severe marks 3; zero damage marks none. Adversaries receive these marks immediately. Critical hits add the maximum of the damage dice, and PCs with available armor can answer the armor prompt. Each successful attack permits one damage roll, including after reconnecting.
+
+## Each player's sight
+
+Select an adventurer, expand **Figure details**, and choose its player under **Owner**. This assigns the linked character sheet, combat actions and all its figures in the campaign's scenes together; changing the sheet's owner does the same. Unlinked figures keep independent owners. Leave vision enabled. A seat sees from its own figures; an unowned figure does not grant everyone sight. The GM can use **View as** to inspect an individual player's view.
+
+Trees, rocks, cabin walls, closed doors and terrain block sight according to their height. Unseen areas are dark; explored areas outside current sight remain dim, including upright scenery. Another player's exploration does not reveal your map. The GM's explicit reveal brush remains shared. Opening the cabin door or moving around an obstacle updates the view, and personal exploration persists when switching scenes or reloading.

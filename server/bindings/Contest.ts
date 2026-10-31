@@ -4,8 +4,16 @@ import type { Blow } from "./Blow.ts";
 /**
  * An attack, or the damage roll that followed a hit.
  */
-export type Contest = { attackerId: string, attackerName: string, targetId: string, targetName: string, defenseName: string, defense: number, 
+export type Contest = { attackerId: string, attackerName: string, targetId: string, targetName: string, defenseName: string, defense: number,
 /**
  * `hit` or `miss` on an attack. Empty on a damage roll.
  */
-verdict: string | null, blow: Blow | null, };
+verdict: string | null, blow: Blow | null,
+/**
+ * The successful attack consumed by this damage roll.
+ */
+attackRollId: string | null,
+/**
+ * A hit can authorize damage once, including across reconnects and saves.
+ */
+damageRolled: boolean, };

@@ -9,7 +9,7 @@ mod attack;
 
 use crate::dice::{RollFormula, ThrownDie};
 
-pub use attack::{attack_formula, attack_hits, damage_formula, defense_of};
+pub use attack::{adversary_critical, attack_formula, attack_hits, critical_damage_formula, damage_formula, deals_direct_damage, defense_of};
 
 use super::rules::{RollOutcome, Rules};
 

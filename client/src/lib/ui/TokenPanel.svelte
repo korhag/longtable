@@ -141,6 +141,7 @@
             <option value={player.id}>{player.name}</option>
           {/each}
         </select>
+        {#if token.characterId}<span class="mt-1 block text-xs normal-case tracking-normal text-[var(--color-parchment)]/60">Assigns the character sheet and its figures together.</span>{/if}
       </label>
       <label class="mt-2 block text-sm tracking-wide text-[var(--color-gold)]/70 uppercase">Character
         <select

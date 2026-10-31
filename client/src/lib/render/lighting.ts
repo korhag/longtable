@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { MapLayout } from '../net/bindings/MapLayout';
 import type { FogView } from '../net/bindings/FogView';
 import { supportHeight } from './levels';
-import { seen } from './seen';
+import { inSight } from './seen';
 
 export const MAX_ACTIVE_LIGHTS = 32;
 export type SourceKind = 'steady' | 'torch' | 'magic';
@@ -164,7 +164,7 @@ export class SceneLighting {
 
   private syncMarkers() {
     this.clearMarkers();
-    const visible = this.selected.filter(({ light }) => this.showAll || seen(this.fog, light.x, light.y));
+    const visible = this.selected.filter(({ light }) => this.showAll || inSight(light, this.fog));
     if (!this.glowTexture && visible.length) {
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
       const context = canvas.getContext('2d')!;

@@ -105,6 +105,38 @@ The cabin furnishings are ordinary reusable object assets. The bed occupies 2×3
 
 A cast entry has four views: `north`, `east`, `south`, and `west`. Each view has a `file`, `sizePx`, and `pivotPx`, with the same pivot rule as an object.
 
+The four static views remain the library preview and fallback. The simple **Import sheet → Cast** layout is still four directional columns, one character per row. To install drawn animation frames, include four directional PNG atlases and an optional `animations` entry in a schema-2 ZIP, then use **Check pack** and **Import pack**.
+
+```json
+"animations": {
+  "frameSizePx": [256, 256],
+  "pivotPx": [128, 224],
+  "pixelsPerWorldUnit": 128,
+  "columns": 4,
+  "rows": 6,
+  "views": {
+    "north": { "file": "cast/bandit/animation-north.png" },
+    "east": { "file": "cast/bandit/animation-east.png", "pixelsPerWorldUnit": 96.75, "pivotPx": [128, 224] },
+    "south": { "file": "cast/bandit/animation-south.png" },
+    "west": { "file": "cast/bandit/animation-west.png" }
+  },
+  "clips": {
+    "idle":   { "row": 0, "frames": 4, "fps": 4 },
+    "melee":  { "row": 1, "frames": 4, "fps": 8 },
+    "ranged": { "row": 2, "frames": 4, "fps": 8 },
+    "move":   { "row": 3, "frames": 4, "fps": 8 },
+    "hurt":   { "row": 4, "frames": 4, "fps": 8 },
+    "spell":  { "row": 5, "frames": 4, "fps": 8 }
+  }
+}
+```
+
+Each atlas in this example is exactly **1024 × 1536 pixels**: four frames across and six action rows down. Rows and columns start at zero; each clip starts in column zero and plays `frames` cells left to right. Idle and move loop; the other actions finish and return to idle. Draw distinct poses on a transparent background with no borders, labels, margin or gutter between cells. Keep the feet on the same frame-local pivot in every cell, and leave transparent padding inside the cells for weapons and spell effects. Directional atlases share the declared frame dimensions and action rows. The renderer changes atlas UVs directly, so the pack needs four atlas files per character rather than separate files for every frame.
+
+Each directional view is an object with a required `file`. Its optional `pixelsPerWorldUnit` and `pivotPx` override the animation's shared defaults. Fractional directional densities are supported: when wide attack poses require shrinking an entire directional atlas, reduce its density by the same factor so the character keeps its world size. Calibrate against the standing body height, not the weapon or spell bounds. The foot pivot can differ by direction but must stay inside one frame; all poses in that direction use it.
+
+The checker requires all four views and all six clips when `animations` is present. Grid dimensions are 1–16, frame counts must fit their row, FPS is 1–30, and the complete atlas must fit within 2048 × 2048 pixels. Shared `pixelsPerWorldUnit` is an integer from 1–4096; directional overrides can be fractional, finite numbers in that range. Animation density is independent of the static preview resolution. Every PNG counts toward the pack's 256 MiB decoded RGBA budget. Packs without `animations` continue to use the runtime fallback. See [animation sizes and limitations](animation-assets.md).
+
 North is toward the top of the map, which is negative Z. East is positive X. South is positive Z. West is negative X. When a figure moves, the larger step picks the facing. A tie keeps the previous facing.
 
 `suggestedFootprintCells` is the body on the ground. A one-cell figure stands on a square center. An even body, such as the ruin Brute at 2 by 2, stands on the corner between squares. The picture does not change that size. The whole body has to stand on one height. A move or a map update that would split it across two levels is refused, and the figure stays put.

@@ -14,7 +14,8 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { CUTOUT_RIGHT, CUTOUT_TOWARD, CUTOUT_UP, cutoutMaterial, opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { structureGeometry, structureTexture } from './architecture';
 import { cellLevel, SUPPORT_CLEARANCE, supportHeight } from './levels';
-import { seen } from './seen';
+import { blockerBrightness, edgeBrightness, sceneryBrightness } from './seen';
+import { setSceneryColor, shadeScenery } from './fogShade';
 import { setWallCutaway } from './wallCutaway';
 
 export const objectStats = { rebuilds: 0, instances: 0 };
@@ -28,6 +29,7 @@ const scratchPosition = new THREE.Vector3();
 const scratchScale = new THREE.Vector3(1, 1, 1);
 const hiddenScale = new THREE.Vector3(0, 0, 0);
 const scratchMatrix = new THREE.Matrix4();
+const scratchColor = new THREE.Color();
 
 export class SceneObjects {
   private group = new THREE.Group();
@@ -43,8 +45,8 @@ export class SceneObjects {
 
   sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void, lowered: Set<string> = new Set()) {
     const generation = this.generation;
-    const wanted = new Map<string, { sig: string; visible: boolean; door: boolean; make: () => THREE.Group }>();
-    const placed = new Map<string, { sig: string; matrices: THREE.Matrix4[]; layer: ObjectLayer; pack: Pack; pixels: number }>();
+    const wanted = new Map<string, { sig: string; brightness: number; door: boolean; make: () => THREE.Group }>();
+    const placed = new Map<string, { sig: string; matrices: THREE.Matrix4[]; shades: number[]; layer: ObjectLayer; pack: Pack; pixels: number }>();
     if (layout) {
       for (const prop of layout.props) {
         const found = findIn(packs, prop.asset, (pack) => pack.objects ?? []);
@@ -53,12 +55,16 @@ export class SceneObjects {
         const x = prop.x + origin[0];
         const z = prop.y + origin[1];
         const height = supportHeight(layout, x, z);
-        const visible = showAll || seen(fog, x, z);
+        const brightness = showAll ? 1 : found.def.blocksVision
+          ? blockerBrightness(fog, x, z, found.def.footprintCells, found.def.collisionPolygon)
+          : sceneryBrightness(fog, x, z);
         found.def.renderLayers.forEach((layer, index) => {
           const key = `${prop.asset}:${index}:${layer.file}:${layer.kind}:${found.def.pixelsPerWorldUnit ?? 128}:${found.pack.contentHash ?? ''}`;
-          const bucket = placed.get(key) ?? { sig: '', matrices: [], layer, pack: found.pack, pixels: found.def.pixelsPerWorldUnit ?? 128 };
-          bucket.matrices.push(instanceMatrix(x, height, z, layer, visible));
-          bucket.sig += `${prop.id}@${x},${height},${z},${visible ? 1 : 0};`;
+          const bucket = placed.get(key) ?? { sig: '', matrices: [], shades: [], layer, pack: found.pack, pixels: found.def.pixelsPerWorldUnit ?? 128 };
+          bucket.matrices.push(instanceMatrix(x, height, z, layer, brightness > 0));
+          // Ground layers already receive the surface fog; only upright layers need a tint.
+          bucket.shades.push(layer.kind === 'ground' ? 1 : brightness);
+          bucket.sig += `${prop.id}@${x},${height},${z},${brightness};`;
           placed.set(key, bucket);
         });
       }
@@ -72,7 +78,7 @@ export class SceneObjects {
         const sig = `${piece.asset}:${piece.axis}:${piece.x},${piece.y}:${open ? 1 : 0}:${height}:${found.pack.contentHash ?? ''}`;
         wanted.set(piece.id, {
           sig,
-          visible: showAll || seen(fog, midX, midY),
+          brightness: showAll ? 1 : edgeBrightness(fog, midX, midY, piece.axis),
           door: piece.kind === 'door',
           make: () => this.pieceGroup(piece.axis, piece.x, piece.y, height, open, found.def, found.pack, generation, onPaint),
         });
@@ -88,7 +94,8 @@ export class SceneObjects {
     for (const [id, spec] of wanted) {
       const existing = this.nodes.get(id);
       if (existing && existing.sig === spec.sig) {
-        existing.group.visible = spec.visible;
+        existing.group.visible = spec.brightness > 0;
+        shadeScenery(existing.group, spec.brightness);
         setWallCutaway(existing.group, lowered.has(id));
         continue;
       }
@@ -98,7 +105,8 @@ export class SceneObjects {
       }
       const group = spec.make();
       if (spec.door) group.userData.doorId = id;
-      group.visible = spec.visible;
+      group.visible = spec.brightness > 0;
+      shadeScenery(group, spec.brightness);
       setWallCutaway(group, lowered.has(id));
       this.group.add(group);
       this.nodes.set(id, { sig: spec.sig, group });
@@ -138,7 +146,7 @@ export class SceneObjects {
   }
 
   private syncBatches(
-    placed: Map<string, { sig: string; matrices: THREE.Matrix4[]; layer: ObjectLayer; pack: Pack; pixels: number }>,
+    placed: Map<string, { sig: string; matrices: THREE.Matrix4[]; shades: number[]; layer: ObjectLayer; pack: Pack; pixels: number }>,
     generation: number,
     onPaint: () => void,
   ) {
@@ -151,7 +159,7 @@ export class SceneObjects {
       const existing = this.batches.get(key);
       if (existing?.sig === spec.sig) continue;
       if (existing && existing.capacity >= spec.matrices.length) {
-        writeInstances(existing.mesh, spec.matrices);
+        writeInstances(existing.mesh, spec.matrices, spec.shades);
         existing.sig = spec.sig;
         continue;
       }
@@ -161,7 +169,7 @@ export class SceneObjects {
       const mesh = new THREE.InstancedMesh(geometry, material, Math.max(spec.matrices.length, 1));
       mesh.frustumCulled = false;
       mesh.renderOrder = spec.layer.kind === 'ground' ? 1 : 3;
-      writeInstances(mesh, spec.matrices);
+      writeInstances(mesh, spec.matrices, spec.shades);
       this.group.add(mesh);
       this.batches.set(key, { sig: spec.sig, capacity: mesh.count, mesh, material, geometry });
       objectStats.rebuilds += 1;
@@ -196,7 +204,8 @@ export class SceneObjects {
       if (url) void loadTexture(url, pack.filtering).then(texture => {
         if (!texture || generation !== this.generation || !mesh.parent) return;
         material.map = structureTexture(texture);
-        material.color.set(0xffffff);
+        setSceneryColor(material, 0xffffff);
+        shadeScenery(group, group.userData.fogBrightness ?? 1);
         material.needsUpdate = true;
         onPaint();
       });
@@ -260,10 +269,14 @@ function instanceMatrix(x: number, height: number, z: number, layer: ObjectLayer
   return scratchMatrix.clone();
 }
 
-function writeInstances(mesh: THREE.InstancedMesh, matrices: THREE.Matrix4[]) {
-  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+function writeInstances(mesh: THREE.InstancedMesh, matrices: THREE.Matrix4[], shades: number[]) {
+  matrices.forEach((matrix, index) => {
+    mesh.setMatrixAt(index, matrix);
+    mesh.setColorAt(index, scratchColor.setScalar(shades[index] ?? 1));
+  });
   mesh.count = matrices.length;
   mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }
 
 function disposeBatch(batch: Batch) {

@@ -24,7 +24,7 @@ use crate::systems::{
     SystemDef,
     Campaign,
 };
-use crate::vision::{cells_for, point_in_poly, reveal_height, sees_actor, visibility_polygon, Explored, CELLS_PER_SQUARE, TALL_WALL};
+use crate::vision::{cells_for, point_in_poly, reveal_height, sees_actor, visibility_polygon, Explored, TALL_WALL};
 
 use super::permissions::{can_see_roll, conceal_notice, snapshot};
 
@@ -126,6 +126,8 @@ pub struct PendingStrike {
     pub target_id: String,
     pub step: String,
     pub marks: i32,
+    #[serde(default)]
+    pub damage_roll_id: Option<String>,
 }
 
 /// One number, as it was before the last mark.
@@ -147,6 +149,8 @@ pub struct AttackPlan {
     pub label: String,
     pub contest: Contest,
     pub damage: bool,
+    pub direct: bool,
+    pub adversary: bool,
 }
 
 /// Who is asking, and whose eyes the map should use.
@@ -202,6 +206,21 @@ pub struct CampaignShelf {
     pub scenes: Vec<SceneShelf>,
 }
 
+/// Explored terrain belongs to a seat, not to the whole party. Explicit GM
+/// brush reveals are shared. Entries are keyed by scene so switching maps or
+/// campaigns never exchanges one map's memory with another's.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SceneFog {
+    pub revealed: Explored,
+    pub seats: HashMap<String, Explored>,
+}
+
+impl SceneFog {
+    fn new(width: u32, height: u32) -> Self {
+        Self { revealed: Explored::new(width, height), seats: HashMap::new() }
+    }
+}
+
 pub struct Table {
     pub passphrase: String,
     pub gm_key: String,
@@ -209,6 +228,7 @@ pub struct Table {
     pub scene: Option<Scene>,
     pub tokens: Vec<Token>,
     pub explored: Explored,
+    pub fog_memory: HashMap<String, SceneFog>,
     pub rolls: Vec<StoredRoll>,
     pub campaign: Campaign,
     /// Scenes in the live campaign, other than the one on the table.
@@ -233,11 +253,13 @@ pub struct Table {
     sight_cache: RefCell<SightCache>,
     /// Cast id to gameplay footprint. Not saved. Filled when the library loads.
     cast_footprints: HashMap<String, [u32; 2]>,
+    /// Claims while dice simulate. Persist the consumed flag only with the resulting damage.
+    damage_in_flight: HashSet<String>,
 }
 
 struct SightCache {
     explored_stamp: Option<u64>,
-    masks: HashMap<String, (u64, String)>,
+    masks: HashMap<String, (u64, Explored)>,
 }
 
 fn roll_speech(roll: &RollEvent) -> String {
@@ -385,7 +407,7 @@ fn same_point(a: &Vec2, b: &Vec2) -> bool {
 }
 
 fn grants_for(token: &Token, viewer_id: &str) -> bool {
-    token.grants_vision && !token.hidden && (token.owner_id.is_none() || token.owner_id.as_deref() == Some(viewer_id))
+    token.grants_vision && !token.hidden && token.owner_id.as_deref() == Some(viewer_id)
 }
 
 fn same_edge(span: &SightBlock, wall: &Segment) -> bool {
@@ -414,6 +436,7 @@ impl Table {
             scene: None,
             tokens: Vec::new(),
             explored: Explored::new(width, height),
+            fog_memory: HashMap::new(),
             rolls: Vec::new(),
             campaign: Campaign {
                 id: Uuid::new_v4().to_string(),
@@ -437,6 +460,7 @@ impl Table {
             next_color: 0,
             sight_cache: RefCell::new(SightCache { explored_stamp: None, masks: HashMap::new() }),
             cast_footprints: HashMap::new(),
+            damage_in_flight: HashSet::new(),
         }
     }
 
@@ -464,7 +488,41 @@ impl Table {
         let (cells_w, cells_h) = cells_for(width, height);
         if self.explored.width != cells_w || self.explored.height != cells_h {
             self.explored.resize(cells_w, cells_h);
+            self.sight_cache.borrow_mut().explored_stamp = None;
+            self.sight_cache.borrow_mut().masks.clear();
         }
+        self.scene_fog_mut();
+    }
+
+    fn fog_key(&self) -> String {
+        self.scene.as_ref().map(|scene| scene.id.clone())
+            .unwrap_or_else(|| format!("unmapped:{}", self.campaign.id))
+    }
+
+    fn scene_fog_mut(&mut self) -> &mut SceneFog {
+        let key = self.fog_key();
+        let (width, height) = (self.explored.width, self.explored.height);
+        let mut reset = !self.fog_memory.contains_key(&key);
+        let memory = self.fog_memory.entry(key).or_insert_with(|| SceneFog::new(width, height));
+        if memory.revealed.width != width || memory.revealed.height != height {
+            *memory = SceneFog::new(width, height);
+            reset = true;
+        }
+        if reset {
+            self.sight_cache.borrow_mut().explored_stamp = None;
+        }
+        memory
+    }
+
+    pub(crate) fn explored_for(&self, viewer_id: &str) -> Explored {
+        let mut explored = Explored::new(self.explored.width, self.explored.height);
+        if let Some(memory) = self.fog_memory.get(&self.fog_key()) {
+            explored.merge(&memory.revealed);
+            if let Some(personal) = memory.seats.get(viewer_id) {
+                explored.merge(personal);
+            }
+        }
+        explored
     }
 
     // --------------------------------------------------------
@@ -847,6 +905,20 @@ impl Table {
     }
 
     pub fn commit_roll(&mut self, roll: &RollEvent) {
+        if let Some(contest) = roll.contest.as_ref().filter(|contest| contest.blow.is_some()) {
+            if let Some(id) = &contest.attack_roll_id {
+                self.damage_in_flight.remove(id);
+                if let Some(attack) = self.rolls.iter_mut().find(|roll| &roll.id == id).and_then(|roll| roll.contest.as_mut()) {
+                    attack.damage_rolled = true;
+                }
+            }
+        }
+        if let (Some(pending), Some(contest)) = (&mut self.strike, &roll.contest) {
+            if pending.damage_roll_id.is_none() && pending.target_id == contest.target_id
+                && contest.blow.as_ref().is_some_and(|blow| blow.pending_armor) {
+                pending.damage_roll_id = Some(roll.id.clone());
+            }
+        }
         self.rolls.push(StoredRoll {
             id: roll.id.clone(),
             roller_id: roll.roller_id.clone(),
@@ -1049,6 +1121,15 @@ impl Table {
         for cell in cells {
             self.explored.set(cell.x, cell.y, reveal);
         }
+        let memory = self.scene_fog_mut();
+        for cell in cells {
+            memory.revealed.set(cell.x, cell.y, reveal);
+            if !reveal {
+                for explored in memory.seats.values_mut() {
+                    explored.set(cell.x, cell.y, false);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1143,6 +1224,7 @@ impl Table {
             self.require_gm(viewer)?;
         }
         let owner_id = self.known_owner(owner_id)?;
+        let owner_changed = clear_owner || owner_id.is_some();
         if !clear_character {
             if let Some(id) = &character_id {
                 if !self.characters.iter().any(|character| &character.id == id) {
@@ -1190,6 +1272,12 @@ impl Table {
         }
         if let Some(facing) = facing {
             token.facing = cardinal_facing(0.0, 0.0, 0.0, 0.0, &facing);
+        }
+        let linked_owner = if owner_changed {
+            token.character_id.clone().map(|id| (id, token.owner_id.clone()))
+        } else { None };
+        if let Some((character_id, owner_id)) = linked_owner {
+            self.assign_character_owner(&character_id, owner_id);
         }
         if !own_turn {
             self.reveal_from_tokens();
@@ -1346,8 +1434,7 @@ impl Table {
             visual_profile: DIMETRIC_PROFILE.to_string(),
         });
         if let Some(memory) = memory {
-            self.explored = memory;
-            self.reveal_from_tokens();
+            self.explored.merge(&memory);
         }
         Ok(id)
     }
@@ -1387,35 +1474,37 @@ impl Table {
     // --------------------------------------------------------
 
     pub fn reveal_from_tokens(&mut self) {
-        if self.uses_height_sight() {
-            let stamp = self.sight_inputs();
-            if self.sight_cache.borrow().explored_stamp == Some(stamp) {
-                return;
-            }
-            let spans = self.sight_spans();
-            let layout = self.sight_layout();
-            let eyes: Vec<(f32, f32, f32)> = self
-                .tokens
-                .iter()
-                .filter(|token| token.grants_vision && !token.hidden)
-                .map(|token| (token.x, token.y, token.vision_radius))
-                .collect();
-            for (x, y, radius) in eyes {
-                reveal_height(&mut self.explored, None, x, y, radius, &layout, &spans);
-            }
-            self.sight_cache.borrow_mut().explored_stamp = Some(stamp);
+        self.sync_fog_size();
+        let stamp = self.sight_inputs();
+        if self.sight_cache.borrow().explored_stamp == Some(stamp) {
             return;
         }
-        let walls = self.blocking_walls();
-        let polygons: Vec<Vec<Vec2>> = self
-            .tokens
-            .iter()
-            .filter(|token| token.grants_vision && !token.hidden)
-            .map(|token| visibility_polygon(Vec2::new(token.x, token.y), token.vision_radius, &walls))
-            .collect();
-        for polygon in polygons {
-            self.explored.paint_polygon(&polygon);
+        let layout = self.uses_height_sight().then(|| self.sight_layout());
+        let spans = if layout.is_some() { self.sight_spans() } else { Vec::new() };
+        let walls = if layout.is_none() { self.blocking_walls() } else { Vec::new() };
+        let (width, height) = (self.explored.width, self.explored.height);
+        let mut masks: HashMap<String, Explored> = HashMap::new();
+        for eye in self.tokens.iter().filter(|token| token.grants_vision && !token.hidden) {
+            let mut visible = Explored::new(width, height);
+            if let Some(layout) = &layout {
+                reveal_height(&mut self.explored, Some(&mut visible), eye.x, eye.y, eye.vision_radius, layout, &spans);
+            } else {
+                visible.paint_polygon(&visibility_polygon(Vec2::new(eye.x, eye.y), eye.vision_radius, &walls));
+                self.explored.merge(&visible);
+            }
+            if let Some(owner) = &eye.owner_id {
+                masks.entry(owner.clone()).or_insert_with(|| Explored::new(width, height)).merge(&visible);
+            }
         }
+        let memory = self.scene_fog_mut();
+        for (owner, visible) in &masks {
+            memory.seats.entry(owner.clone()).or_insert_with(|| Explored::new(width, height)).merge(visible);
+        }
+        // The same current masks serve snapshots, so a move does one sight pass
+        // per eye, rather than recomputing the ray field for every connection.
+        let mut cache = self.sight_cache.borrow_mut();
+        cache.masks = masks.into_iter().map(|(owner, mask)| (owner, (stamp, mask))).collect();
+        cache.explored_stamp = Some(stamp);
     }
 
     pub(crate) fn uses_height_sight(&self) -> bool {
@@ -1445,7 +1534,7 @@ impl Table {
             .masks
             .get(viewer_id)
             .filter(|(cached, _)| *cached == stamp)
-            .map(|(_, bits)| bits.clone())
+            .map(|(_, mask)| mask.to_base64())
         {
             return Some(bits);
         }
@@ -1463,7 +1552,7 @@ impl Table {
             reveal_height(&mut ignored, Some(&mut mask), x, y, radius, &layout, &spans);
         }
         let bits = mask.to_base64();
-        self.sight_cache.borrow_mut().masks.insert(viewer_id.to_string(), (stamp, bits.clone()));
+        self.sight_cache.borrow_mut().masks.insert(viewer_id.to_string(), (stamp, mask));
         Some(bits)
     }
 
@@ -1495,7 +1584,15 @@ impl Table {
             *hash = hash.wrapping_mul(0x100000001b3);
         };
         let mix_f = |hash: &mut u64, value: f32| mix(hash, value.to_bits() as u64);
+        let mix_str = |hash: &mut u64, value: &str| {
+            mix(hash, value.len() as u64);
+            for byte in value.bytes() {
+                mix(hash, byte as u64);
+            }
+        };
+        mix_str(&mut hash, &self.campaign.id);
         if let Some(scene) = &self.scene {
+            mix_str(&mut hash, &scene.id);
             mix_f(&mut hash, scene.width);
             mix_f(&mut hash, scene.height);
             for wall in &scene.walls {
@@ -1506,11 +1603,17 @@ impl Table {
             }
             for door in &scene.doors {
                 mix(&mut hash, if door.open { 1 } else { 2 });
+                mix_f(&mut hash, door.a.x);
+                mix_f(&mut hash, door.a.y);
+                mix_f(&mut hash, door.b.x);
+                mix_f(&mut hash, door.b.y);
             }
             for block in &scene.sight {
                 mix_f(&mut hash, block.base);
                 mix_f(&mut hash, block.top);
                 mix_f(&mut hash, block.a.x);
+                mix_f(&mut hash, block.a.y);
+                mix_f(&mut hash, block.b.x);
                 mix_f(&mut hash, block.b.y);
             }
             if let Some(levels) = scene.layout.as_ref().and_then(|layout| layout.levels.as_deref()) {
@@ -1520,6 +1623,8 @@ impl Table {
             }
         }
         for token in &self.tokens {
+            mix_str(&mut hash, &token.id);
+            mix_str(&mut hash, token.owner_id.as_deref().unwrap_or(""));
             mix_f(&mut hash, token.x);
             mix_f(&mut hash, token.y);
             mix_f(&mut hash, token.vision_radius);
@@ -1533,18 +1638,9 @@ impl Table {
         let walls = self.blocking_walls();
         self.tokens
             .iter()
-            .filter(|token| {
-                token.grants_vision
-                    && !token.hidden
-                    && (token.owner_id.is_none() || token.owner_id.as_deref() == Some(player_id))
-            })
+            .filter(|token| grants_for(token, player_id))
             .map(|token| visibility_polygon(Vec2::new(token.x, token.y), token.vision_radius, &walls))
             .collect()
-    }
-
-    pub fn explored_at(&self, x: f32, y: f32) -> bool {
-        let scale = CELLS_PER_SQUARE as f32;
-        self.explored.get((x * scale).floor() as i32, (y * scale).floor() as i32)
     }
 
     fn blocking_walls(&self) -> Vec<Segment> {
@@ -1763,6 +1859,13 @@ impl Table {
     fn delete_campaign(&mut self, viewer: &Viewer, campaign_id: &str) -> Result<(), String> {
         self.require_gm(viewer)?;
         if self.campaign.id == campaign_id {
+            self.fog_memory.remove(&format!("unmapped:{campaign_id}"));
+            if let Some(scene) = &self.scene {
+                self.fog_memory.remove(&scene.id);
+            }
+            for scene in &self.scenes {
+                self.fog_memory.remove(&scene.id);
+            }
             if let Some(next) = self.shelved.pop() {
                 self.restore_campaign(next);
             } else {
@@ -1775,10 +1878,15 @@ impl Table {
             }
             return Ok(());
         }
-        let before = self.shelved.len();
-        self.shelved.retain(|item| item.campaign.id != campaign_id);
-        if self.shelved.len() == before {
-            return Err("that campaign is not on this table".into());
+        let index = self.shelved.iter().position(|item| item.campaign.id == campaign_id)
+            .ok_or_else(|| "that campaign is not on this table".to_string())?;
+        let removed = self.shelved.remove(index);
+        self.fog_memory.remove(&format!("unmapped:{campaign_id}"));
+        if let Some(scene) = &removed.scene {
+            self.fog_memory.remove(&scene.id);
+        }
+        for scene in &removed.scenes {
+            self.fog_memory.remove(&scene.id);
         }
         Ok(())
     }
@@ -1881,11 +1989,15 @@ impl Table {
     fn delete_scene(&mut self, viewer: &Viewer, scene_id: &str) -> Result<(), String> {
         self.require_gm(viewer)?;
         if self.scene.as_ref().is_some_and(|scene| scene.id == scene_id) {
+            self.fog_memory.remove(scene_id);
             if self.scenes.is_empty() {
                 self.scene = None;
                 self.tokens.clear();
                 let (width, height) = cells_for(DEFAULT_WIDTH, DEFAULT_HEIGHT);
                 self.explored = Explored::new(width, height);
+                self.fog_memory.remove(&self.fog_key());
+                self.sight_cache.borrow_mut().explored_stamp = None;
+                self.sight_cache.borrow_mut().masks.clear();
                 return Ok(());
             }
             let next = self.scenes.remove(0);
@@ -1897,6 +2009,7 @@ impl Table {
         if self.scenes.len() == before {
             return Err("that scene is not in this campaign".into());
         }
+        self.fog_memory.remove(scene_id);
         Ok(())
     }
 
@@ -1989,6 +2102,7 @@ impl Table {
     ) -> Result<(), String> {
         let gm = viewer.role == crate::net::protocol::Role::Gm;
         let owner_id = if gm { self.known_owner(owner_id)? } else { None };
+        let owner_changed = gm && (clear_owner || owner_id.is_some());
         let character = self
             .characters
             .iter_mut()
@@ -2003,11 +2117,6 @@ impl Table {
         if gm {
             if let Some(kind) = kind {
                 character.kind = kind;
-            }
-            if clear_owner {
-                character.owner_id = None;
-            } else if owner_id.is_some() {
-                character.owner_id = owner_id;
             }
         }
         for (key, value) in numbers {
@@ -2028,7 +2137,24 @@ impl Table {
             }
             character.cast_asset_id = asset;
         }
+        if owner_changed {
+            self.assign_character_owner(character_id, if clear_owner { None } else { owner_id });
+            self.reveal_from_tokens();
+        }
         Ok(())
+    }
+
+    /// One assignment grants the sheet, game actions and sight from every
+    /// linked figure in this campaign. Exploration remains with its old seat.
+    fn assign_character_owner(&mut self, character_id: &str, owner_id: Option<String>) {
+        if let Some(character) = self.characters.iter_mut().find(|character| character.id == character_id) {
+            character.owner_id = owner_id.clone();
+        }
+        for token in self.tokens.iter_mut().chain(self.scenes.iter_mut().flat_map(|scene| scene.tokens.iter_mut())) {
+            if token.character_id.as_deref() == Some(character_id) {
+                token.owner_id = owner_id.clone();
+            }
+        }
     }
 
     fn delete_character(&mut self, viewer: &Viewer, character_id: &str) -> Result<(), String> {
@@ -2156,6 +2282,7 @@ impl Table {
     pub fn prepare_strike(
         &self,
         viewer: &Viewer,
+        attack_roll_id: &str,
         attacker_id: &str,
         target_id: &str,
         plus: i32,
@@ -2164,7 +2291,43 @@ impl Table {
         if self.strike.is_some() {
             return Err("answer the last blow first".into());
         }
-        self.engagement(viewer, attacker_id, target_id, plus, minus, true)
+        let mut plan = self.engagement(viewer, attacker_id, target_id, plus, minus, true)?;
+        let attack = self.rolls.iter().find(|roll| roll.id == attack_roll_id)
+            .ok_or_else(|| "that attack is no longer in the roll history".to_string())?;
+        let contest = attack.contest.as_ref()
+            .ok_or_else(|| "roll an attack before rolling damage".to_string())?;
+        if contest.verdict.as_deref() != Some("hit") || contest.blow.is_some()
+            || contest.attacker_id != attacker_id || contest.target_id != target_id {
+            return Err("damage requires a hit against this target".into());
+        }
+        if contest.damage_rolled || self.damage_in_flight.contains(attack_roll_id) {
+            return Err("damage has already been rolled for this attack".into());
+        }
+        if attack.outcome.as_ref().is_some_and(|outcome| outcome.tone == "critical") {
+            plan.formula = crate::systems::daggerheart::critical_damage_formula(&plan.formula)?;
+        }
+        plan.contest.attack_roll_id = Some(attack_roll_id.into());
+        Ok(plan)
+    }
+
+    /// Reserve the hit while dice simulate outside the table lock. Replayed clicks cannot reuse it.
+    pub fn claim_damage(&mut self, viewer: &Viewer, plan: &AttackPlan) -> Result<(), String> {
+        let id = plan.contest.attack_roll_id.as_deref()
+            .ok_or_else(|| "damage requires an attack roll".to_string())?;
+        self.prepare_strike(viewer, id, &plan.contest.attacker_id, &plan.contest.target_id, 0, 0)?;
+        self.damage_in_flight.insert(id.into());
+        Ok(())
+    }
+
+    pub fn damage_in_flight(&self, attack_roll_id: &str) -> bool {
+        self.damage_in_flight.contains(attack_roll_id)
+    }
+
+    /// Failed dice jobs release their reservation so the explicit button can be retried.
+    pub fn cancel_damage(&mut self, plan: &AttackPlan) {
+        if let Some(id) = plan.contest.attack_roll_id.as_deref() {
+            self.damage_in_flight.remove(id);
+        }
     }
 
     fn engagement(
@@ -2195,8 +2358,14 @@ impl Table {
         };
         let filled = fill_formula(&raw, &attacker.numbers)?;
         let verb = if damage { "damages" } else { "attacks" };
+        let formula = if filled.starts_with("flat:") {
+            let parsed = parse_formula(&filled).map_err(|error| error.to_string())?;
+            format!("flat:{}", parsed.modifier + plus.clamp(0, 1000) - minus.clamp(0, 1000))
+        } else {
+            apply_modifiers(&filled, plus, minus)
+        };
         Ok(AttackPlan {
-            formula: apply_modifiers(&filled, plus, minus),
+            formula,
             label: format!("{} {} {}", attacker.name, verb, target.name),
             contest: Contest {
                 attacker_id: attacker.id.clone(),
@@ -2207,13 +2376,17 @@ impl Table {
                 defense,
                 verdict: None,
                 blow: None,
+                attack_roll_id: None,
+                damage_rolled: false,
             },
             damage,
+            direct: damage && crate::systems::daggerheart::deals_direct_damage(attacker),
+            adversary: attacker.kind == CharacterKind::Adversary,
         })
     }
 
     /// Compare a damage total with the target's thresholds. Armor, when a slot is free, waits for an answer.
-    pub fn receive_blow(&mut self, target_id: &str, amount: i32, system: &SystemDef) -> Result<Blow, String> {
+    pub fn receive_blow(&mut self, target_id: &str, amount: i32, direct: bool, system: &SystemDef) -> Result<Blow, String> {
         if self.strike.is_some() {
             return Err("answer the last blow first".into());
         }
@@ -2222,26 +2395,38 @@ impl Table {
             .iter()
             .find(|field| field.kind == FieldKind::Thresholds)
             .ok_or_else(|| "this system has no damage thresholds".to_string())?;
-        let (step, marks, open) = {
+        let (step, marks, open, hp_before, major_threshold, severe_threshold) = {
             let character = self
                 .characters
                 .iter()
                 .find(|character| character.id == target_id)
                 .ok_or_else(|| "that target is not at the table".to_string())?;
-            let (step, marks) = threshold_blow(field, amount, &character.numbers).unwrap_or_else(|| ("None".into(), 0));
-            (step, marks, armor_open(character))
+            let (step, marks) = if amount <= 0 { ("None".into(), 0) } else {
+                threshold_blow(field, amount, &character.numbers).unwrap_or_else(|| ("None".into(), 0))
+            };
+            let open = if direct || character.kind == CharacterKind::Adversary { 0 } else { armor_open(character) };
+            let pool_id = field.pool.as_deref().unwrap_or("hp");
+            let threshold = |id: &str| field.steps.iter().find(|step| step.id == id)
+                .map(|step| character.numbers.get(id).copied().unwrap_or(step.default));
+            (step, marks, open, character.numbers.get(pool_id).copied().unwrap_or(0), threshold("major"), threshold("severe"))
         };
-        let blow = Blow { step: step.clone(), marks };
+        let mut blow = Blow {
+            step: step.clone(), marks, applied_marks: 0, pending_armor: open > 0 && marks > 0, major_threshold, severe_threshold,
+        };
         if marks <= 0 {
             return Ok(blow);
         }
         if open > 0 {
-            self.strike = Some(PendingStrike { target_id: target_id.to_string(), step, marks });
+            self.strike = Some(PendingStrike { target_id: target_id.to_string(), step, marks, damage_roll_id: None });
             return Ok(blow);
         }
         if let Some(slot) = self.add_pool(target_id, field, marks, system)? {
             self.remember(vec![slot]);
         }
+        let pool_id = field.pool.as_deref().unwrap_or("hp");
+        let hp_after = self.characters.iter().find(|character| character.id == target_id)
+            .and_then(|character| character.numbers.get(pool_id)).copied().unwrap_or(hp_before);
+        blow.applied_marks = (hp_after - hp_before).max(0);
         Ok(blow)
     }
 
@@ -2290,6 +2475,15 @@ impl Table {
                     field: "armor".into(),
                     before: armor_before,
                 });
+            }
+        }
+        if let Some(id) = pending.damage_roll_id.as_deref() {
+            let hp_after = self.characters.iter().find(|character| character.id == pending.target_id)
+                .and_then(|character| character.numbers.get("hp")).copied().unwrap_or(hp_before);
+            if let Some(blow) = self.rolls.iter_mut().find(|roll| roll.id == id)
+                .and_then(|roll| roll.contest.as_mut()).and_then(|contest| contest.blow.as_mut()) {
+                blow.pending_armor = false;
+                blow.applied_marks = (hp_after - hp_before).max(0);
             }
         }
         self.strike = None;
@@ -2598,6 +2792,80 @@ mod tests {
         assert!(renamed.is_err(), "a player should not rename a figure from the turn");
         assert_eq!(table.tokens[0].name, "Ada");
         assert_eq!(table.tokens[0].facing, "west");
+    }
+
+    #[test]
+    fn assigning_a_figure_grants_its_sheet_actions_and_personal_sight_across_scenes() {
+        use crate::session::permissions::snapshot;
+        let catalog = crate::systems::load_systems(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems").as_path());
+        let system = catalog.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        for id in ["p1", "p2"] {
+            table.players.push(Player { id: id.into(), name: id.into(), role: Role::Player, color: "#ffffff".into(), connected: true });
+        }
+        let p1 = Viewer { player_id: "p1".into(), role: Role::Player, view_as: None, session_token: "p1".into() };
+        let p2 = Viewer { player_id: "p2".into(), role: Role::Player, view_as: None, session_token: "p2".into() };
+        table.command(&gm(), ClientMsg::CreateScene { name: "Split room".into(), width: 12, height: 12 }, None).unwrap();
+        table.scene.as_mut().unwrap().walls.push(Segment { a: Vec2::new(6.0, 0.0), b: Vec2::new(6.0, 12.0) });
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Adventurer".into(), kind: CharacterKind::Pc }, Some(system)).unwrap();
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Bandit".into(), kind: CharacterKind::Adversary }, Some(system)).unwrap();
+        let hero = table.characters[0].id.clone();
+        let target = table.characters[1].id.clone();
+        for (name, x, owner_id, character_id) in [
+            ("Hero", 2.5, None, Some(hero.clone())),
+            ("Hero companion", 3.5, None, Some(hero.clone())),
+            ("Independent scout", 9.5, Some("p2".into()), None),
+        ] {
+            table.command(&gm(), ClientMsg::CreateToken {
+                name: name.into(), x, y: 5.5, owner_id, hidden: false, vision_radius: 12.0, grants_vision: true,
+                color: "#ffffff".into(), character_id, cast_asset: None, facing: None,
+            }, Some(system)).unwrap();
+        }
+        let figure = table.tokens[0].id.clone();
+        let mut shelved = table.tokens[0].clone();
+        shelved.id = "shelved-hero".into();
+        table.scenes.push(SceneShelf { id: "other-scene".into(), name: "Other scene".into(), scene: None,
+            tokens: vec![shelved], explored: table.explored.clone() });
+        let assign = |owner: Option<&str>| ClientMsg::UpdateToken {
+            token_id: figure.clone(), name: None, owner_id: owner.map(str::to_string), clear_owner: owner.is_none(),
+            hidden: None, vision_radius: None, grants_vision: None, color: None, character_id: None,
+            clear_character: false, set_cast_asset: false, cast_asset: None, facing: None,
+        };
+        assert!(table.command(&p1, assign(Some("p1")), Some(system)).is_err(), "a player cannot claim an unassigned figure");
+        table.command(&gm(), assign(Some("p1")), Some(system)).unwrap();
+        assert_eq!(table.characters[0].owner_id.as_deref(), Some("p1"));
+        assert_eq!(table.tokens[1].owner_id.as_deref(), Some("p1"));
+        assert_eq!(table.scenes[0].tokens[0].owner_id.as_deref(), Some("p1"));
+        assert_eq!(table.tokens[2].owner_id.as_deref(), Some("p2"), "unlinked figures stay independent");
+        let left = snapshot(&table, &p1);
+        let right = snapshot(&table, &p2);
+        assert_eq!(left.characters.len(), 1, "assignment exposes the playable sheet to its owner");
+        assert_eq!(left.characters[0].id, hero);
+        assert_eq!(left.tokens.len(), 2, "the wall hides the other seat's figure");
+        assert_eq!(right.tokens.len(), 1);
+        assert!(right.characters.is_empty());
+        assert!(table.prepare_attack(&p1, &hero, &target, 0, 0).is_ok(), "the assigned player can use attacks");
+        assert!(table.prepare_attack(&p2, &hero, &target, 0, 0).is_err());
+        let edit_owner = |owner: Option<&str>| ClientMsg::UpdateCharacter {
+            character_id: hero.clone(), name: None, kind: None, owner_id: owner.map(str::to_string), clear_owner: owner.is_none(),
+            numbers: BTreeMap::new(), texts: BTreeMap::new(), set_cast_asset: false, cast_asset_id: None,
+        };
+        table.command(&p1, edit_owner(Some("p2")), Some(system)).unwrap();
+        assert_eq!(table.characters[0].owner_id.as_deref(), Some("p1"), "player sheet edits cannot transfer ownership");
+        table.command(&gm(), edit_owner(Some("p2")), Some(system)).unwrap();
+        assert_eq!(table.tokens[0].owner_id.as_deref(), Some("p2"));
+        assert_eq!(table.tokens[1].owner_id.as_deref(), Some("p2"));
+        assert_eq!(table.scenes[0].tokens[0].owner_id.as_deref(), Some("p2"));
+        assert!(snapshot(&table, &p1).tokens.is_empty(), "reassignment removes old current sight immediately");
+        assert!(table.explored_for("p1").get(10, 22), "old exploration remains with the old seat");
+        assert!(table.explored_for("p2").get(10, 22), "the new seat receives current sight immediately");
+        assert!(table.prepare_attack(&p1, &hero, &target, 0, 0).is_err());
+        assert!(table.prepare_attack(&p2, &hero, &target, 0, 0).is_ok());
+        table.command(&gm(), edit_owner(None), Some(system)).unwrap();
+        assert!(table.characters[0].owner_id.is_none());
+        assert!(table.tokens[..2].iter().all(|token| token.owner_id.is_none()));
+        assert!(table.scenes[0].tokens[0].owner_id.is_none());
+        assert_eq!(snapshot(&table, &p2).tokens.len(), 1);
     }
 
     #[test]
@@ -3066,6 +3334,99 @@ mod tests {
     }
 
     #[test]
+    fn damage_requires_a_controlled_hit_and_each_hit_is_consumed_once() {
+        use crate::systems::{load_systems, CharacterKind, RollOutcome};
+        let catalog = load_systems(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems").as_path());
+        let system = catalog.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        for (name, kind) in [("Ada", CharacterKind::Pc), ("Bandit", CharacterKind::Adversary)] {
+            table.command(&gm(), ClientMsg::CreateCharacter { name: name.into(), kind }, Some(system)).unwrap();
+        }
+        let attacker = table.characters[0].id.clone();
+        let target = table.characters[1].id.clone();
+        table.characters[0].owner_id = Some("p".into());
+        table.characters[0].texts.insert("damage".into(), "2d8+1 phy".into());
+        let owner = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "p".into() };
+        let stranger = Viewer { player_id: "other".into(), role: Role::Player, view_as: None, session_token: "other".into() };
+        assert!(table.prepare_strike(&owner, "absent", &attacker, &target, 0, 0).is_err());
+        let mut contest = table.prepare_attack(&owner, &attacker, &target, 0, 0).unwrap().contest;
+        contest.verdict = Some("miss".into());
+        table.rolls.push(StoredRoll {
+            id: "attack".into(), roller_id: "p".into(), roller_name: "Player".into(), formula: "1d12h+1d12f".into(),
+            label: None, visibility: RollVisibility::Public, modifier: 0, total: 4, dice: Vec::new(), created_at: 0,
+            outcome: None, contest: Some(contest),
+        });
+        assert!(table.prepare_strike(&owner, "attack", &attacker, &target, 0, 0).is_err());
+        table.rolls[0].contest.as_mut().unwrap().verdict = Some("hit".into());
+        table.rolls[0].outcome = Some(RollOutcome { label: "Critical success".into(), tone: "critical".into() });
+        assert!(table.prepare_strike(&stranger, "attack", &attacker, &target, 0, 0).is_err());
+        assert!(table.prepare_strike(&owner, "attack", &attacker, &attacker, 0, 0).is_err());
+        let plan = table.prepare_strike(&owner, "attack", &attacker, &target, 0, 0).unwrap();
+        let replay = table.prepare_strike(&owner, "attack", &attacker, &target, 0, 0).unwrap();
+        assert_eq!(plan.formula, "2d8+1+16");
+        assert_eq!(plan.contest.attack_roll_id.as_deref(), Some("attack"));
+        assert_eq!(table.characters[1].numbers["hp"], 0, "a hit does not roll or mark damage by itself");
+        table.claim_damage(&owner, &plan).unwrap();
+        assert!(table.claim_damage(&owner, &replay).is_err(), "concurrent clicks cannot reserve the same hit");
+        let saved_during_simulation: Vec<StoredRoll> = serde_json::from_str(&serde_json::to_string(&table.rolls).unwrap()).unwrap();
+        assert!(!saved_during_simulation[0].contest.as_ref().unwrap().damage_rolled,
+            "an unrelated save while dice simulate must not consume an unapplied hit");
+        table.cancel_damage(&plan);
+        table.claim_damage(&owner, &plan).unwrap();
+        let blow = table.receive_blow(&target, 13, false, system).unwrap();
+        assert_eq!(blow.applied_marks, 3);
+        assert_eq!(table.characters[1].numbers["hp"], 3);
+        let mut damage_contest = plan.contest.clone();
+        damage_contest.blow = Some(blow);
+        table.commit_roll(&RollEvent {
+            id: "damage".into(), roller_id: "p".into(), roller_name: "Player".into(), formula: plan.formula.clone(),
+            label: None, visibility: RollVisibility::Public, modifier: 0, total: 13, dice: Vec::new(), play_at: 0,
+            keyframe_dt: 0.0, outcome: None, contest: Some(damage_contest),
+        });
+        assert!(!table.damage_in_flight("attack"));
+        // Save/load keeps the consumed flag, so replay after a reconnect cannot deal another blow.
+        table.rolls = serde_json::from_str(&serde_json::to_string(&table.rolls).unwrap()).unwrap();
+        assert!(table.prepare_strike(&owner, "attack", &attacker, &target, 0, 0).is_err());
+        assert_eq!(table.characters[1].numbers["hp"], 3);
+    }
+
+    #[test]
+    fn adversary_damage_uses_threshold_boundaries_and_clamps_marked_hp() {
+        use crate::systems::{load_systems, CharacterKind};
+        let catalog = load_systems(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems").as_path());
+        let system = catalog.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Bandit".into(), kind: CharacterKind::Adversary }, Some(system)).unwrap();
+        let target = table.characters[0].id.clone();
+        table.characters[0].numbers.extend(BTreeMap::from([
+            ("minor".into(), 1), ("major".into(), 7), ("severe".into(), 13), ("hpmax".into(), 6),
+            ("armorscore".into(), 2), // Adversaries do not spend PC Armor Slots.
+        ]));
+        for (amount, marks, step) in [(-1, 0, "None"), (0, 0, "None"), (1, 1, "Minor"), (6, 1, "Minor"),
+            (7, 2, "Major"), (12, 2, "Major"), (13, 3, "Severe"), (99, 3, "Severe")] {
+            table.characters[0].numbers.insert("hp".into(), 0);
+            let blow = table.receive_blow(&target, amount, false, system).unwrap();
+            assert_eq!((blow.step.as_str(), blow.marks, blow.applied_marks), (step, marks, marks));
+            assert_eq!((blow.major_threshold, blow.severe_threshold), (Some(7), Some(13)));
+            assert!(!blow.pending_armor);
+            assert!(table.strike.is_none());
+            assert_eq!(table.characters[0].numbers["hp"], marks);
+        }
+        table.characters[0].numbers.insert("hp".into(), 5);
+        let lethal = table.receive_blow(&target, 20, false, system).unwrap();
+        assert_eq!(lethal.marks, 3);
+        assert_eq!(lethal.applied_marks, 1);
+        assert_eq!(table.characters[0].numbers["hp"], 6);
+        assert_eq!(table.receive_blow(&target, 20, false, system).unwrap().applied_marks, 0);
+        table.characters[0].kind = CharacterKind::Pc;
+        table.characters[0].numbers.insert("hp".into(), 0);
+        let direct = table.receive_blow(&target, 7, true, system).unwrap();
+        assert!(!direct.pending_armor);
+        assert_eq!(direct.applied_marks, 2);
+        assert!(table.strike.is_none());
+    }
+
+    #[test]
     fn armor_softens_one_step_and_undo_puts_both_back() {
         use crate::net::protocol::ClientMsg;
         use crate::systems::{load_systems, CharacterKind};
@@ -3096,11 +3457,18 @@ mod tests {
         assert_eq!(attack.contest.defense, 10);
         assert!(!attack.damage);
 
-        let blow = table.receive_blow(&ada, 12, system).unwrap();
+        let blow = table.receive_blow(&ada, 12, false, system).unwrap();
         assert_eq!(blow.step, "Major");
         assert_eq!(blow.marks, 2);
         assert!(table.strike.is_some());
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+        let mut damage_contest = attack.contest.clone();
+        damage_contest.blow = Some(blow);
+        table.commit_roll(&RollEvent {
+            id: "damage".into(), roller_id: "gm".into(), roller_name: "GM".into(), formula: "1d8".into(),
+            label: None, visibility: RollVisibility::Public, modifier: 0, total: 12, dice: Vec::new(), play_at: 0,
+            keyframe_dt: 0.0, outcome: None, contest: Some(damage_contest),
+        });
 
         table
             .command(&gm(), ClientMsg::AnswerStrike { use_armor: true }, Some(system))
@@ -3108,6 +3476,9 @@ mod tests {
         assert!(table.strike.is_none());
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(1));
         assert_eq!(table.characters[0].numbers.get("armor").copied(), Some(1));
+        let receipt = table.rolls.last().unwrap().contest.as_ref().unwrap().blow.as_ref().unwrap();
+        assert_eq!(receipt.applied_marks, 1);
+        assert!(!receipt.pending_armor, "the saved damage receipt follows the armor answer");
 
         table.command(&gm(), ClientMsg::Undo, Some(system)).unwrap();
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
@@ -3115,7 +3486,7 @@ mod tests {
         assert!(table.undo.is_none());
 
         table.characters[0].numbers.insert("armorscore".into(), 0);
-        let bare = table.receive_blow(&ada, 7, system).unwrap();
+        let bare = table.receive_blow(&ada, 7, false, system).unwrap();
         assert_eq!(bare.marks, 2);
         assert!(table.strike.is_none());
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(2));

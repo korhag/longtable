@@ -28,7 +28,30 @@ pub fn attack_formula(character: &Character) -> String {
 pub fn damage_formula(character: &Character) -> String {
     let key = if character.kind == CharacterKind::Adversary { "atkdamage" } else { "damage" };
     let text = character.texts.get(key).map(|text| dice_text(text)).unwrap_or_default();
-    if text.is_empty() { "1d8".into() } else { text }
+    if text.is_empty() {
+        "1d8".into()
+    } else if character.kind != CharacterKind::Adversary && text.starts_with('d') {
+        // Equipment's bare d8 notation uses the wielder's Proficiency. Explicit
+        // counts (2d8, @proficiency d8, spell damage) already state their dice.
+        format!("{}{}", number(character, "proficiency").clamp(1, 6), text)
+    } else {
+        text
+    }
+}
+
+pub fn deals_direct_damage(character: &Character) -> bool {
+    let key = if character.kind == CharacterKind::Adversary { "atkdamage" } else { "damage" };
+    character.texts.get(key).is_some_and(|text| text.split_whitespace().any(|word| word.eq_ignore_ascii_case("direct")))
+}
+
+/// Critical hits add the maximum of the damage dice, without doubling flat bonuses.
+pub fn critical_damage_formula(formula: &str) -> Result<String, String> {
+    let parsed = crate::dice::parse_formula(formula).map_err(|error| error.to_string())?;
+    let maximum: i32 = parsed.groups.iter()
+        .map(|group| i32::from(group.count) * if group.sign > 0 { i32::from(group.sides) } else { -1 })
+        .sum();
+    if maximum == 0 { return Ok(formula.into()); }
+    Ok(format!("{formula}{}", signed(maximum)))
 }
 
 pub fn defense_of(character: &Character) -> (&'static str, i32) {
@@ -42,6 +65,11 @@ pub fn defense_of(character: &Character) -> (&'static str, i32) {
 /// A roll hits when it meets the defense. Matching Hope and Fear is a critical, and that hits too.
 pub fn attack_hits(total: i32, defense: i32, critical: bool) -> bool {
     critical || total >= defense
+}
+
+/// The GM's natural 20 is critical on an adversary attack (not on an ordinary damage d20).
+pub fn adversary_critical(dice: &[crate::dice::ThrownDie]) -> bool {
+    dice.iter().any(|die| die.sides == 20 && die.value == 20 && die.sign > 0)
 }
 
 fn trait_mod(character: &Character) -> i32 {
@@ -160,5 +188,34 @@ mod tests {
             cast_asset_id: None,
             };
         assert_eq!(damage_formula(&foe), "flat:2");
+    }
+
+    #[test]
+    fn critical_damage_adds_maximum_dice_not_flat_modifiers() {
+        assert_eq!(critical_damage_formula("2d8+1").unwrap(), "2d8+1+16");
+        assert_eq!(critical_damage_formula("1d6+1d8+3").unwrap(), "1d6+1d8+3+14");
+        assert_eq!(critical_damage_formula("flat:4").unwrap(), "flat:4");
+    }
+
+    #[test]
+    fn adversary_natural_twenty_hits_even_above_the_modified_total() {
+        let mut die = crate::dice::ThrownDie { sides: 20, value: 20, sign: 1, tag: None, keyframes: Vec::new() };
+        assert!(attack_hits(18, 25, adversary_critical(std::slice::from_ref(&die))));
+        die.value = 19;
+        assert!(!adversary_critical(std::slice::from_ref(&die)));
+        die.sides = 12;
+        die.value = 12;
+        assert!(!adversary_critical(std::slice::from_ref(&die)));
+    }
+
+    #[test]
+    fn proficiency_scales_bare_weapon_dice_and_direct_damage_is_preserved() {
+        let mut sheet = character(CharacterKind::Pc, BTreeMap::from([("proficiency".into(), 3)]), "");
+        sheet.texts.insert("damage".into(), "d8+2 direct phy".into());
+        assert_eq!(damage_formula(&sheet), "3d8+2");
+        assert!(deals_direct_damage(&sheet));
+        sheet.texts.insert("damage".into(), "2d8+2 mag".into());
+        assert_eq!(damage_formula(&sheet), "2d8+2");
+        assert!(!deals_direct_damage(&sheet));
     }
 }

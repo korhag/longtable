@@ -136,15 +136,29 @@ pub struct Contest {
     /// `hit` or `miss` on an attack. Empty on a damage roll.
     pub verdict: Option<String>,
     pub blow: Option<Blow>,
+    /// The successful attack consumed by this damage roll.
+    #[serde(default)]
+    pub attack_roll_id: Option<String>,
+    /// A hit can authorize damage once, including across reconnects and saves.
+    #[serde(default)]
+    pub damage_rolled: bool,
 }
 
-/// What a damage total does to the target before armor.
+/// Damage resolution receipt. Marks are before armor; applied marks reflect the HP actually marked.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
 pub struct Blow {
     pub step: String,
     pub marks: i32,
+    #[serde(default)]
+    pub applied_marks: i32,
+    #[serde(default)]
+    pub pending_armor: bool,
+    #[serde(default)]
+    pub major_threshold: Option<i32>,
+    #[serde(default)]
+    pub severe_threshold: Option<i32>,
 }
 
 /// The armor question waiting on the defender, or the GM when nobody owns them.
@@ -688,6 +702,7 @@ pub enum ClientMsg {
         minus: i32,
     },
     Strike {
+        attack_roll_id: String,
         attacker_id: String,
         target_id: String,
         #[serde(default)]

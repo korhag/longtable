@@ -35,6 +35,10 @@ Footprints are the occupied ground cells, 1–8 per axis. Movement and sight blo
 
 Four matching views per character: north/back, east/right, south/front, west/left. Keep clothing, equipment, proportions, scale and foot pivot identical across views. Each row is a different character. No names or direction letters within the images. A 4-column by 4-row sheet can hold Human, Elf, Dwarf and Orc. Enter those names on separate lines. Cast images do not overwrite existing character portraits.
 
+For drawn animations, make one separate transparent atlas per direction. A recommended atlas is 1024 × 1536 pixels: four 256 × 256 frames per row, with rows idle, melee, ranged, move, hurt and spell in that order. Use zero gutter and margin, no labels, and the same frame-local foot pivot in every cell. Import these four atlases through **Import pack**, with the optional `animations` metadata described in docs/assets.md; the simple Cast sheet importer creates static directional views. The pack keeps its four static views for previews and includes frame dimensions, pivot, scale, row indices, frame counts and FPS for playback.
+
+Animation directions use objects, for example `"east": {"file": "cast/elf/animation-east.png", "pixelsPerWorldUnit": 96.75, "pivotPx": [128,224]}`. Only `file` is required; omitted density and pivot inherit the shared animation defaults. Directional density accepts fractional finite values from 1–4096. If you shrink a direction's drawings to fit broad weapon poses inside its cells, reduce its density proportionally to preserve the character's world height. Keep every complete pose and effect within its own cell, with transparent padding; align all feet in that direction to the declared pivot.
+
 ## Walls and doors
 
 Draw both fixed-camera axes. Wall segments represent one grid edge. Align ends so repeated pieces meet without gaps. Doors need four frames, including a visibly open leaf and clear doorway; all four share the same pivot and canvas size. Walls and closed doors normally block movement and sight; the game handles opening the door. Import roof art separately so it does not cover the room permanently.

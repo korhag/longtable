@@ -139,6 +139,38 @@ pub fn validate_v2_shape(pack: &Pack) -> Result<(), String> {
             check_path(&pack.id, &frame.file)?;
             check_pivot(&frame.file, frame.pivot_px, frame.size_px)?;
         }
+        if let Some(animation) = &cast.animations {
+            let what = format!("cast {}/{} animation", pack.id, cast.id);
+            check_pivot(&what, animation.pivot_px, animation.frame_size_px)?;
+            if !(1..=4_096).contains(&animation.pixels_per_world_unit) {
+                return Err(format!("{what} scale must be between 1 and 4096 pixels per world unit"));
+            }
+            if !(1..=16).contains(&animation.columns) || !(1..=16).contains(&animation.rows) {
+                return Err(format!("{what} atlas grid must have 1 to 16 columns and rows"));
+            }
+            if animation.frame_size_px[0] * animation.columns > MAX_SIDE
+                || animation.frame_size_px[1] * animation.rows > MAX_SIDE {
+                return Err(format!("{what} atlas must be at most {MAX_SIDE} pixels on a side"));
+            }
+            for view in [&animation.views.north, &animation.views.east, &animation.views.south, &animation.views.west] {
+                check_path(&pack.id, &view.file)?;
+                let density = view.pixels_per_world_unit.unwrap_or(animation.pixels_per_world_unit as f32);
+                if !density.is_finite() || !(1.0..=4_096.0).contains(&density) {
+                    return Err(format!("{} scale must be between 1 and 4096 pixels per world unit", view.file));
+                }
+                check_pivot(&view.file, view.pivot_px.unwrap_or(animation.pivot_px), animation.frame_size_px)?;
+            }
+            let clips = &animation.clips;
+            for (name, clip) in [("idle", &clips.idle), ("melee", &clips.melee), ("ranged", &clips.ranged),
+                ("move", &clips.r#move), ("hurt", &clips.hurt), ("spell", &clips.spell)] {
+                if clip.row >= animation.rows || clip.frames == 0 || clip.frames > animation.columns {
+                    return Err(format!("{what} {name} frames are outside the atlas grid"));
+                }
+                if !clip.fps.is_finite() || !(1.0..=30.0).contains(&clip.fps) {
+                    return Err(format!("{what} {name} fps must be between 1 and 30"));
+                }
+            }
+        }
         if let Some(portrait) = &cast.portrait {
             check_path(&pack.id, portrait)?;
         }
@@ -186,6 +218,20 @@ pub fn validate_v2_files(pack: &Pack, files: &BTreeMap<String, Vec<u8>>, decode:
             }
             if decode && !image.has_alpha {
                 warnings.push(format!("{} has no transparent pixels. Cast art needs a transparent background", frame.file));
+            }
+        }
+        if let Some(animation) = &cast.animations {
+            let width = animation.frame_size_px[0] * animation.columns;
+            let height = animation.frame_size_px[1] * animation.rows;
+            for view in [&animation.views.north, &animation.views.east, &animation.views.south, &animation.views.west] {
+                let file = &view.file;
+                let image = read_image(files, file, &mut budget, decode)?;
+                if image.width != width || image.height != height {
+                    return Err(format!("{file} is {} by {}, not the {width} by {height} animation atlas declared", image.width, image.height));
+                }
+                if decode && !image.has_alpha {
+                    warnings.push(format!("{file} has no transparent pixels. Animation art needs a transparent background"));
+                }
             }
         }
         if let Some(portrait) = &cast.portrait {
@@ -550,6 +596,131 @@ mod tests {
             ("cast/bandit/south.png", png_colored(32, 64, 0)),
             ("cast/bandit/west.png", png_colored(32, 64, 0)),
         ]
+    }
+
+    fn animated_manifest() -> serde_json::Value {
+        let mut value: serde_json::Value = serde_json::from_str(&manifest("")).unwrap();
+        value["cast"][0]["animations"] = serde_json::json!({
+            "frameSizePx": [32, 64], "pivotPx": [16, 60], "pixelsPerWorldUnit": 128,
+            "columns": 4, "rows": 6,
+            "views": {
+                "north": {"file": "cast/bandit/animation-north.png"},
+                "east": {"file": "cast/bandit/animation-east.png", "pixelsPerWorldUnit": 106.125, "pivotPx": [15, 59]},
+                "south": {"file": "cast/bandit/animation-south.png"},
+                "west": {"file": "cast/bandit/animation-west.png"}
+            },
+            "clips": {
+                "idle": {"row": 0, "frames": 4, "fps": 4}, "melee": {"row": 1, "frames": 4, "fps": 8},
+                "ranged": {"row": 2, "frames": 4, "fps": 8}, "move": {"row": 3, "frames": 4, "fps": 8},
+                "hurt": {"row": 4, "frames": 4, "fps": 8}, "spell": {"row": 5, "frames": 4, "fps": 8}
+            }
+        });
+        value
+    }
+
+    fn animated_files() -> Vec<(&'static str, Vec<u8>)> {
+        let mut files = sample_files();
+        for name in ["cast/bandit/animation-north.png", "cast/bandit/animation-east.png",
+            "cast/bandit/animation-south.png", "cast/bandit/animation-west.png"] {
+            files.push((name, png_colored(128, 384, 0)));
+        }
+        files
+    }
+
+    #[test]
+    fn animation_atlases_import_and_old_four_view_packs_still_load() {
+        assert!(crate::assets::parse_pack(&manifest("")).unwrap().cast[0].animations.is_none());
+        let dir = temp_assets();
+        let bytes = zip_with(&animated_manifest().to_string(), &animated_files());
+        assert!(check_bytes(&bytes).unwrap().warnings.is_empty());
+        let installed = import_bytes(&bytes, &dir).unwrap();
+        let animation = installed.cast[0].animations.as_ref().unwrap();
+        assert_eq!(animation.frame_size_px, [32, 64]);
+        assert_eq!(animation.pivot_px, [16, 60]);
+        assert_eq!(animation.views.north.pixels_per_world_unit, None, "omitted density inherits the shared default");
+        assert_eq!(animation.views.north.pivot_px, None);
+        assert_eq!(animation.views.east.pixels_per_world_unit, Some(106.125), "directional density keeps fractional precision");
+        assert_eq!(animation.views.east.pivot_px, Some([15, 59]));
+        assert_eq!(animation.clips.r#move.row, 3);
+        assert_eq!(animation.clips.spell.frames, 4);
+        let catalog = crate::assets::load_catalog(&dir).unwrap();
+        assert_eq!(catalog.cast("demo/bandit").unwrap().animations.as_ref().unwrap().clips.idle.fps, 4.0);
+        assert!(catalog.warnings.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn animation_grid_frames_fps_scale_pivot_and_paths_are_checked() {
+        for (pointer, value, message) in [
+            ("/views/north/file", serde_json::json!("../escape.png"), "safe path"),
+            ("/views/east/file", serde_json::json!("https://example.org/sheet.png"), "remote address"),
+            ("/views/east/pixelsPerWorldUnit", serde_json::json!(0.99), "scale must be between"),
+            ("/views/east/pixelsPerWorldUnit", serde_json::json!(4096.5), "scale must be between"),
+            ("/views/east/pivotPx", serde_json::json!([16, 64]), "pivot is outside"),
+            ("/clips/melee/row", serde_json::json!(6), "outside the atlas grid"),
+            ("/clips/move/frames", serde_json::json!(0), "outside the atlas grid"),
+            ("/clips/spell/frames", serde_json::json!(5), "outside the atlas grid"),
+            ("/clips/hurt/fps", serde_json::json!(0), "fps must be between"),
+            ("/clips/idle/fps", serde_json::json!(31), "fps must be between"),
+            ("/columns", serde_json::json!(17), "atlas grid"),
+            ("/rows", serde_json::json!(0), "atlas grid"),
+            ("/frameSizePx", serde_json::json!([1024, 64]), "atlas must be at most"),
+            ("/pivotPx", serde_json::json!([32, 60]), "pivot is outside"),
+            ("/pixelsPerWorldUnit", serde_json::json!(0), "scale must be between"),
+        ] {
+            let mut value_json = animated_manifest();
+            *value_json["cast"][0]["animations"].pointer_mut(pointer).unwrap() = value;
+            let error = crate::assets::parse_pack(&value_json.to_string()).unwrap_err();
+            assert!(error.contains(message), "{pointer}: {error}");
+        }
+        let mut missing_clip = animated_manifest();
+        missing_clip["cast"][0]["animations"]["clips"].as_object_mut().unwrap().remove("spell");
+        assert!(crate::assets::parse_pack(&missing_clip.to_string()).unwrap_err().contains("spell"));
+        let mut pack = crate::assets::parse_pack(&animated_manifest().to_string()).unwrap();
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            pack.cast[0].animations.as_mut().unwrap().views.east.pixels_per_world_unit = Some(invalid);
+            assert!(validate_v2_shape(&pack).unwrap_err().contains("scale must be between"));
+        }
+    }
+
+    #[test]
+    fn missing_or_mis_sized_animation_atlas_installs_nothing() {
+        let dir = temp_assets();
+        let manifest = animated_manifest().to_string();
+        let mut files = animated_files();
+        files.retain(|(name, _)| *name != "cast/bandit/animation-west.png");
+        let error = import_bytes(&zip_with(&manifest, &files), &dir).unwrap_err();
+        assert!(error.contains("animation-west.png is missing"), "{error}");
+        assert!(!dir.join("packs/demo").exists());
+        files.push(("cast/bandit/animation-west.png", png_colored(128, 383, 0)));
+        let error = import_bytes(&zip_with(&manifest, &files), &dir).unwrap_err();
+        assert!(error.contains("128 by 384 animation atlas declared"), "{error}");
+        assert!(!dir.join("packs/demo").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn animation_atlases_share_the_existing_decoded_memory_budget() {
+        let mut value = animated_manifest();
+        value["cast"][0]["animations"]["frameSizePx"] = serde_json::json!([512, 256]);
+        let cast = value["cast"][0].clone();
+        let list = value["cast"].as_array_mut().unwrap();
+        for index in 1..6 {
+            let mut other = cast.clone();
+            other["id"] = serde_json::json!(format!("bandit-{index}"));
+            list.push(other);
+        }
+        let pack = crate::assets::parse_pack(&value.to_string()).unwrap();
+        let mut files: BTreeMap<String, Vec<u8>> = animated_files().into_iter().map(|(name, bytes)| (name.into(), bytes)).collect();
+        for (name, bytes) in &mut files {
+            if name.contains("animation-") {
+                // Metadata validation checks the budget before decoding. No large allocation is needed here.
+                bytes[16..20].copy_from_slice(&2048u32.to_be_bytes());
+                bytes[20..24].copy_from_slice(&1536u32.to_be_bytes());
+            }
+        }
+        let error = validate_v2_files(&pack, &files, false).unwrap_err();
+        assert!(error.contains("memory budget"), "{error}");
     }
 
     fn temp_assets() -> PathBuf {

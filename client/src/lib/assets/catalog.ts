@@ -116,6 +116,32 @@ export interface CastDef {
   suggestedFootprintCells?: [number, number];
   views: { north: CastFrame; east: CastFrame; south: CastFrame; west: CastFrame };
   portrait?: string | null;
+  animations?: CastAnimations;
+}
+
+export interface CastAnimationClip { row: number; frames: number; fps: number }
+export interface CastAnimationView { file: string; pixelsPerWorldUnit?: number; pivotPx?: [number, number] }
+export interface CastAnimations {
+  frameSizePx: [number, number];
+  pivotPx: [number, number];
+  pixelsPerWorldUnit: number;
+  columns: number;
+  rows: number;
+  views: { north: CastAnimationView; east: CastAnimationView; south: CastAnimationView; west: CastAnimationView };
+  clips: Record<'idle' | 'melee' | 'ranged' | 'move' | 'hurt' | 'spell', CastAnimationClip>;
+}
+
+/** A wide weapon can need a smaller raster scale than another direction. Its
+ * matching PPU and foot pivot keep the character the same size in the world.
+ */
+export function resolveAnimationView(animations: CastAnimations | undefined, facing: string) {
+  if (!animations) return null;
+  const view = animations.views[facing as keyof CastAnimations['views']] ?? animations.views.south;
+  return { file: view.file, definition: {
+    ...animations,
+    pixelsPerWorldUnit: view.pixelsPerWorldUnit ?? animations.pixelsPerWorldUnit,
+    pivotPx: view.pivotPx ?? animations.pivotPx,
+  } };
 }
 
 export interface Pack {
@@ -232,6 +258,12 @@ export function fileUrl(pack: Pack, file: string | null | undefined): string | n
   if (!file) return null;
   if (/^(blob:|data:|https?:)/.test(file)) return file;
   return `${pack.baseUrl}/${file}`;
+}
+
+/** Reimporting a sheet under the same filename must replace its cached artwork. */
+export function animationFileUrl(pack: Pack, file: string | null | undefined): string | null {
+  const url = fileUrl(pack, file);
+  return url?.startsWith('/') && pack.contentHash ? `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(pack.contentHash)}` : url;
 }
 
 export function loadTexture(url: string, filtering: Pack['filtering']): Promise<THREE.Texture | null> {

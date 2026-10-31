@@ -28,6 +28,7 @@ export function contextActions(options: {
     actions.push({ id: 'target', label: 'Target', icon: '◎' });
   }
   if (options.hasClickedSheet) actions.push({ id: 'sheet', label: 'Character', icon: '▤' });
+  if (clicked.castAsset && canControl(clicked, gm, seat, readOnly)) actions.push({ id: 'animations', label: 'Animations', icon: '▷', detail: 'Preview six animations locally' });
   actions.push({ id: 'center', label: 'Center view', icon: '⌖' });
   if (gm && !readOnly) actions.push({ id: 'hide', label: clicked.hidden ? 'Show' : 'Hide', icon: clicked.hidden ? '◌' : '◑' });
   if (controlsActor && actor && system && clicked.id === selected?.id) {

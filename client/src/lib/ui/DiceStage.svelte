@@ -2,23 +2,34 @@
   import { onMount } from 'svelte';
   import { loadCatalog, trayTextures } from '../assets/catalog';
   import { DicePlayer } from '../dice/dicePlayer';
+  import { damageApplication, damageThresholds, mayRollDamage } from '../dice/damageFlow';
   import { dieLook } from '../dice/palette';
   import { rollDuration } from '../dice/playback';
   import { impacts, playBounces, playRollSettle } from '../dice/sound';
   import { sound } from '../dice/sound.svelte';
   import { systems } from '../systems/store.svelte';
   import { prefs } from '../prefs.svelte';
+  import { send } from '../net/socket';
   import { table } from '../table.svelte';
 
   let canvas: HTMLCanvasElement;
   let player: DicePlayer | undefined;
   let ready = $state(false);
+  let pendingRollId = $state<string | null>(null);
+  let damageError = $state<string | null>(null);
+  let previousRollId: string | undefined;
 
   const showing = $derived(table.activeRoll);
   const landed = $derived(showing !== null && table.landedRollId === showing.id);
+  const recorded = $derived(table.rolls.find((roll) => roll.id === showing?.id)?.contest ?? null);
+  const blow = $derived(recorded?.blow ?? showing?.contest?.blow ?? null);
+  const canDamage = $derived(mayRollDamage(showing, table.campaign.systemId, table.characters, table.role, table.playerId, table.viewAs, recorded));
+  const thresholds = $derived(damageThresholds(blow));
 
   onMount(() => {
     player = new DicePlayer(canvas);
+    const observer = new ResizeObserver(() => player?.resize());
+    observer.observe(canvas);
     ready = true;
     void loadCatalog().then((packs) => {
       const tray = trayTextures(packs);
@@ -26,6 +37,7 @@
     });
     return () => {
       ready = false;
+      observer.disconnect();
       player?.dispose();
     };
   });
@@ -46,7 +58,9 @@
         table.finishRoll(roll.id);
         playRollSettle();
       },
-      () => table.dismissRoll(),
+      () => {
+        if (table.activeRoll?.id === roll.id && !canDamage && pendingRollId !== roll.id) table.dismissRoll();
+      },
       systems.active?.dieTags ?? [],
     );
     if (!started) return;
@@ -58,6 +72,42 @@
       }
     }
   });
+
+  $effect(() => {
+    if (showing?.id === previousRollId) return;
+    previousRollId = showing?.id;
+    pendingRollId = null;
+    damageError = null;
+  });
+
+  $effect(() => {
+    if (!pendingRollId) return;
+    if (table.error || !table.connected) {
+      damageError = table.error || 'Connection lost. Reconnect to try again.';
+      pendingRollId = null;
+    }
+  });
+
+  $effect(() => {
+    const id = pendingRollId;
+    if (!id) return;
+    const timeout = window.setTimeout(() => {
+      if (pendingRollId !== id) return;
+      pendingRollId = null;
+      damageError = recorded?.damageRolled
+        ? 'Damage was accepted. Check Rolls if you reconnected.'
+        : 'No response yet. You can safely try again.';
+    }, 15_000);
+    return () => window.clearTimeout(timeout);
+  });
+
+  function rollDamage() {
+    if (!showing?.contest || !landed || !canDamage || pendingRollId || !table.connected) return;
+    pendingRollId = showing.id;
+    damageError = null;
+    table.error = null;
+    send({ type: 'strike', attackRollId: showing.id, attackerId: showing.contest.attackerId, targetId: showing.contest.targetId, plus: 0, minus: 0 });
+  }
 
   function dismiss() {
     if (showing) table.dismissRoll();
@@ -107,9 +157,9 @@
                 {showing.contest.verdict === 'hit' ? 'Hit' : 'Miss'}
               </span>
               <span class="text-sm">{showing.total} vs {showing.contest.defenseName} {showing.contest.defense}</span>
-            {:else if showing.contest?.blow}
+            {:else if blow}
               <span class="text-base">
-                {showing.contest.blow.marks > 0 ? `${showing.contest.blow.step} · ${showing.contest.blow.marks} HP` : 'No mark'}
+                {table.campaign.systemId === 'daggerheart' ? blow.step : blow.marks > 0 ? `${blow.step} · ${blow.marks} HP` : 'No mark'}
               </span>
             {/if}
             {#if showing.outcome}
@@ -120,6 +170,22 @@
           <p class="ml-auto text-sm tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
         {/if}
       </button>
+      {#if landed && table.campaign.systemId === 'daggerheart' && blow}
+        <div class="shrink-0 border-t border-[var(--color-gold)]/20 px-4 py-2 text-sm" role="status">
+          <p>{showing.total} damage{#if thresholds} · {thresholds}{/if}</p>
+          <p class="mt-1 text-[var(--color-gold-bright)]">{damageApplication(blow)}</p>
+        </div>
+      {:else if landed && (canDamage || pendingRollId === showing.id || damageError)}
+        <div class="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--color-gold)]/20 px-4 py-3">
+          {#if canDamage || pendingRollId === showing.id}
+            <button class="btn disabled:opacity-50" type="button" onclick={rollDamage} disabled={pendingRollId === showing.id || !table.connected}>
+              {pendingRollId === showing.id ? 'Rolling damage…' : 'Roll damage'}
+            </button>
+          {/if}
+          <span class="text-sm text-[var(--color-parchment)]/70">{!table.connected ? 'Reconnecting…' : `Hit ${showing.contest?.targetName ?? ''}`}</span>
+          {#if damageError}<p class="w-full text-sm text-[#e7a090]" role="alert">{damageError}</p>{/if}
+        </div>
+      {/if}
     {/if}
   </div>
 </div>

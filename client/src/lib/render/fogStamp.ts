@@ -14,7 +14,9 @@ export type FogStamp = {
   mode: string;
   fogWidth: number;
   fogHeight: number;
+  cellsPerSquare: number;
   mapWidth: number;
+  mapHeight: number;
   levels: string;
   polygons: FogPolygons;
 };
@@ -31,14 +33,16 @@ export function samePolygons(left: FogPolygons | undefined, right: FogPolygons |
   });
 }
 
-export function fogStamp(fog: FogView, mapWidth: number, levels: string): FogStamp {
+export function fogStamp(fog: FogView, mapWidth: number, levels: string, mapHeight = mapWidth): FogStamp {
   return {
     explored: fog.explored,
     visible: fog.visible ?? '',
     mode: fog.mode,
     fogWidth: fog.width,
     fogHeight: fog.height,
+    cellsPerSquare: fog.cellsPerSquare,
     mapWidth,
+    mapHeight,
     levels,
     polygons: fog.visiblePolygons,
   };
@@ -50,18 +54,21 @@ export function sameFogPicture(left: FogView | null | undefined, right: FogView 
   return left.mode === right.mode
     && left.width === right.width
     && left.height === right.height
+    && left.cellsPerSquare === right.cellsPerSquare
     && left.explored === right.explored
     && (left.visible ?? '') === (right.visible ?? '')
     && samePolygons(left.visiblePolygons, right.visiblePolygons);
 }
 
-export function sameFogStamp(stamp: FogStamp, fog: FogView, mapWidth: number, levels: string) {
+export function sameFogStamp(stamp: FogStamp, fog: FogView, mapWidth: number, levels: string, mapHeight = mapWidth) {
   return stamp.explored === fog.explored
     && stamp.visible === (fog.visible ?? '')
     && stamp.mode === fog.mode
     && stamp.fogWidth === fog.width
     && stamp.fogHeight === fog.height
+    && stamp.cellsPerSquare === fog.cellsPerSquare
     && stamp.mapWidth === mapWidth
+    && stamp.mapHeight === mapHeight
     && stamp.levels === levels
     && samePolygons(stamp.polygons, fog.visiblePolygons);
 }

@@ -273,6 +273,59 @@ pub struct CastViews {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CastAnimationView {
+    pub file: String,
+    /// Overrides the shared atlas density when a direction needs wider poses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pixels_per_world_unit: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot_px: Option<[u32; 2]>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastAnimationViews {
+    pub north: CastAnimationView,
+    pub east: CastAnimationView,
+    pub south: CastAnimationView,
+    pub west: CastAnimationView,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastAnimationClip {
+    pub row: u32,
+    pub frames: u32,
+    pub fps: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastAnimationClips {
+    pub idle: CastAnimationClip,
+    pub melee: CastAnimationClip,
+    pub ranged: CastAnimationClip,
+    pub r#move: CastAnimationClip,
+    pub hurt: CastAnimationClip,
+    pub spell: CastAnimationClip,
+}
+
+/// Four directional atlases with equal cells and shared action rows.
+/// Static views remain the fallback for packs without drawn animation sheets.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CastAnimations {
+    pub frame_size_px: [u32; 2],
+    pub pivot_px: [u32; 2],
+    pub pixels_per_world_unit: u32,
+    pub columns: u32,
+    pub rows: u32,
+    pub views: CastAnimationViews,
+    pub clips: CastAnimationClips,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CastDef {
     pub id: String,
     pub name: String,
@@ -281,6 +334,8 @@ pub struct CastDef {
     #[serde(default = "one_cell")]
     pub suggested_footprint_cells: [u32; 2],
     pub views: CastViews,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animations: Option<CastAnimations>,
     #[serde(default)]
     pub portrait: Option<String>,
 }

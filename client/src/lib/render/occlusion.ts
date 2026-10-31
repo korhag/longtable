@@ -71,7 +71,7 @@ export class OcclusionOutlines {
   castDraws = 0;
   private readyStamp = -1;
   private castStamp = -1;
-  private castState: { mesh: THREE.Mesh; geometry: THREE.BufferGeometry; map: THREE.Texture | null; version: number; matrix: THREE.Matrix4 }[] = [];
+  private castState: { mesh: THREE.Mesh; geometry: THREE.BufferGeometry; positionVersion: number; uvVersion: number; map: THREE.Texture | null; version: number; matrix: THREE.Matrix4 }[] = [];
   private masks = new Map<string, THREE.ShaderMaterial>();
   private scenery: THREE.WebGLRenderTarget | null = null;
   private cast: THREE.WebGLRenderTarget | null = null;
@@ -137,10 +137,12 @@ export class OcclusionOutlines {
     // a body, its picture, or the camera changes; movement still updates every frame.
     if (this.castChanged(bodies, sceneryToken)) {
       const parked: { mesh: THREE.Mesh; parent: THREE.Object3D | null; material: THREE.Material | THREE.Material[] }[] = [];
+      const effects: THREE.Object3D[] = [];
       const wanted = new Set<string>();
       for (const mesh of bodies) {
         const id = mesh.userData.tokenId as string;
         wanted.add(id);
+        for (const child of mesh.children) if (child.visible && child.userData.castEffect) { effects.push(child); child.visible = false; }
         parked.push({ mesh, parent: mesh.parent, material: mesh.material });
         this.scratch.add(mesh);
         mesh.matrix.copy(mesh.matrixWorld);
@@ -163,6 +165,7 @@ export class OcclusionOutlines {
         item.mesh.matrixAutoUpdate = true;
         item.parent?.add(item.mesh);
       }
+      for (const effect of effects) effect.visible = true;
     }
     renderer.setRenderTarget(null);
 
@@ -206,6 +209,8 @@ export class OcclusionOutlines {
       const map = (mesh.material as THREE.MeshBasicMaterial).map ?? null;
       const previous = this.castState[index];
       if (!previous || previous.mesh !== mesh || previous.geometry !== mesh.geometry || previous.map !== map
+        || previous.positionVersion !== (mesh.geometry.getAttribute('position') as THREE.BufferAttribute).version
+        || previous.uvVersion !== (mesh.geometry.getAttribute('uv') as THREE.BufferAttribute).version
         || previous.version !== (map?.version ?? 0) || !previous.matrix.equals(mesh.matrixWorld)) changed = true;
     });
     if (!changed) return false;
@@ -216,8 +221,10 @@ export class OcclusionOutlines {
       const state = this.castState[index];
       if (state) {
         state.mesh = mesh; state.geometry = mesh.geometry; state.map = map; state.version = map?.version ?? 0;
+        state.positionVersion = (mesh.geometry.getAttribute('position') as THREE.BufferAttribute).version;
+        state.uvVersion = (mesh.geometry.getAttribute('uv') as THREE.BufferAttribute).version;
         state.matrix.copy(mesh.matrixWorld);
-      } else this.castState[index] = { mesh, geometry: mesh.geometry, map, version: map?.version ?? 0, matrix: mesh.matrixWorld.clone() };
+      } else this.castState[index] = { mesh, geometry: mesh.geometry, positionVersion: (mesh.geometry.getAttribute('position') as THREE.BufferAttribute).version, uvVersion: (mesh.geometry.getAttribute('uv') as THREE.BufferAttribute).version, map, version: map?.version ?? 0, matrix: mesh.matrixWorld.clone() };
     });
     return true;
   }

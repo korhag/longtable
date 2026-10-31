@@ -167,8 +167,12 @@ pub fn reveal_height(explored: &mut Explored, mut visible: Option<&mut Explored>
     let reach = (radius * scale).ceil() as i32 + 1;
     let origin_x = (eye_x * scale).floor() as i32;
     let origin_y = (eye_y * scale).floor() as i32;
-    for y in (origin_y - reach)..=(origin_y + reach) {
-        for x in (origin_x - reach)..=(origin_x + reach) {
+    let min_x = (origin_x - reach).max(0);
+    let min_y = (origin_y - reach).max(0);
+    let max_x = (origin_x + reach).min(explored.width as i32 - 1);
+    let max_y = (origin_y + reach).min(explored.height as i32 - 1);
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
             let px = (x as f32 + 0.5) / scale;
             let py = (y as f32 + 0.5) / scale;
             if !field.sees_surface(eye_x, eye_y, radius, px, py) {

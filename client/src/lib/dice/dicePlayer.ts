@@ -16,6 +16,7 @@ import { sampleFrame, settleTime } from './playback';
 
 const HOLD_MS = 2500;
 const GLIDE_S = 0.7;
+const TAG_POP_S = 0.22;
 
 interface DieActor {
   group: THREE.Group;
@@ -76,6 +77,7 @@ export class DicePlayer {
         this.felt.map = texture;
         this.felt.color.set(0xffffff);
         this.felt.needsUpdate = true;
+        this.redrawResting();
       });
     }
     if (woodUrl) {
@@ -86,6 +88,7 @@ export class DicePlayer {
         this.wood.map = texture;
         this.wood.color.set(0xffffff);
         this.wood.needsUpdate = true;
+        this.redrawResting();
       });
     }
   }
@@ -139,7 +142,7 @@ export class DicePlayer {
     const restAt = Math.max(0, ...roll.dice.map((die) => settleTime(die.keyframes, roll.keyframeDt)));
     const loop = () => {
       if (!this.playing) return;
-      this.frameId = requestAnimationFrame(loop);
+      this.frameId = 0;
       const elapsed = (serverNow() - roll.playAt) / 1000;
       const glide = elapsed >= restAt && elapsed >= 0 ? smoothstep((elapsed - restAt) / GLIDE_S) : 0;
       for (const actor of this.actors) {
@@ -180,6 +183,9 @@ export class DicePlayer {
           if (this.playing && this.currentId === rollId) onDone();
         }, HOLD_MS);
       }
+      // A hit can remain here until its owner chooses to roll damage. Once the
+      // badges have appeared the tray is static, so it needs no further frames.
+      if (this.playing && (!landed || elapsed - landedAt < TAG_POP_S)) this.frameId = requestAnimationFrame(loop);
     };
     loop();
     return true;
@@ -189,6 +195,7 @@ export class DicePlayer {
     this.playing = false;
     this.currentId = '';
     cancelAnimationFrame(this.frameId);
+    this.frameId = 0;
     if (!clear) return;
     for (const actor of this.actors) {
       disposeObject(actor.group);
@@ -215,6 +222,11 @@ export class DicePlayer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.redrawResting();
+  }
+
+  private redrawResting() {
+    if (this.playing && this.frameId === 0) this.renderer.render(this.scene, this.camera);
   }
 
   private frameTray(dice: { keyframes: { p: [number, number, number] }[] }[]) {
@@ -321,7 +333,7 @@ export class DicePlayer {
   }
 
   private placeTags(sinceLand: number) {
-    const pop = 1 - (1 - Math.min(1, Math.max(0, sinceLand / 0.22))) ** 3;
+    const pop = 1 - (1 - Math.min(1, Math.max(0, sinceLand / TAG_POP_S))) ** 3;
     const size = Math.max(0.01, 0.46 * pop);
     for (const actor of this.actors) {
       if (!actor.badge) continue;

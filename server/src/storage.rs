@@ -6,11 +6,12 @@
 // ------------------------------------------------------------
 
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::map::Scene;
-use crate::session::state::{CampaignShelf, PendingStrike, Player, SceneShelf, StoredRoll, Table, Token, UndoStep};
+use crate::session::state::{CampaignShelf, PendingStrike, Player, SceneFog, SceneShelf, StoredRoll, Table, Token, UndoStep};
 use crate::systems::{Campaign, Character};
 use crate::vision::Explored;
 
@@ -23,6 +24,8 @@ struct SaveFile {
     scene: Option<Scene>,
     tokens: Vec<Token>,
     explored: Explored,
+    #[serde(default)]
+    fog_memory: HashMap<String, SceneFog>,
     rolls: Vec<StoredRoll>,
     #[serde(default)]
     campaign: Campaign,
@@ -113,6 +116,7 @@ fn capture(table: &Table) -> SaveFile {
         scene: table.scene.clone(),
         tokens: table.tokens.clone(),
         explored: table.explored.clone(),
+        fog_memory: table.fog_memory.clone(),
         rolls: table.rolls.clone(),
         campaign: table.campaign.clone(),
         characters: table.characters.clone(),
@@ -253,6 +257,9 @@ fn apply(table: &mut Table, save: SaveFile) {
     table.scene = save.scene;
     table.tokens = save.tokens;
     table.explored = save.explored;
+    // Older shared exploration cannot identify which seat saw a cell. Preserve
+    // it for the GM, and rebuild each seat's memory from that seat's own eyes.
+    table.fog_memory = save.fog_memory;
     table.rolls = save.rolls;
     table.campaign = save.campaign;
     table.characters = save.characters;
@@ -264,6 +271,7 @@ fn apply(table: &mut Table, save: SaveFile) {
     table.talk = save.talk;
     table.ensure_campaign();
     table.sync_fog_size();
+    table.reveal_from_tokens();
 }
 
 #[cfg(test)]

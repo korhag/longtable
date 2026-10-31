@@ -52,7 +52,7 @@ export function cutoutMaterial(map: THREE.Texture | null, color: number, ground:
 }
 
 // Weak keys let discarded artwork and its mask be reclaimed together.
-const alphaMasks = new WeakMap<object, { width: number; height: number; alpha: Uint8Array } | null>();
+const alphaMasks = new WeakMap<object, { width: number; height: number; alpha: Uint8Array; top: number } | null>();
 export function opaqueTexel(image: CanvasImageSource | undefined, u: number, v: number): boolean {
   if (!image || typeof document === 'undefined') return true;
   const width = 'width' in image ? Number(image.width) : 0;
@@ -68,8 +68,12 @@ export function opaqueTexel(image: CanvasImageSource | undefined, u: number, v: 
       context.drawImage(image, 0, 0);
       const rgba = context.getImageData(0, 0, width, height).data;
       const alpha = new Uint8Array(width * height);
-      for (let i = 0; i < alpha.length; i += 1) alpha[i] = rgba[i * 4 + 3] ?? 0;
-      mask = { width, height, alpha };
+      let top = height;
+      for (let i = 0; i < alpha.length; i += 1) {
+        alpha[i] = rgba[i * 4 + 3] ?? 0;
+        if (alpha[i]! >= ALPHA_CUTOFF * 255) top = Math.min(top, Math.floor(i / width));
+      }
+      mask = { width, height, alpha, top };
     } catch { mask = null; }
     alphaMasks.set(image, mask);
   }
@@ -77,4 +81,12 @@ export function opaqueTexel(image: CanvasImageSource | undefined, u: number, v: 
   const x = Math.min(mask.width - 1, Math.max(0, Math.floor(u * mask.width)));
   const y = Math.min(mask.height - 1, Math.max(0, Math.floor((1 - v) * mask.height)));
   return (mask.alpha[y * mask.width + x] ?? 0) >= ALPHA_CUTOFF * 255;
+}
+
+/** Share the picking mask with rigs, so transparent headroom is not body height. */
+export function opaqueTop(image: CanvasImageSource | undefined): number | null {
+  if (!image) return null;
+  opaqueTexel(image, 0, 0);
+  const mask = alphaMasks.get(image);
+  return mask && mask.top < mask.height ? mask.top / mask.height : null;
 }

@@ -538,11 +538,11 @@ async fn dispatch(app: &App, player_id: &str, epoch: u64, message: ClientMsg) ->
     }
 
     if let ClientMsg::Attack { attacker_id, target_id, plus, minus } = message {
-        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, false).await;
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, None).await;
     }
 
-    if let ClientMsg::Strike { attacker_id, target_id, plus, minus } = message {
-        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, true).await;
+    if let ClientMsg::Strike { attack_roll_id, attacker_id, target_id, plus, minus } = message {
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, Some(attack_roll_id)).await;
     }
 
     if let ClientMsg::RollAction { character_id, action_id, visibility, plus, minus } = message {
@@ -648,15 +648,15 @@ async fn finish_attack(
     target_id: String,
     plus: i32,
     minus: i32,
-    damage: bool,
+    attack_roll_id: Option<String>,
 ) -> bool {
     let plan = {
         let table = app.table.lock().await;
         let Some(viewer) = table.viewer(player_id, epoch) else {
             return false;
         };
-        if damage {
-            table.prepare_strike(&viewer, &attacker_id, &target_id, plus, minus)
+        if let Some(attack_roll_id) = &attack_roll_id {
+            table.prepare_strike(&viewer, attack_roll_id, &attacker_id, &target_id, plus, minus)
         } else {
             table.prepare_attack(&viewer, &attacker_id, &target_id, plus, minus)
         }
@@ -685,11 +685,17 @@ async fn finish_roll(
     let (system, rules_id) = active_system(app).await;
     let rules = rules_for(&rules_id);
     let job = {
-        let table = app.table.lock().await;
+        let mut table = app.table.lock().await;
         let Some(viewer) = table.viewer(player_id, epoch) else {
             return false;
         };
-        table.begin_roll(&viewer, &formula, visibility, label, system.as_ref(), rules.as_ref())
+        table.begin_roll(&viewer, &formula, visibility, label, system.as_ref(), rules.as_ref()).and_then(|job| {
+            if let Some(plan) = plan.as_ref().filter(|plan| plan.damage) {
+                table.claim_damage(&viewer, plan)?;
+                table.broadcast_state();
+            }
+            Ok(job)
+        })
     };
     let job = match job {
         Ok(job) => job,
@@ -706,11 +712,20 @@ async fn finish_roll(
     })
     .await;
     let Ok(thrown) = thrown else {
+        if let Some(plan) = plan.as_ref().filter(|plan| plan.damage) {
+            let mut table = app.table.lock().await;
+            table.cancel_damage(plan);
+            table.broadcast_state();
+        }
         reply_error(app, player_id, epoch, "the dice tray failed").await;
         return true;
     };
     let total = modifier + thrown.iter().map(|die| die.value as i32 * die.sign as i32).sum::<i32>();
-    let outcome = rules.outcome(&thrown, total);
+    let mut outcome = rules.outcome(&thrown, total);
+    if plan.as_ref().is_some_and(|plan| !plan.damage && plan.adversary)
+        && crate::systems::daggerheart::adversary_critical(&thrown) {
+        outcome = Some(crate::systems::RollOutcome { label: "Critical success".into(), tone: "critical".into() });
+    }
     let mut contest = plan.as_ref().map(|plan| plan.contest.clone());
     if let Some(contest) = contest.as_mut() {
         if !plan.as_ref().is_some_and(|plan| plan.damage) {
@@ -736,22 +751,31 @@ async fn finish_roll(
     };
     let mut table = app.table.lock().await;
     if table.viewer(player_id, epoch).is_none() {
+        if let Some(plan) = plan.as_ref().filter(|plan| plan.damage) {
+            table.cancel_damage(plan);
+            table.broadcast_state();
+        }
         return false;
     }
     if plan.as_ref().is_some_and(|plan| plan.damage) {
         let target_id = event.contest.as_ref().map(|contest| contest.target_id.clone()).unwrap_or_default();
         let Some(system) = system.as_ref() else {
+            if let Some(plan) = &plan { table.cancel_damage(plan); }
             table.send_to(player_id, epoch, ServerMsg::Error { message: "this table has no system".into() });
+            table.broadcast_state();
             return true;
         };
-        match table.receive_blow(&target_id, event.total, system) {
+        let direct = plan.as_ref().is_some_and(|plan| plan.direct);
+        match table.receive_blow(&target_id, event.total, direct, system) {
             Ok(blow) => {
                 if let Some(contest) = event.contest.as_mut() {
                     contest.blow = Some(blow);
                 }
             }
             Err(message) => {
+                if let Some(plan) = &plan { table.cancel_damage(plan); }
                 table.send_to(player_id, epoch, ServerMsg::Error { message });
+                table.broadcast_state();
                 return true;
             }
         }

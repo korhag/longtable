@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // Module: fog
-// Purpose: The party's memory of the map. Each grid square is
+// Purpose: A viewer's memory of the map. Each grid square is
 //          split into 4x4 cells. A set bit has been seen.
 //          Bits are row-major, x fastest, with the high bit
 //          of each byte first. The client uses the same order.
@@ -32,6 +32,16 @@ impl Explored {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         *self = Self::new(width, height);
+    }
+
+    /// Combine equally sized masks without revisiting individual cells.
+    pub fn merge(&mut self, other: &Self) {
+        if self.width != other.width || self.height != other.height {
+            return;
+        }
+        for (ours, theirs) in self.bits.iter_mut().zip(&other.bits) {
+            *ours |= theirs;
+        }
     }
 
     pub fn get(&self, x: i32, y: i32) -> bool {
@@ -71,10 +81,10 @@ impl Explored {
             max_y = max_y.max(point.y);
         }
         let scale = CELLS_PER_SQUARE as f32;
-        let x0 = (min_x * scale).floor() as i32;
-        let y0 = (min_y * scale).floor() as i32;
-        let x1 = (max_x * scale).ceil() as i32;
-        let y1 = (max_y * scale).ceil() as i32;
+        let x0 = ((min_x * scale).floor() as i32).max(0);
+        let y0 = ((min_y * scale).floor() as i32).max(0);
+        let x1 = ((max_x * scale).ceil() as i32).min(self.width as i32 - 1);
+        let y1 = ((max_y * scale).ceil() as i32).min(self.height as i32 - 1);
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let center = Vec2::new((x as f32 + 0.5) / scale, (y as f32 + 0.5) / scale);

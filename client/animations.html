@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Longtable · animation showroom</title>
+  <style>
+    * { box-sizing: border-box; } body { margin: 0; background: #15120f; color: #dcc89e; font: 14px system-ui, sans-serif; }
+    header { padding: 18px 28px 8px; } h1 { font: 25px Georgia, serif; margin: 0 0 8px; } p { margin: 4px 0; color: #ad9e86; }
+    button, select { background: #2b2419; color: #e1c995; border: 1px solid #8b6f3e; border-radius: 6px; padding: 6px 12px; margin: 6px 6px 0 0; }
+    #stage { position: relative; width: 1400px; height: 1320px; } canvas { display: block; width: 1400px; height: 1320px; }
+    .name, .state { position: absolute; pointer-events: none; font-size: 12px; text-align: center; }
+    .name { top: 4px; width: 150px; } .state { left: 0; width: 100px; color: #d6ad63; }
+    #status { padding: 8px 28px; font-size: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header><h1>Longtable · Character animation showroom</h1><p>Eight casts · four directions · six actions. Drawn animation sheets when provided; compact motion for imported still artwork.</p><select id="facing" aria-label="Facing"><option>south</option><option>north</option><option>east</option><option>west</option></select><button id="play">Play all clips</button><button id="pose">Show mid-clip poses</button></header>
+  <div id="stage"><canvas id="view"></canvas></div><div id="status">Loading 32 directional images…</div>
+  <script type="module" src="/src/lib/render/animationShowroom.ts"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@ use crate::map::layout::{encode_cells, EdgeAxis, EdgePiece, MapLayout, PieceKind
 use crate::net::protocol::{ClientMsg, Role};
 use crate::session::state::{now_ms, SceneShelf, Table, Viewer};
 use crate::systems::{Character, CharacterKind};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 pub const NAME: &str = "The Old Forest Road";
@@ -120,9 +121,10 @@ pub fn install(table: &mut Table, viewer: &Viewer, catalog: &Catalog) -> Result<
         let cast = format!("forest/{asset}");
         if catalog.cast(&cast).is_none() { return Err(format!("Install the Forest pack first: missing {cast}")); }
         let character_id = Uuid::new_v4().to_string();
+        let (numbers, texts) = showroom_stats(asset, player);
         prepared.characters.push(Character {
             id: character_id.clone(), name: name.into(), kind: if player { CharacterKind::Pc } else { CharacterKind::Adversary },
-            owner_id: None, system_id: None, numbers: Default::default(), texts: Default::default(), cast_asset_id: Some(cast.clone()),
+            owner_id: None, system_id: Some("daggerheart".into()), numbers, texts, cast_asset_id: Some(cast.clone()),
         });
         prepared.command(viewer, ClientMsg::CreateToken {
             name: name.into(), x, y, owner_id: None, hidden: false, vision_radius: 10., grants_vision: player,
@@ -142,8 +144,54 @@ pub fn install(table: &mut Table, viewer: &Viewer, catalog: &Catalog) -> Result<
     }
     table.characters.extend(prepared.characters);
     table.tokens = prepared.tokens;
+    // A new campaign can try the encounter immediately; an existing rules choice is preserved.
+    if table.campaign.system_id.is_none() { table.campaign.system_id = Some("daggerheart".into()); }
     table.reveal_from_tokens();
     Ok(Draft { id: Uuid::new_v4().to_string(), name: NAME.into(), updated_at: now_ms(), scene_id: Some(scene_id), environment_base: Some(layout.environment.clone().unwrap_or_default()), layout })
+}
+
+/// Editable demonstration builds, not published SRD adversary stat blocks.
+fn showroom_stats(asset: &str, player: bool) -> (BTreeMap<String, i32>, BTreeMap<String, String>) {
+    let mut numbers: BTreeMap<String, i32> = [
+        ("hp", 0), ("hpmax", 6), ("stress", 0), ("stressmax", 6),
+        ("minor", 1), ("major", 7), ("severe", 13), ("tier", 1),
+    ].into_iter().map(|(key, value)| (key.into(), value)).collect();
+    let mut texts = BTreeMap::from([("notes".into(), "Editable showroom character for trying movement, facing, attacks and threshold damage.".into())]);
+    if player {
+        numbers.extend([
+            ("agility", 1), ("strength", 1), ("finesse", 0), ("instinct", 0),
+            ("presence", 0), ("knowledge", 0), ("evasion", 10), ("hope", 2),
+            ("armor", 0), ("armorscore", 0), ("proficiency", 1), ("level", 1),
+        ].into_iter().map(|(key, value)| (key.into(), value)));
+        let (ancestry, weapon, damage, trait_name, trait_key, range) = match asset {
+            "elf" => ("Elf", "Longbow", "1d8+2 phy", "Agility", "agility", "Far"),
+            "dwarf" => ("Dwarf", "Warhammer", "1d10+2 phy", "Strength", "strength", "Melee"),
+            "orc" => ("Orc", "Battleaxe", "1d10+2 phy", "Strength", "strength", "Melee"),
+            _ => ("Human", "Longsword", "1d8+2 phy", "Agility", "agility", "Melee"),
+        };
+        numbers.insert(trait_key.into(), 2);
+        texts.extend([
+            ("ancestry".into(), ancestry.into()),
+            ("primary".into(), format!("{weapon} · {trait_name} · {range}")),
+            ("attackrange".into(), range.into()), ("damage".into(), damage.into()),
+        ]);
+    } else {
+        let (major, severe, hpmax, difficulty, attack, kind, weapon, range, damage) = match asset {
+            "bandit-archer" => (6, 11, 3, 12, 1, "Ranged", "Shortbow", "Far", "1d8+2 phy"),
+            "bandit-brute" => (9, 17, 6, 13, 2, "Bruiser", "Heavy club", "Melee", "1d12+2 phy"),
+            "bandit-captain" => (10, 18, 6, 14, 2, "Leader", "Sabre", "Melee", "1d10+2 phy"),
+            _ => (7, 12, 3, 11, 1, "Skulk", "Daggers", "Melee", "1d8+1 phy"),
+        };
+        numbers.extend([
+            ("major", major), ("severe", severe), ("hpmax", hpmax),
+            ("difficulty", difficulty), ("attack", attack), ("stressmax", 3),
+        ].into_iter().map(|(key, value)| (key.into(), value)));
+        texts.extend([
+            ("advtype".into(), kind.into()), ("attackname".into(), weapon.into()),
+            ("attackrange".into(), range.into()), ("atkdamage".into(), damage.into()),
+        ]);
+    }
+    (numbers, texts)
 }
 
 #[cfg(test)]
@@ -173,6 +221,51 @@ mod tests {
             }
         }
         assert_eq!(all_pictures.len(), 32);
+    }
+
+    #[test]
+    fn showroom_animation_atlases_have_all_drawn_frames_without_cell_clipping() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
+        let catalog = crate::assets::load_catalog(&assets).unwrap();
+        let mut sheets = std::collections::HashSet::new();
+        let mut frame_count = 0;
+        for id in ["human", "elf", "dwarf", "orc", "bandit-scout", "bandit-archer", "bandit-brute", "bandit-captain"] {
+            let cast = catalog.cast(&format!("forest/{id}")).unwrap();
+            let animation = cast.animations.as_ref().expect("each showroom cast has drawn animation sheets");
+            for (view, still) in [
+                (&animation.views.north, &cast.views.north), (&animation.views.east, &cast.views.east),
+                (&animation.views.south, &cast.views.south), (&animation.views.west, &cast.views.west),
+            ] {
+                let path = &view.file;
+                assert!(sheets.insert(path.clone()), "directional sheets must be distinct");
+                let picture = image::open(assets.join("packs/forest").join(path)).unwrap().to_rgba8();
+                assert_eq!([picture.width(), picture.height()], [1024, 1536]);
+                let opaque_height = |image: &image::RgbaImage| {
+                    let rows: Vec<_> = image.enumerate_pixels().filter(|(_, _, pixel)| pixel[3] >= 128).map(|(_, y, _)| y).collect();
+                    (rows.iter().max().unwrap() - rows.iter().min().unwrap() + 1) as f32
+                };
+                let reference = image::open(assets.join("packs/forest").join(&still.file)).unwrap().to_rgba8();
+                let idle_height: f32 = (0..4).map(|column| opaque_height(&image::imageops::crop_imm(&picture, column * 256, 0, 256, 256).to_image())).sum::<f32>() / 4.;
+                let source_height = opaque_height(&reference) / cast.pixels_per_world_unit as f32;
+                let drawn_height = idle_height / view.pixels_per_world_unit.unwrap_or(animation.pixels_per_world_unit as f32);
+                assert!((source_height - drawn_height).abs() <= source_height * 0.1,
+                    "{path}: drawn body must keep its original world scale ({source_height} vs {drawn_height})");
+                for row in 0..6 {
+                    let mut poses = std::collections::HashSet::new();
+                    for column in 0..4 {
+                        let cell = image::imageops::crop_imm(&picture, column * 256, row * 256, 256, 256).to_image();
+                        assert!(cell.pixels().any(|pixel| pixel[3] >= 128), "{path} frame {row}/{column} is empty");
+                        assert!(cell.enumerate_pixels().all(|(x, y, pixel)| {
+                            pixel[3] < 128 || (x > 1 && x < 254 && y > 1 && y < 254)
+                        }), "{path} frame {row}/{column} crosses its cell boundary");
+                        assert!(poses.insert(cell.into_raw()), "{path} action {row} repeats the same picture");
+                        frame_count += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(sheets.len(), 32);
+        assert_eq!(frame_count, 768);
     }
 
     #[test]
@@ -291,12 +384,22 @@ mod tests {
         let first = install(&mut table, &gm, &catalog).unwrap();
         assert_eq!(table.tokens.len(), 8);
         assert_eq!(table.characters.iter().filter(|c| c.kind == CharacterKind::Pc).count(), 4);
+        assert_eq!(table.campaign.system_id.as_deref(), Some("daggerheart"));
+        for character in &table.characters {
+            assert_eq!(character.numbers["hp"], 0, "HP records marked slots, not remaining health");
+            assert!(character.numbers["hpmax"] >= 3);
+            assert!(character.numbers["major"] < character.numbers["severe"]);
+            let key = if character.kind == CharacterKind::Pc { "damage" } else { "atkdamage" };
+            assert!(!character.texts[key].is_empty());
+        }
         assert_eq!(table.scene.as_ref().unwrap().doors.len(), 1);
         let door_id = table.scene.as_ref().unwrap().doors[0].id.clone();
         assert!(!table.scene.as_ref().unwrap().doors[0].open);
         table.command(&gm, ClientMsg::SetDoor { door_id, open: true }, None).unwrap();
         assert!(table.scene.as_ref().unwrap().doors[0].open);
+        table.campaign.system_id = Some("pathfinder2e".into());
         let second = install(&mut table, &gm, &catalog).unwrap();
+        assert_eq!(table.campaign.system_id.as_deref(), Some("pathfinder2e"), "loading a sample must preserve a chosen campaign system");
         assert_ne!(first.scene_id, second.scene_id);
         assert_eq!(table.scenes.len(), 1);
         assert_eq!(table.scenes[0].tokens.len(), 8);

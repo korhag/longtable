@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // Module: vision
-// Purpose: Server-owned line of sight and the party's explored
+// Purpose: Server-owned line of sight and each seat's explored
 //          fog. Clients only draw what they are sent.
 // ------------------------------------------------------------
 

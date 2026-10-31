@@ -153,6 +153,14 @@ class TableStore {
   }
 
   enqueue(roll: RollEvent) {
+    if (this.activeRoll?.id === roll.id || this.queue.some((queued) => queued.id === roll.id)) return;
+    // A hit may stay open for its Roll damage button. Its linked damage replaces
+    // that settled tray instead of waiting behind a result the user is reading.
+    if (roll.contest?.attackRollId === this.activeRoll?.id && this.landedRollId === this.activeRoll?.id) {
+      this.activeRoll = roll;
+      this.landedRollId = null;
+      return;
+    }
     if (this.activeRoll) this.queue.push(roll);
     else this.activeRoll = roll;
   }

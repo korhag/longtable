@@ -12,6 +12,7 @@ import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { cameraDepth, sceneBasis } from './cameraProfile';
 import { FOG_LIFT } from './levels';
 import { fogShell } from './terrain';
+import { checkPlayerVision } from './visionCheck';
 
 const out = document.querySelector('#out');
 const canvas = document.querySelector('#view') as HTMLCanvasElement;
@@ -119,5 +120,6 @@ const blue = (pixel: { r: number; b: number }) => pixel.b > 200 && pixel.r < 40;
 if (!shell.lifted || !red(top) || !red(cliff) || !blue(flat)) {
   report(`FOG_FAIL top ${top.px},${top.py} ${top.r},${top.g},${top.b} cliff ${cliff.px},${cliff.py} ${cliff.r},${cliff.g},${cliff.b} flat ${flat.px},${flat.py} ${flat.r},${flat.g},${flat.b}`);
 } else {
-  report('FOG_OK');
+  try { report(`FOG_OK\n${checkPlayerVision()}`); }
+  catch (error) { report(`FOG_OK\nVISION_FAIL ${String(error)}`); }
 }

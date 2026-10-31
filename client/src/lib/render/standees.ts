@@ -14,7 +14,8 @@ import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
 import { COS_ELEVATION, sceneBasis } from './cameraProfile';
-import { seen } from './seen';
+import { blockerBrightness, edgeBrightness, sceneryBrightness } from './seen';
+import { shadeScenery } from './fogShade';
 import { setWallCutaway } from './wallCutaway';
 import { standeeWorldSize, uprightPixels } from './view';
 
@@ -38,14 +39,17 @@ export class StandeeLayer {
 
   sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void = () => {}, lowered: Set<string> = new Set()) {
     this.onPaint = onPaint;
-    const wanted = new Map<string, { sig: string; visible: boolean; make: () => THREE.Group }>();
+    const wanted = new Map<string, { sig: string; brightness: number; make: () => THREE.Group }>();
     if (layout) {
       for (const prop of layout.props) {
         if (findIn(packs, prop.asset, (pack) => pack.objects ?? [])) continue;
         const found = findIn(packs, prop.asset, (pack) => pack.props);
+        const footprint = found?.def.footprint ?? [1, 1];
+        const x = prop.x + footprint[0] / 2, y = prop.y + footprint[1] / 2;
         wanted.set(`prop:${prop.id}`, {
           sig: `${prop.asset}@${prop.x},${prop.y},${prop.mirror ? 1 : 0}:${found?.pack.contentHash ?? ''}`,
-          visible: showAll || seen(fog, prop.x + 0.5, prop.y + 0.5),
+          brightness: showAll ? 1 : found?.def.blocks === 'sight'
+            ? blockerBrightness(fog, x, y, footprint as [number, number]) : sceneryBrightness(fog, x, y),
           make: () => this.propGroup(prop, packs),
         });
       }
@@ -56,7 +60,7 @@ export class StandeeLayer {
         const midY = piece.axis === 'v' ? piece.y + 0.5 : piece.y;
         wanted.set(`piece:${piece.id}`, {
           sig: `${piece.asset}:${piece.axis}:${piece.x},${piece.y}:${open ? 1 : 0}`,
-          visible: showAll || seen(fog, midX, midY),
+          brightness: showAll ? 1 : edgeBrightness(fog, midX, midY, piece.axis),
           make: () => this.pieceGroup(piece, packs, open),
         });
       }
@@ -64,7 +68,7 @@ export class StandeeLayer {
         if (findIn(packs, post.asset, (pack) => pack.objects ?? [])) continue;
         wanted.set(`post:${post.x},${post.y}`, {
           sig: post.asset,
-          visible: showAll || seen(fog, post.x, post.y),
+          brightness: showAll ? 1 : sceneryBrightness(fog, post.x, post.y),
           make: () => this.postGroup(post.x, post.y, post.asset, packs),
         });
       }
@@ -78,7 +82,8 @@ export class StandeeLayer {
     for (const [id, spec] of wanted) {
       const existing = this.nodes.get(id);
       if (existing && existing.sig === spec.sig) {
-        existing.group.visible = spec.visible;
+        existing.group.visible = spec.brightness > 0;
+        shadeScenery(existing.group, spec.brightness);
         setWallCutaway(existing.group, id.startsWith('piece:') && lowered.has(id.slice(6)));
         continue;
       }
@@ -87,7 +92,8 @@ export class StandeeLayer {
         existing.group.removeFromParent();
       }
       const group = spec.make();
-      group.visible = spec.visible;
+      group.visible = spec.brightness > 0;
+      shadeScenery(group, spec.brightness);
       setWallCutaway(group, id.startsWith('piece:') && lowered.has(id.slice(6)));
       this.group.add(group);
       this.nodes.set(id, { sig: spec.sig, group });
@@ -186,7 +192,9 @@ export class StandeeLayer {
     mesh.position.copy(anchor);
     mesh.scale.x = mirror ? -1 : 1;
     mesh.renderOrder = 3;
-    box.parent?.add(mesh);
+    const holder = box.parent;
+    holder.add(mesh);
+    shadeScenery(holder, holder.userData.fogBrightness ?? 1);
     disposeNode(box);
     box.removeFromParent();
     this.onPaint();

@@ -38,4 +38,12 @@ describe('sameFogStamp', () => {
     expect(sameFogPicture(before, fog())).toBe(true);
     expect(sameFogPicture(before, fog({ explored: 'AQ==' }))).toBe(false);
   });
+
+  it('refreshes when the map height or subcell scale changes', () => {
+    const before = fog();
+    const stamp = fogStamp(before, 12, '', 8);
+    expect(sameFogStamp(stamp, before, 12, '', 9)).toBe(false);
+    expect(sameFogStamp(stamp, fog({ cellsPerSquare: 4 }), 12, '', 8)).toBe(false);
+    expect(sameFogPicture(before, fog({ cellsPerSquare: 4 }))).toBe(false);
+  });
 });
