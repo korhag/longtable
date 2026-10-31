@@ -9,6 +9,8 @@ mod formula;
 mod geometry;
 mod simulate;
 
-pub use formula::{parse_formula, DiceGroup, FormulaError, RollFormula};
-pub use geometry::{read_face, templates, DieKind, DieTemplate, Face};
-pub use simulate::{simulate, SimFrame, ThrownDie, KEYFRAME_DT};
+pub use formula::{parse_formula, RollFormula};
+pub use geometry::{templates, DieKind};
+pub use simulate::{simulate, ThrownDie, KEYFRAME_DT};
+#[cfg(test)]
+pub use simulate::SimFrame;

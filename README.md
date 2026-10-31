@@ -18,6 +18,12 @@ cd client && npm install && npm run dev
 
 Open `http://127.0.0.1:5173`. Vite forwards `/api` and `/ws` to the Rust process on port 8080. The terminal running the server prints the table passphrase and the GM key. The GM types that key in the lobby. Players type only the passphrase.
 
+`npm run dev` waits for the Rust `/api/health` endpoint before starting Vite. A first Rust build can take several minutes; leave its terminal open until it prints `listening on`. If the backend is not ready within five minutes, the client exits with instructions. Fix any error in the server terminal, then run `npm run dev` again. For a different backend address, set `LONGTABLE_API` to its HTTP origin before starting the client. This startup check also applies to the Windows and Linux launch scripts.
+
+If you see `ECONNREFUSED 127.0.0.1:8080` after startup, the backend has stopped or is listening on a different port. Check the Rust terminal and its configured bind address. Restart the backend, then refresh the browser.
+
+As of October 31, 2026, `npm audit` reports a low-severity `deepmerge` advisory through the Svelte Vite plugin, with no patched release available. The two audit entries describe this dependency chain; it is development tooling, not part of the production client. `npm audit --omit=dev` checks production dependencies separately. Do not use a forced downgrade to hide the advisory.
+
 ## Run it for a game
 
 ```bash

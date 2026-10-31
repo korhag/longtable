@@ -23,4 +23,4 @@ pub use scene::{Door, Light, Scene, Segment, SightBlock, Vec2, DIMETRIC_PROFILE}
 pub use package::{read_package, safe_relative, LoadedPackage, PackageError};
 #[allow(unused_imports)]
 pub use presentation::Prerendered;
-pub use uvtt::{parse_uvtt, ParsedMap, UvttError};
+pub use uvtt::{parse_uvtt};

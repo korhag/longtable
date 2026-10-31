@@ -149,6 +149,7 @@ fn span_cells(span: &SightBlock) -> Vec<(i32, i32)> {
     cells
 }
 
+#[cfg(test)]
 pub fn sees_surface(eye_x: f32, eye_y: f32, radius: f32, target_x: f32, target_y: f32, layout: &MapLayout, spans: &[SightBlock]) -> bool {
     Field::new(layout, spans).sees_surface(eye_x, eye_y, radius, target_x, target_y)
 }

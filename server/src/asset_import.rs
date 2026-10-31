@@ -6,7 +6,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Cursor, Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
+#[cfg(test)]
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;

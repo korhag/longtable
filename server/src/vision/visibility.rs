@@ -11,6 +11,7 @@ const ANGLE_NUDGE: f32 = 0.0001;
 
 /// True when the open segment from `from` to `to` properly crosses a wall.
 /// Touching an endpoint does not count, so a token can slide past a corner.
+#[cfg(test)]
 pub fn path_blocked(from: Vec2, to: Vec2, walls: &[Segment]) -> bool {
     walls.iter().any(|wall| segments_cross(from, to, wall.a, wall.b))
 }
@@ -102,6 +103,7 @@ fn ray_segment(origin: Vec2, dir: Vec2, a: Vec2, b: Vec2) -> Option<f32> {
     }
 }
 
+#[cfg(test)]
 fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
     let ab_c = (b - a).cross(c - a);
     let ab_d = (b - a).cross(d - a);

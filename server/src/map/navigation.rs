@@ -11,6 +11,7 @@ const PROP: u8 = 1;
 const WALL: u8 = 2;
 type Cell = (i32, i32);
 
+#[cfg(test)]
 pub fn check_route(layout: &MapLayout, from: Vec2, to: Vec2) -> Result<(), String> {
     find_route(layout, from, to, &[], &[], [1, 1]).map(|_| ())
 }

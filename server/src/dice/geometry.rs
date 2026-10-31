@@ -10,6 +10,7 @@
 
 use std::sync::OnceLock;
 
+#[cfg(test)]
 use rapier3d::prelude::nalgebra::{UnitQuaternion, Vector3};
 
 /// The six dice this table knows how to throw.
