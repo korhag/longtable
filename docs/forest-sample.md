@@ -2,11 +2,15 @@
 
 ![The forest encounter and compact game interface](milestones/forest-sample.png)
 
-[View the cabin cutaway in focus mode](milestones/forest-cabin-cutaway.png).
+[View the cabin cutaway in focus mode](milestones/forest-cabin-cutaway.png) or [inspect the stone stairs](milestones/forest-stairs.png).
 
 Open **Edit → Map → Load forest encounter**. This creates a new playable encounter and an editable draft. It keeps the previous scene and its figures in the campaign. Switch to **Play** for the encounter, or keep editing and use **Put on the table** to publish changes.
 
-The road winds past an enclosed timber cabin, four species of trees, a mossy boulder, and two raised terraces. Both height changes have stairs: the lower path connects tier 0 to 1, and the upper path connects 1 to 2. Four adventurers (Human, Elf, Dwarf, Orc) approach four different bandits. The cabin captain starts inside. The GM can click its door to open it. During play, a visible occupant lowers the room's foreground walls; edit mode displays the full walls. Characters hidden by fog or GM permissions never gain an outline.
+The road winds past a furnished log cabin, four species of trees, a mossy boulder, and two raised terraces. Both height changes have solid stone treads and landings: the lower path connects tier 0 to 1, and the upper path connects 1 to 2. Four adventurers (Human, Elf, Dwarf, Orc) approach four different bandits. The captain starts inside a seven-by-seven cabin with a bed, writing desk, two barrels and two bookshelves. These are reusable object assets with movement blockers and a clear aisle through the room.
+
+The cabin has full-height log walls and a framed oak door taller than the human figure. The GM can click the door's artwork to open it. During play, selecting a figure inside lowers the room's foreground walls; with no selection, visible occupants determine the cutaway. Edit mode displays the full walls. Characters hidden by fog or GM permissions never gain an outline.
+
+Load a fresh forest encounter after pulling an update to see the revised layout and furnishings. Previously saved scenes keep their existing placements.
 
 ## Paint a woodland
 
@@ -35,3 +39,13 @@ All eight characters have four distinct views. Select a figure and use North, Ea
 Try `docs/examples/forest-adventurers-sheet.png` or `docs/examples/forest-bandits-sheet.png` in Import sheet: choose Cast, set cells to **160 × 256**, zero margin/gutter, **128 pixels per world unit**, **1 × 1 footprint**, and foot pivot **80, 245**. The four columns are North, East, South, West; each row becomes one character. Use a new pack ID to preserve the bundled artwork.
 
 The importer expects regular-grid PNG sheets. It does not remove backgrounds or segment arbitrary moodboard collages.
+
+## Select, target and move
+
+Left-click a controllable figure to select it. With a figure selected, click another figure to target it; click that target again to select it if your seat controls it. Transparent space around a sprite passes the click through to figures behind it.
+
+Click clear ground to move the selected figure, or drag it to a destination. Walking follows a route around blocked objects and walls, through open doors and across connected stairs. An unreachable destination leaves the figure in place. The entire footprint must fit; a large figure cannot squeeze through a narrow gap. GM walking follows the same rules.
+
+Right-click a character for the action dial. It shows selection, targeting, character sheet and available rules actions for that character and the selected actor. Right-click ground for **Move here**, **Center view**, and the GM's explicit **Teleport** option. Teleport bypasses the route; use ordinary movement to walk through the scene. Escape or a click outside closes the dial.
+
+Movement animates locally along the route. Reduced-motion preferences keep movement immediate. Rendering reuses scenery, textures, elevation grids and silhouette masks; stationary lighting updates are capped, and hidden tabs stop drawing. See [performance notes](rendering-performance.md) for the measured checks and limits.

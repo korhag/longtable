@@ -64,7 +64,9 @@
     if (window.innerWidth < 1000) layout.rightOpen = false;
   }
   function shortcuts(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
     if ((event.target as HTMLElement)?.closest('input, textarea, select, [contenteditable=true]') || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === 'Escape' && table.menu) return;
     if (event.key.toLowerCase() === 'f') layout.focusMode = !layout.focusMode;
     if (event.key === 'Escape') layout.focusMode = false;
   }

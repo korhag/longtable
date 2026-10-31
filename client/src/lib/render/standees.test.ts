@@ -69,4 +69,19 @@ describe('standees', () => {
     expect(root.children).toHaveLength(4);
     layer.clear();
   });
+
+  it('does not add legacy wireframe corner posts to schema-2 walls', () => {
+    const scene = new THREE.Scene();
+    const layer = new StandeeLayer(scene);
+    const room = layout(false);
+    room.props = [];
+    room.pieces = [
+      { id: 'north', kind: 'wall', asset: 'core/logs', x: 1, y: 1, open: false, axis: 'h' },
+      { id: 'west', kind: 'wall', asset: 'core/logs', x: 1, y: 1, open: false, axis: 'v' },
+    ];
+    const modern: Pack = { ...pack, objects: [{ id: 'logs', name: 'Logs', kind: 'wall', placement: 'edge', footprintCells: [1, 1], renderLayers: [] }] };
+    layer.sync(room, [modern], [], null, true);
+    expect((scene.children[0] as THREE.Group).children).toHaveLength(0);
+    layer.clear();
+  });
 });

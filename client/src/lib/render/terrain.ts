@@ -15,6 +15,7 @@ import { decodeCells } from '../editor/cells';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import { cellLevel, FOG_LIFT } from './levels';
 import { pictureIndex } from './tileVariant';
+import { stairGeometry } from './stairGeometry';
 
 const TILE = 128;
 const CHUNK = 64;
@@ -78,8 +79,9 @@ const FRAG = `
   }
 
   vec2 lookup(vec2 cellPos) {
-    vec2 p = (floor(cellPos) + 0.5) / mapSize;
-    return vec2(p.x, 1.0 - p.y);
+    // DataTexture rows are uploaded in layout order (flipY=false). The cell
+    // already converted mesh UVs back to world rows; flipping again mirrors paint.
+    return (floor(cellPos) + 0.5) / mapSize;
   }
 
   float noise(vec2 p) {
@@ -149,7 +151,7 @@ export class TerrainLayer {
     }
     const built = buildGround(layout, packs);
     const slices = built.slices.map((slice) => `${slice.url ?? ''}|${slice.swatch}|${slice.filtering}`).join(';');
-    const shape = `${layout.levels ?? ''}|${(layout.stairs ?? []).map((stair) => `${stair.x},${stair.y},${stair.x2},${stair.y2}`).join(';')}`;
+    const shape = `${layout.levels ?? ''}|${(layout.stairs ?? []).map((stair) => `${stair.asset}:${stair.x},${stair.y},${stair.x2},${stair.y2}`).join(';')}`;
     const reusable = this.cellImage(layout);
     if (reusable && slices === this.sliceKey && shape === this.shape) {
       writeCells(reusable.data, built);
@@ -314,15 +316,20 @@ export class TerrainLayer {
       this.ramps.removeFromParent();
       this.ramps = null;
     }
-    const slopes = ramps(layout);
+    const slopes = stairGeometry(layout);
     if (!slopes) return;
     const stairs = (layout.stairs ?? []).filter((stair) => Math.abs(cellLevel(layout, stair.x, stair.y) - cellLevel(layout, stair.x2, stair.y2)) === 1);
     const materials = stairs.map((stair) => {
-      const material = new THREE.MeshBasicMaterial({ color: 0x817157, side: THREE.DoubleSide });
+      const material = new THREE.MeshBasicMaterial({ color: 0x817157, side: THREE.DoubleSide, vertexColors: true });
       const found = findIn(packs, stair.asset, (pack) => pack.objects ?? []);
-      const layer = found?.def.renderLayers.find((layer) => layer.kind === 'ground') ?? found?.def.renderLayers[0];
-      const url = found && layer ? fileUrl(found.pack, layer.file) : null;
-      if (url && found) void loadTexture(url, found.pack.filtering).then((texture) => {
+      // Upright stair pictures have transparent margins and projected perspective;
+      // only a ground surface may be wrapped onto the real treads.
+      const layer = found?.def.renderLayers.find((layer) => layer.kind === 'ground');
+      const ground = findIn(packs, terrainAt(layout, stair.x, stair.y), pack => pack.tiles ?? []);
+      const file = layer?.file ?? ground?.def.files[0];
+      const pack = layer ? found?.pack : ground?.pack;
+      const url = pack && file ? fileUrl(pack, file) : null;
+      if (url && pack) void loadTexture(url, pack.filtering).then((texture) => {
         if (!texture || generation !== this.generation) return;
         material.map = texture;
         material.color.set(0xffffff);
@@ -563,39 +570,6 @@ function sideSource(packs: Pack[], asset: string) {
   const file = chosen?.files[0];
   if (!file) return null;
   return { url: fileUrl(tile.pack, file), filtering: tile.pack.filtering };
-}
-
-function ramps(layout: MapLayout) {
-  const stairs = layout.stairs ?? [];
-  if (stairs.length === 0) return null;
-  const positions: number[] = [];
-  for (const stair of stairs) {
-    const low = cellLevel(layout, stair.x, stair.y);
-    const high = cellLevel(layout, stair.x2, stair.y2);
-    if (Math.abs(low - high) !== 1) continue;
-    const from = low < high ? { x: stair.x, y: stair.y, tier: low } : { x: stair.x2, y: stair.y2, tier: high };
-    const to = low < high ? { x: stair.x2, y: stair.y2, tier: high } : { x: stair.x, y: stair.y, tier: low };
-    const dx = to.x - from.x;
-    const dz = to.y - from.y;
-    const px = -dz * 0.35;
-    const pz = dx * 0.35;
-    const ax = from.x + 0.5;
-    const az = from.y + 0.5;
-    const bx = to.x + 0.5;
-    const bz = to.y + 0.5;
-    positions.push(ax + px, from.tier + 0.02, az + pz, ax - px, from.tier + 0.02, az - pz, bx - px, to.tier + 0.02, bz - pz);
-    positions.push(ax + px, from.tier + 0.02, az + pz, bx - px, to.tier + 0.02, bz - pz, bx + px, to.tier + 0.02, bz + pz);
-  }
-  if (positions.length === 0) return null;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  const uvs: number[] = [];
-  for (let i = 0; i < positions.length / 18; i += 1) {
-    uvs.push(0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1);
-    geometry.addGroup(i * 6, 6, i);
-  }
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  return geometry;
 }
 
 function disposeRampMaterials(material: THREE.Material | THREE.Material[]) {

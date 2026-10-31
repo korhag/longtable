@@ -11,7 +11,8 @@ import { fileUrl, findIn, loadTexture, type ObjectDef, type ObjectLayer, type Pa
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
-import { CUTOUT_RIGHT, CUTOUT_TOWARD, CUTOUT_UP, cutoutMaterial, orientUpright, uprightGeometry } from './cutout';
+import { CUTOUT_RIGHT, CUTOUT_TOWARD, CUTOUT_UP, cutoutMaterial, opaqueTexel, orientUpright, uprightGeometry } from './cutout';
+import { structureGeometry, structureTexture } from './architecture';
 import { cellLevel, SUPPORT_CLEARANCE, supportHeight } from './levels';
 import { seen } from './seen';
 import { setWallCutaway } from './wallCutaway';
@@ -32,6 +33,7 @@ export class SceneObjects {
   private group = new THREE.Group();
   private nodes = new Map<string, Node>();
   private batches = new Map<string, Batch>();
+  private architecture = new Map<string, THREE.BufferGeometry>();
   private generation = 0;
 
   constructor(scene: THREE.Scene) {
@@ -41,7 +43,7 @@ export class SceneObjects {
 
   sync(layout: MapLayout | null, packs: Pack[], doors: DoorView[], fog: FogView | null, showAll: boolean, onPaint: () => void, lowered: Set<string> = new Set()) {
     const generation = this.generation;
-    const wanted = new Map<string, { sig: string; visible: boolean; make: () => THREE.Group }>();
+    const wanted = new Map<string, { sig: string; visible: boolean; door: boolean; make: () => THREE.Group }>();
     const placed = new Map<string, { sig: string; matrices: THREE.Matrix4[]; layer: ObjectLayer; pack: Pack; pixels: number }>();
     if (layout) {
       for (const prop of layout.props) {
@@ -71,6 +73,7 @@ export class SceneObjects {
         wanted.set(piece.id, {
           sig,
           visible: showAll || seen(fog, midX, midY),
+          door: piece.kind === 'door',
           make: () => this.pieceGroup(piece.axis, piece.x, piece.y, height, open, found.def, found.pack, generation, onPaint),
         });
       }
@@ -94,6 +97,7 @@ export class SceneObjects {
         existing.group.removeFromParent();
       }
       const group = spec.make();
+      if (spec.door) group.userData.doorId = id;
       group.visible = spec.visible;
       setWallCutaway(group, lowered.has(id));
       this.group.add(group);
@@ -111,6 +115,26 @@ export class SceneObjects {
     this.nodes.clear();
     for (const batch of this.batches.values()) disposeBatch(batch);
     this.batches.clear();
+    for (const geometry of this.architecture.values()) geometry.dispose();
+    this.architecture.clear();
+  }
+
+  /** Pick visible door artwork or solid architecture, rather than its ground projection. */
+  doorAt(raycaster: THREE.Raycaster): string | null {
+    let closest: { id: string; distance: number } | null = null;
+    for (const [id, node] of this.nodes) {
+      if (!node.group.visible || !node.group.userData.doorId) continue;
+      node.group.updateWorldMatrix(true, true);
+      for (const hit of raycaster.intersectObject(node.group, true)) {
+        if (!(hit.object instanceof THREE.Mesh) || !hit.object.visible) continue;
+        const material = Array.isArray(hit.object.material) ? hit.object.material[hit.face?.materialIndex ?? 0] : hit.object.material;
+        if (!material || (material.clippingPlanes?.some((plane: THREE.Plane) => plane.distanceToPoint(hit.point) < 0))) continue;
+        if (hit.uv && material.alphaTest > 0 && !opaqueTexel(material.map?.image, hit.uv.x, hit.uv.y)) continue;
+        if (!closest || hit.distance < closest.distance) closest = { id, distance: hit.distance };
+        break;
+      }
+    }
+    return closest?.id ?? null;
   }
 
   private syncBatches(
@@ -159,6 +183,25 @@ export class SceneObjects {
     const group = new THREE.Group();
     const along = axis === 'h';
     group.position.set(along ? x + 0.5 : x, height + SUPPORT_CLEARANCE, along ? y : y + 0.5);
+    if (object.structure) {
+      const structure = object.structure;
+      const key = `${structure.profile}:${structure.height}:${structure.thickness}:${open ? 1 : 0}`;
+      let geometry = this.architecture.get(key);
+      if (!geometry) { geometry = structureGeometry(structure, open); this.architecture.set(key, geometry); }
+      const material = new THREE.MeshBasicMaterial({ color: 0x84684b, vertexColors: true });
+      const mesh = new THREE.Mesh(geometry, material);
+      if (!along) mesh.rotation.y = Math.PI / 2;
+      group.add(mesh);
+      const url = fileUrl(pack, structure.texture);
+      if (url) void loadTexture(url, pack.filtering).then(texture => {
+        if (!texture || generation !== this.generation || !mesh.parent) return;
+        material.map = structureTexture(texture);
+        material.color.set(0xffffff);
+        material.needsUpdate = true;
+        onPaint();
+      });
+      return group;
+    }
     const state = open ? 'open' : 'closed';
     const layers = object.renderLayers.filter((layer) => (layer.axis ?? '') === '' || layer.axis === axis);
     const matched = layers.filter((layer) => (layer.state ?? '') === '' || layer.state === state);
@@ -196,7 +239,7 @@ export class SceneObjects {
 function disposeGroup(group: THREE.Group) {
   group.traverse((node) => {
     if (!(node instanceof THREE.Mesh)) return;
-    node.geometry.dispose();
+    if (!node.geometry.userData.sharedArchitecture) node.geometry.dispose();
     const material = node.material as THREE.MeshBasicMaterial;
     material.map = null;
     material.dispose();

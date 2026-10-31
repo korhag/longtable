@@ -62,6 +62,8 @@ An object is one placed thing: a barrel, a tree, a wall, or a door.
 
 A stair uses `kind: stairs` and `placement: connection`. It joins two neighboring squares one tier apart. A jump from tier 0 to tier 2 needs two stairs.
 
+Stairs render as solid treads and an upper landing aligned to the two squares. Use an opaque `ground` render layer for the tread surface, such as a stone or timber tile. An additional upright layer can provide the library illustration. Older upright-only stair pictures remain compatible; their steps use the adjacent ground texture.
+
 Each picture is a `renderLayers` entry:
 
 | Field | Meaning |
@@ -83,6 +85,21 @@ An upright picture stands on the root and faces the camera. It is not a flat car
 `collisionPolygon` and each vision polygon are in world units around the root, with 3 to 32 points. An empty collision polygon uses the footprint rectangle.
 
 A door or wall on an edge needs a layer for each axis it should show. `h` runs east-west. `v` runs north-south. `state` picks the open or closed picture. An empty axis or state matches both.
+
+For a cabin with real depth, an edge object can also declare retained architecture:
+
+```json
+"structure": {
+  "profile": "log-wall",
+  "height": 2.65,
+  "thickness": 0.24,
+  "texture": "objects/cabin-wood.png"
+}
+```
+
+Use `log-wall` for a wall or `plank-door` for a door. Height is 1–4 world units and thickness is 0.1–0.5. The texture must be an opaque PNG. Geometry follows the placed edge; doors swing open, and foreground walls still lower when the room is occupied. Keep the ordinary render layers for library previews and fallback artwork. The bundled cabin uses a 2.65-unit wall and doorway so its entrance is taller than the human cast.
+
+The cabin furnishings are ordinary reusable object assets. The bed occupies 2×3 cells, desk and shelves 2×1, and barrels 1×1. Their images use 128 pixels per world unit, 384×384 canvases and a `[192, 366]` pivot. `docs/examples/cabin-furniture-sheet.png` contains their four cells in reading order: bed, desk, barrel, shelf. When making mixed-size sheets, record each object's footprint in the final pack manifest; sheet import applies one chosen footprint to the whole batch.
 
 ## Cast
 

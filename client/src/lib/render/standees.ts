@@ -61,6 +61,7 @@ export class StandeeLayer {
         });
       }
       for (const post of cornerPosts(layout)) {
+        if (findIn(packs, post.asset, (pack) => pack.objects ?? [])) continue;
         wanted.set(`post:${post.x},${post.y}`, {
           sig: post.asset,
           visible: showAll || seen(fog, post.x, post.y),

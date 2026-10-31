@@ -63,7 +63,7 @@ class TableStore {
   selectedTokenId = $state<string | null>(null);
   targetTokenId = $state<string | null>(null);
   hoverTokenId = $state<string | null>(null);
-  menu = $state<{ tokenId: string; x: number; y: number } | null>(null);
+  menu = $state<{ tokenId: string | null; x: number; y: number; point?: { x: number; y: number } } | null>(null);
   fear = $state(0);
   catalogRevision = $state('');
   figures = $state<Figure[]>([]);
@@ -131,7 +131,7 @@ class TableStore {
           this.hoverTokenId = null;
         }
         const menu = this.menu;
-        if (menu && !message.tokens.some((token) => token.id === menu.tokenId)) {
+        if (menu?.tokenId && !message.tokens.some((token) => token.id === menu.tokenId)) {
           this.menu = null;
         }
         break;

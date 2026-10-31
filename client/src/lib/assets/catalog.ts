@@ -96,6 +96,7 @@ export interface ObjectDef {
   originCells?: [number, number] | null;
   pixelsPerWorldUnit?: number;
   renderLayers: ObjectLayer[];
+  structure?: { profile: 'log-wall' | 'plank-door'; height: number; thickness: number; texture: string } | null;
   blocksMovement?: boolean;
   blocksVision?: boolean;
   occludesVisually?: boolean;

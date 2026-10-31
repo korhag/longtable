@@ -6,7 +6,7 @@
 //          buffer. It does not decide that the table is smooth.
 // ------------------------------------------------------------
 
-import type { Pack } from '../assets/catalog';
+import { loadCatalog, type Pack } from '../assets/catalog';
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
@@ -238,6 +238,10 @@ function readPixel(x: number, y: number, z: number) {
 window.addEventListener('error', (event) => say(`PERF_FAIL ${event.message}`));
 
 const host = document.querySelector('#host') as HTMLElement;
+if (new URLSearchParams(location.search).has('lighting')) {
+  host.style.width = 'min(1280px, 100vw)';
+  host.style.height = '720px';
+}
 let onPaint = () => {};
 const engine = new TableEngine(host, {
   onMove: () => {},
@@ -251,7 +255,39 @@ engine.start();
 say('PERF_STEP engine');
 
 try {
-  if (new URLSearchParams(location.search).has('ceiling')) {
+  if (new URLSearchParams(location.search).has('lighting')) {
+    const packs = await loadCatalog();
+    if (!packs.some(pack => pack.id === 'forest')) throw new Error('install the forest sample before the lighting performance check');
+    const view = sceneOf('forest-lighting', 26, 0, 8, 1);
+    view.packs = packs;
+    const map = view.scene!.layout!;
+    map.terrains = ['forest/forest-floor', 'forest/road'];
+    let ground = '';
+    for (let y = 0; y < 26; y++) for (let x = 0; x < 26; x++) ground += String.fromCharCode(Math.abs(x - 12) < 2 ? 1 : 0);
+    map.cells = btoa(ground);
+    const treeKinds = ['oak', 'pine', 'birch', 'dead-tree'];
+    map.props = Array.from({length: 18}, (_, i) => ({ id: `tree-${i}`, asset: `forest/${treeKinds[i % 4]}`, x: (i % 6) * 4, y: Math.floor(i / 6) * 8, mirror: false }));
+    const castKinds = ['human', 'elf', 'dwarf', 'orc', 'bandit-scout', 'bandit-archer', 'bandit-brute', 'bandit-captain'];
+    view.tokens = view.tokens.map((token, i) => ({ ...token, castAsset: `forest/${castKinds[i]}`, x: 10.5 + (i % 4), y: 10.5 + Math.floor(i / 4) * 3 }));
+    view.scene!.environment = { preset: 'night', brightness: 0.16 };
+    view.scene!.lights = [{ x: 10, y: 10, range: 5, color: '#ffad42', kind: 'torch', intensity: 1.4 }, { x: 15, y: 14, range: 5, color: '#79c8ff', kind: 'magic', intensity: 1.3 }];
+    engine.sync(view);
+    engine.fitMap();
+    await wait(2000);
+    await activeFrames(8); // Finish asynchronous artwork uploads before the measured window.
+    const before = engine.sample();
+    const frames = await activeFrames(16);
+    const after = engine.sample();
+    const lit = { ...after, frames: summarize(frames), frameDelta: after.draws - before.draws, sceneryPassDelta: after.sceneryPasses - before.sceneryPasses, castPassDelta: after.castPasses - before.castPasses };
+    if (lit.castPassDelta > lit.sceneryPassDelta + 1) throw new Error('stationary flickering lights rebuilt the cast silhouette mask');
+    engine.sync({ ...view, scene: { ...view.scene!, lights: [] } });
+    await wait(1200);
+    const quiet = engine.sample().draws;
+    await wait(800);
+    const idleExtraFrames = engine.sample().draws - quiet;
+    // A slow software driver can still finish a previously submitted frame here.
+    say(`PERF_OK ${JSON.stringify({ forestLighting: lit, idleExtraFrames, note: 'Real forest textures and cast, 18 trees, eight characters and two animated sources. Software rendering is a stress check, not a low-end-device FPS guarantee.' })}`);
+  } else if (new URLSearchParams(location.search).has('ceiling')) {
     const ceiling = sceneOf('ceiling', 200, 16, 8, 7);
     const beforeTerrain = terrainStats.rebuilds;
     const started = performance.now();

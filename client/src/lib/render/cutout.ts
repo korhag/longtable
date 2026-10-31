@@ -51,22 +51,30 @@ export function cutoutMaterial(map: THREE.Texture | null, color: number, ground:
   });
 }
 
+// Weak keys let discarded artwork and its mask be reclaimed together.
+const alphaMasks = new WeakMap<object, { width: number; height: number; alpha: Uint8Array } | null>();
 export function opaqueTexel(image: CanvasImageSource | undefined, u: number, v: number): boolean {
   if (!image || typeof document === 'undefined') return true;
   const width = 'width' in image ? Number(image.width) : 0;
   const height = 'height' in image ? Number(image.height) : 0;
   if (!width || !height) return true;
-  const canvas = document.createElement('canvas');
-  canvas.width = 1;
-  canvas.height = 1;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) return true;
-  const x = Math.min(width - 1, Math.max(0, Math.floor(u * width)));
-  const y = Math.min(height - 1, Math.max(0, Math.floor((1 - v) * height)));
-  try {
-    context.drawImage(image, x, y, 1, 1, 0, 0, 1, 1);
-    return (context.getImageData(0, 0, 1, 1).data[3] ?? 0) >= ALPHA_CUTOFF * 255;
-  } catch {
-    return true;
+  let mask = alphaMasks.get(image);
+  if (mask === undefined) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return true;
+    try {
+      context.drawImage(image, 0, 0);
+      const rgba = context.getImageData(0, 0, width, height).data;
+      const alpha = new Uint8Array(width * height);
+      for (let i = 0; i < alpha.length; i += 1) alpha[i] = rgba[i * 4 + 3] ?? 0;
+      mask = { width, height, alpha };
+    } catch { mask = null; }
+    alphaMasks.set(image, mask);
   }
+  if (!mask) return true;
+  const x = Math.min(mask.width - 1, Math.max(0, Math.floor(u * mask.width)));
+  const y = Math.min(mask.height - 1, Math.max(0, Math.floor((1 - v) * mask.height)));
+  return (mask.alpha[y * mask.width + x] ?? 0) >= ALPHA_CUTOFF * 255;
 }

@@ -13,6 +13,7 @@ import { cameraDepth, sceneBasis } from './cameraProfile';
 import { cutoutMaterial, orientUpright, uprightGeometry } from './cutout';
 import { TerrainLayer } from './terrain';
 import { checkOrganicTransitions } from './organicCheck';
+import { checkTerrainOrientation } from './terrainOrientationCheck';
 
 const out = document.querySelector('#out');
 const canvas = document.querySelector('#view') as HTMLCanvasElement;
@@ -115,7 +116,7 @@ camera.updateProjectionMatrix();
 const terrain = new TerrainLayer(scene);
 let paints = 0;
 let transitionsReady = false;
-void checkOrganicTransitions().then(() => { transitionsReady = true; draw(); }).catch((error) => report(`SCENE_FAIL ${String(error)}`));
+void Promise.all([checkOrganicTransitions(), checkTerrainOrientation()]).then(() => { transitionsReady = true; draw(); }).catch((error) => report(`SCENE_FAIL ${String(error)}`));
 terrain.sync(layout, [pack], () => {
   paints += 1;
   draw();

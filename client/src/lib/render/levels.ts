@@ -5,6 +5,23 @@
 // ------------------------------------------------------------
 
 import { decodeCells } from '../editor/cells';
+import { stairSurfaceHeight, type StairMap } from './stairShape';
+
+// Drafts replace their encoded height string on edit. Keep a few immutable grids,
+// rather than decoding an entire map for every moving foot, light or hit test.
+const heightGrids = new Map<string, { bytes: Uint8Array; highest: number }>();
+function heightGrid(encoded: string) {
+  const cached = heightGrids.get(encoded);
+  if (cached) return cached;
+  let bytes: Uint8Array;
+  try { bytes = decodeCells(encoded); } catch { bytes = new Uint8Array(); }
+  let highest = 0;
+  for (const value of bytes) if (value <= 2 && value > highest) highest = value;
+  const grid = { bytes, highest };
+  if (heightGrids.size >= 8) heightGrids.delete(heightGrids.keys().next().value!);
+  heightGrids.set(encoded, grid);
+  return grid;
+}
 
 /** The ground mesh sits a hair above the tier. Feet use this so they rest on it. */
 export const SUPPORT_CLEARANCE = 0.02;
@@ -14,12 +31,7 @@ export const FOG_LIFT = 0.01;
 
 export function cellLevel(layout: { width: number; height: number; levels?: string | null } | null | undefined, x: number, y: number): number {
   if (!layout?.levels) return 0;
-  let bytes: Uint8Array;
-  try {
-    bytes = decodeCells(layout.levels);
-  } catch {
-    return 0;
-  }
+  const { bytes } = heightGrid(layout.levels);
   const cx = Math.floor(x);
   const cy = Math.floor(y);
   if (cx < 0 || cy < 0 || cx >= layout.width || cy >= layout.height) return 0;
@@ -27,8 +39,8 @@ export function cellLevel(layout: { width: number; height: number; levels?: stri
   return value <= 2 ? value : 0;
 }
 
-export function supportHeight(layout: { width: number; height: number; levels?: string | null } | null | undefined, x: number, y: number): number {
-  return cellLevel(layout, x, y) + SUPPORT_CLEARANCE;
+export function supportHeight(layout: (StairMap & { levels?: string | null }) | null | undefined, x: number, y: number): number {
+  return (stairSurfaceHeight(layout, x, y, (cx, cy) => cellLevel(layout, cx, cy)) ?? cellLevel(layout, x, y)) + SUPPORT_CLEARANCE;
 }
 
 export function tierLabel(level: number): string {
@@ -40,13 +52,9 @@ export function tierLabel(level: number): string {
 /** Highest square, plus one world unit for a standing figure. */
 export function sceneRise(layout: { width: number; height: number; levels?: string | null } | null | undefined): number {
   if (!layout?.levels || layout.width < 1 || layout.height < 1) return 1;
-  let bytes: Uint8Array;
-  try {
-    bytes = decodeCells(layout.levels);
-  } catch {
-    return 1;
-  }
+  const { bytes, highest: cachedHighest } = heightGrid(layout.levels);
   const count = layout.width * layout.height;
+  if (bytes.length <= count) return cachedHighest + 1;
   let highest = 0;
   for (let index = 0; index < count && index < bytes.length; index += 1) {
     const value = bytes[index] ?? 0;

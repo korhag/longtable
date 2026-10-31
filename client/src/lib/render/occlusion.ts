@@ -68,7 +68,11 @@ const COMPOSITE = `
 
 export class OcclusionOutlines {
   sceneryDraws = 0;
+  castDraws = 0;
   private readyStamp = -1;
+  private castStamp = -1;
+  private castState: { mesh: THREE.Mesh; geometry: THREE.BufferGeometry; map: THREE.Texture | null; version: number; matrix: THREE.Matrix4 }[] = [];
+  private masks = new Map<string, THREE.ShaderMaterial>();
   private scenery: THREE.WebGLRenderTarget | null = null;
   private cast: THREE.WebGLRenderTarget | null = null;
   private scratch = new THREE.Scene();
@@ -102,7 +106,13 @@ export class OcclusionOutlines {
     hideDuringScenery: THREE.Object3D[],
     sceneryToken = 0,
   ) {
-    if (bodies.length === 0) return;
+    if (bodies.length === 0) {
+      for (const material of this.masks.values()) material.dispose();
+      this.masks.clear();
+      this.castState = [];
+      this.castStamp = -1;
+      return;
+    }
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     this.ensure(size.x, size.y);
     const scenery = this.scenery;
@@ -123,28 +133,36 @@ export class OcclusionOutlines {
       this.sceneryDraws += 1;
     }
 
-    const parked: { mesh: THREE.Mesh; parent: THREE.Object3D | null; material: THREE.Material | THREE.Material[] }[] = [];
-    for (const mesh of bodies) {
-      mesh.updateWorldMatrix(true, false);
-      parked.push({ mesh, parent: mesh.parent, material: mesh.material });
-      this.scratch.add(mesh);
-      mesh.matrix.copy(mesh.matrixWorld);
-      mesh.matrixAutoUpdate = false;
-      mesh.material = maskMaterial(mesh, mesh.userData.tokenId as string);
-    }
-    renderer.setRenderTarget(cast);
+    // Torch animation changes color, not silhouettes. Keep the ID/depth mask until
+    // a body, its picture, or the camera changes; movement still updates every frame.
+    if (this.castChanged(bodies, sceneryToken)) {
+      const parked: { mesh: THREE.Mesh; parent: THREE.Object3D | null; material: THREE.Material | THREE.Material[] }[] = [];
+      const wanted = new Set<string>();
+      for (const mesh of bodies) {
+        const id = mesh.userData.tokenId as string;
+        wanted.add(id);
+        parked.push({ mesh, parent: mesh.parent, material: mesh.material });
+        this.scratch.add(mesh);
+        mesh.matrix.copy(mesh.matrixWorld);
+        mesh.matrixAutoUpdate = false;
+        mesh.material = maskMaterial(mesh, id, this.masks);
+      }
+      for (const [id, material] of this.masks) if (!wanted.has(id)) { material.dispose(); this.masks.delete(id); }
+      renderer.setRenderTarget(cast);
     // The ID mask must have transparent background. An opaque clear color makes
     // empty pixels look like a far-away character and outlines every visible body.
-    const clearColor = renderer.getClearColor(new THREE.Color());
-    const clearAlpha = renderer.getClearAlpha();
-    renderer.setClearColor(0x000000, 0);
-    renderer.clear();
-    renderer.render(this.scratch, camera);
-    renderer.setClearColor(clearColor, clearAlpha);
-    for (const item of parked) {
-      item.mesh.material = item.material;
-      item.mesh.matrixAutoUpdate = true;
-      item.parent?.add(item.mesh);
+      const clearColor = renderer.getClearColor(new THREE.Color());
+      const clearAlpha = renderer.getClearAlpha();
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear();
+      renderer.render(this.scratch, camera);
+      this.castDraws += 1;
+      renderer.setClearColor(clearColor, clearAlpha);
+      for (const item of parked) {
+        item.mesh.material = item.material;
+        item.mesh.matrixAutoUpdate = true;
+        item.parent?.add(item.mesh);
+      }
     }
     renderer.setRenderTarget(null);
 
@@ -163,6 +181,10 @@ export class OcclusionOutlines {
     this.scenery?.dispose();
     this.cast?.dispose();
     this.material.dispose();
+    this.overlay.traverse(object => { if (object instanceof THREE.Mesh) object.geometry.dispose(); });
+    for (const material of this.masks.values()) material.dispose();
+    this.masks.clear();
+    this.castState = [];
     this.scenery = null;
     this.cast = null;
   }
@@ -174,14 +196,37 @@ export class OcclusionOutlines {
     this.scenery = target(width, height);
     this.cast = target(width, height);
     this.readyStamp = -1;
+    this.castStamp = -1;
+  }
+
+  private castChanged(bodies: THREE.Mesh[], sceneryToken: number) {
+    let changed = this.castStamp !== sceneryToken || this.castState.length !== bodies.length;
+    bodies.forEach((mesh, index) => {
+      mesh.updateWorldMatrix(true, false);
+      const map = (mesh.material as THREE.MeshBasicMaterial).map ?? null;
+      const previous = this.castState[index];
+      if (!previous || previous.mesh !== mesh || previous.geometry !== mesh.geometry || previous.map !== map
+        || previous.version !== (map?.version ?? 0) || !previous.matrix.equals(mesh.matrixWorld)) changed = true;
+    });
+    if (!changed) return false;
+    this.castStamp = sceneryToken;
+    this.castState.length = bodies.length;
+    bodies.forEach((mesh, index) => {
+      const map = (mesh.material as THREE.MeshBasicMaterial).map ?? null;
+      const state = this.castState[index];
+      if (state) {
+        state.mesh = mesh; state.geometry = mesh.geometry; state.map = map; state.version = map?.version ?? 0;
+        state.matrix.copy(mesh.matrixWorld);
+      } else this.castState[index] = { mesh, geometry: mesh.geometry, map, version: map?.version ?? 0, matrix: mesh.matrixWorld.clone() };
+    });
+    return true;
   }
 }
 
-const masks = new Map<string, THREE.ShaderMaterial>();
 const solidMap = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 solidMap.needsUpdate = true;
 
-function maskMaterial(mesh: THREE.Mesh, tokenId: string) {
+function maskMaterial(mesh: THREE.Mesh, tokenId: string, masks: Map<string, THREE.ShaderMaterial>) {
   const source = mesh.material as THREE.MeshBasicMaterial;
   const map = source.map ?? solidMap;
   const hasMap = source.map ? 1 : 0;

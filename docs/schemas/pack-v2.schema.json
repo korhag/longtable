@@ -29,7 +29,25 @@
         }
       }
     },
-    "objects": { "type": "array" },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "structure": {
+            "type": "object",
+            "description": "Optional solid edge architecture. Existing renderLayers remain the library preview; omitted structure uses the original cutout rendering.",
+            "required": ["profile", "height", "thickness", "texture"],
+            "properties": {
+              "profile": { "enum": ["log-wall", "plank-door"] },
+              "height": { "type": "number", "minimum": 1, "maximum": 4 },
+              "thickness": { "type": "number", "minimum": 0.1, "maximum": 0.5 },
+              "texture": { "type": "string", "description": "Pack-relative opaque PNG surface texture." }
+            }
+          }
+        }
+      }
+    },
     "cast": { "type": "array" }
   }
 }

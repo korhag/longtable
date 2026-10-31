@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const port = 5202;
 const ceiling = process.argv.includes('--ceiling');
-const url = `http://127.0.0.1:${port}/perf.html${ceiling ? '?ceiling=1' : ''}`;
+const lighting = process.argv.includes('--lighting');
+const url = `http://127.0.0.1:${port}/perf.html${ceiling ? '?ceiling=1' : lighting ? '?lighting=1' : ''}`;
 const swift = process.argv.includes('--swiftshader');
 const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: new URL('..', import.meta.url),

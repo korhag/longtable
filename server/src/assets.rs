@@ -212,6 +212,16 @@ pub struct VisionVolume {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StructureDef {
+    /// Optional retained architecture. Upright artwork remains the library preview.
+    pub profile: String,
+    pub height: f32,
+    pub thickness: f32,
+    pub texture: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectDef {
     pub id: String,
     pub name: String,
@@ -226,6 +236,8 @@ pub struct ObjectDef {
     pub pixels_per_world_unit: u32,
     #[serde(default)]
     pub render_layers: Vec<ObjectLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structure: Option<StructureDef>,
     #[serde(default)]
     pub blocks_movement: bool,
     #[serde(default)]

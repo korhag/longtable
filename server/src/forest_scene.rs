@@ -10,6 +10,11 @@ use crate::systems::{Character, CharacterKind};
 use uuid::Uuid;
 
 pub const NAME: &str = "The Old Forest Road";
+const CABIN_WEST: u32 = 3;
+const CABIN_EAST: u32 = 10;
+const CABIN_NORTH: u32 = 5;
+const CABIN_SOUTH: u32 = 12;
+const CABIN_DOOR_X: u32 = 6;
 
 pub fn layout() -> MapLayout {
     let (width, height) = (26_u32, 22_u32);
@@ -23,29 +28,46 @@ pub fn layout() -> MapLayout {
             if x >= 22 && y <= 6 { levels[(y * width + x) as usize] = 2; }
         }
     }
-    // A short branch leads from the road to a genuinely enclosed cabin.
-    for y in 11..13 { for x in 6..15 { cells[(y * width + x) as usize] = 1; } }
-    for y in 6..11 { for x in 4..9 { cells[(y * width + x) as usize] = 2; } }
-    let mut pieces = Vec::new();
-    for x in 4..9 {
-        pieces.push(piece(x, 6, EdgeAxis::H, false));
-        pieces.push(piece(x, 11, EdgeAxis::H, x == 6));
+    // Worn approaches make the cabin entrance and both stair landings readable.
+    for y in 12..14 { for x in 6..15 { cells[(y * width + x) as usize] = 1; } }
+    for x in 13..=19 { cells[(8 * width + x) as usize] = 1; }
+    for y in 4..=8 { cells[(y * width + 20) as usize] = 1; }
+    for x in 20..=23 { cells[(4 * width + x) as usize] = 1; }
+    for y in CABIN_NORTH..CABIN_SOUTH {
+        for x in CABIN_WEST..CABIN_EAST { cells[(y * width + x) as usize] = 2; }
     }
-    for y in 6..11 {
-        pieces.push(piece(4, y, EdgeAxis::V, false));
-        pieces.push(piece(9, y, EdgeAxis::V, false));
+    let mut pieces = Vec::new();
+    for x in CABIN_WEST..CABIN_EAST {
+        pieces.push(piece(x, CABIN_NORTH, EdgeAxis::H, false));
+        pieces.push(piece(x, CABIN_SOUTH, EdgeAxis::H, x == CABIN_DOOR_X));
+    }
+    for y in CABIN_NORTH..CABIN_SOUTH {
+        pieces.push(piece(CABIN_WEST, y, EdgeAxis::V, false));
+        pieces.push(piece(CABIN_EAST, y, EdgeAxis::V, false));
     }
     let trees = [
         ("oak", 1., 1.), ("pine", 5., 1.), ("birch", 9., 2.), ("dead-tree", 15., 2.),
-        ("pine", 1., 6.), ("oak", 1., 12.), ("birch", 4., 15.), ("dead-tree", 1., 18.),
+        ("pine", 1., 6.), ("oak", 0., 16.), ("birch", 4., 15.), ("dead-tree", 1., 18.),
         ("oak", 6., 19.), ("pine", 17., 18.), ("birch", 21., 18.), ("dead-tree", 24., 18.),
         ("oak", 21., 12.), ("pine", 24., 8.), ("birch", 19., 2.), ("dead-tree", 23., 2.),
-        ("oak", 15., 6.), ("pine", 6., 13.),
+        ("oak", 15., 6.), ("pine", 2., 15.),
     ];
     let mut props: Vec<_> = trees.iter().enumerate().map(|(i, (asset, x, y))| PlacedProp {
         id: format!("forest-tree-{i}"), asset: format!("forest/{asset}"), x: *x, y: *y, mirror: false,
     }).collect();
     props.push(PlacedProp { id: "forest-boulder".into(), asset: "forest/boulder".into(), x: 17., y: 14., mirror: false });
+    // Each furnishing is a reusable library object, with its own blocking footprint.
+    // The central aisle stays open from the door to the captain and work desk.
+    for (id, asset, x, y) in [
+        ("bed", "cabin-bed", 3., 6.),
+        ("desk", "cabin-desk", 7., 6.),
+        ("rear-shelf", "cabin-shelf", 7., 5.),
+        ("front-shelf", "cabin-shelf", 7., 10.),
+        ("barrel-a", "cabin-barrel", 3., 10.),
+        ("barrel-b", "cabin-barrel", 4., 10.),
+    ] {
+        props.push(PlacedProp { id: format!("forest-cabin-{id}"), asset: format!("forest/{asset}"), x, y, mirror: false });
+    }
     MapLayout {
         width, height, terrains: vec!["forest/forest-floor".into(), "forest/road".into(), "forest/cabin-floor".into()],
         cells: encode_cells(&cells), pieces, props, decals: Vec::new(),
@@ -127,8 +149,8 @@ pub fn install(table: &mut Table, viewer: &Viewer, catalog: &Catalog) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::navigation::check_route;
-    use crate::map::Vec2;
+    use crate::map::navigation::{check_route, find_route};
+    use crate::map::{Segment, Vec2};
 
     #[test]
     fn every_showroom_cast_has_four_distinct_transparent_views() {
@@ -200,8 +222,48 @@ mod tests {
         assert_eq!(layout.level_at(24., 4.), 2.);
         check_route(&layout, Vec2::new(17.5, 8.5), Vec2::new(18.5, 8.5)).unwrap();
         check_route(&layout, Vec2::new(21.5, 4.5), Vec2::new(22.5, 4.5)).unwrap();
-        assert_eq!(layout.pieces.len(), 20);
+        assert_eq!(layout.pieces.len(), 28);
         assert_eq!(layout.pieces.iter().filter(|p| p.kind == PieceKind::Door).count(), 1);
+    }
+
+    #[test]
+    fn furnished_cabin_has_a_clear_aisle_and_an_operable_entrance() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
+        let catalog = crate::assets::load_catalog(&assets).unwrap();
+        let layout = layout();
+        let compiled = compile(&layout, &catalog).unwrap();
+        let furnishings: Vec<_> = layout.props.iter().filter(|prop| prop.id.starts_with("forest-cabin-")).collect();
+        assert_eq!(furnishings.len(), 6);
+        for (asset, count) in [("cabin-bed", 1), ("cabin-desk", 1), ("cabin-shelf", 2), ("cabin-barrel", 2)] {
+            assert_eq!(furnishings.iter().filter(|prop| prop.asset == format!("forest/{asset}")).count(), count);
+        }
+        let mut occupied = std::collections::HashSet::new();
+        for prop in furnishings {
+            let object = catalog.object(&prop.asset).expect("furniture is available in the library");
+            assert!(object.blocks_movement, "{} must be an obstacle", prop.asset);
+            for y in prop.y as u32..prop.y as u32 + object.footprint_cells[1] {
+                for x in prop.x as u32..prop.x as u32 + object.footprint_cells[0] {
+                    assert!((CABIN_WEST..CABIN_EAST).contains(&x) && (CABIN_NORTH..CABIN_SOUTH).contains(&y));
+                    assert!(occupied.insert((x, y)), "furnishings overlap at {x},{y}");
+                }
+            }
+        }
+        assert!(!occupied.contains(&(6, 8)), "captain must not stand in furniture");
+        for y in 8..CABIN_SOUTH { assert!(!occupied.contains(&(CABIN_DOOR_X, y)), "the door aisle stays clear"); }
+        let captain = Vec2::new(6.5, 8.5);
+        let doorstep = Vec2::new(6.5, 13.5);
+        let mut closed = compiled.walls.clone();
+        closed.extend(compiled.doors.iter().map(|door| Segment { a: door.a, b: door.b }));
+        assert!(find_route(&layout, doorstep, captain, &closed, &compiled.move_blockers, [1, 1]).is_err(), "closed cabin must not admit a figure");
+        let entrance = find_route(&layout, doorstep, captain, &compiled.walls, &compiled.move_blockers, [1, 1]).expect("opening the door gives the captain a clear route outside");
+        assert!(entrance.contains(&(CABIN_DOOR_X as i32, CABIN_SOUTH as i32)));
+        for destination in [Vec2::new(5.5, 7.5), Vec2::new(8.5, 8.5)] {
+            find_route(&layout, captain, destination, &compiled.walls, &compiled.move_blockers, [1, 1]).expect("bedside and work area remain reachable");
+        }
+        let terraces = find_route(&layout, Vec2::new(11.5, 17.5), Vec2::new(23.5, 4.5), &closed, &compiled.move_blockers, [1, 1]).expect("the party can reach both terraces around scenery");
+        for landing in [(17, 8), (18, 8), (21, 4), (22, 4)] {
+            assert!(terraces.contains(&landing), "the route must use each stair landing");
+        }
     }
 
     #[test]

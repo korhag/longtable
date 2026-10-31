@@ -32,6 +32,7 @@
   import SettingsPanel from './lib/ui/SettingsPanel.svelte';
   import TalkPanel from './lib/ui/TalkPanel.svelte';
   import TokenPanel from './lib/ui/TokenPanel.svelte';
+  import ContextDial from './lib/ui/ContextDial.svelte';
 
   let host: HTMLDivElement;
   let viewportWidth = $state(1400);
@@ -135,6 +136,7 @@
       onMove: (tokenId, x, y) => send({ type: 'moveToken', tokenId, x, y }),
       onSelect: (tokenId) => {
         table.selectedTokenId = tokenId;
+        table.targetTokenId = null;
         table.menu = null;
         const token = table.tokens.find((item) => item.id === tokenId);
         if (token?.characterId) systems.selectedId = token.characterId;
@@ -143,13 +145,7 @@
         table.targetTokenId = tokenId;
         table.menu = null;
       },
-      onMenu: (tokenId, x, y) => {
-        if (!tokenId) {
-          table.menu = null;
-          return;
-        }
-        table.menu = { tokenId, x, y };
-      },
+      onMenu: (tokenId, x, y, point) => { table.menu = { tokenId, x, y, point }; },
       onPaint: () => {
         const id = table.targetTokenId;
         const raw = id ? engine?.screenOf(id) ?? null : null;
@@ -369,6 +365,9 @@
     </div>
 
     <DiceStage />
+    {#if !editor.active}
+      <ContextDial onCenter={(x, y) => engine?.centerOn(x, y)} onMove={(id, x, y) => engine?.moveTo(id, x, y)} onTeleport={(tokenId, x, y) => { engine?.skipNextMovement(tokenId); send({ type: 'teleportToken', tokenId, x, y }); }} />
+    {/if}
 
     {#if chrome.settings}
       <Panel id="settings" title="Settings" onclose={() => (chrome.settings = false)}>

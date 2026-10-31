@@ -436,7 +436,7 @@
     },
     {
       "id": "cabin-wall",
-      "name": "Timber & plaster wall",
+      "name": "Handhewn log wall",
       "kind": "wall",
       "placement": "edge",
       "footprintCells": [
@@ -449,12 +449,12 @@
           "kind": "upright",
           "file": "objects/wall-h.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "v"
         },
@@ -462,23 +462,29 @@
           "kind": "upright",
           "file": "objects/wall-v.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "h"
         }
       ],
       "blocksMovement": true,
       "blocksVision": true,
-      "occludesVisually": true
+      "occludesVisually": true,
+      "structure": {
+        "profile": "log-wall",
+        "height": 2.65,
+        "thickness": 0.24,
+        "texture": "objects/cabin-wood.png"
+      }
     },
     {
       "id": "cabin-door",
-      "name": "Oak cabin door",
+      "name": "Full-height oak cabin door",
       "kind": "door",
       "placement": "edge",
       "footprintCells": [
@@ -491,12 +497,12 @@
           "kind": "upright",
           "file": "objects/door-h-closed.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "v",
           "state": "closed"
@@ -505,12 +511,12 @@
           "kind": "upright",
           "file": "objects/door-h-open.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "v",
           "state": "open"
@@ -519,12 +525,12 @@
           "kind": "upright",
           "file": "objects/door-v-closed.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "h",
           "state": "closed"
@@ -533,12 +539,12 @@
           "kind": "upright",
           "file": "objects/door-v-open.png",
           "sizePx": [
-            96,
-            160
+            192,
+            384
           ],
           "pivotPx": [
-            48,
-            136
+            96,
+            352
           ],
           "axis": "h",
           "state": "open"
@@ -546,11 +552,17 @@
       ],
       "blocksMovement": true,
       "blocksVision": true,
-      "occludesVisually": true
+      "occludesVisually": true,
+      "structure": {
+        "profile": "plank-door",
+        "height": 2.65,
+        "thickness": 0.24,
+        "texture": "objects/cabin-wood.png"
+      }
     },
     {
       "id": "stairs",
-      "name": "Mossy stone steps",
+      "name": "Weathered stone stairway",
       "kind": "stairs",
       "placement": "connection",
       "footprintCells": [
@@ -570,6 +582,242 @@
             64,
             116
           ]
+        },
+        {
+          "kind": "ground",
+          "file": "tiles/road-0.png",
+          "sizePx": [
+            128,
+            128
+          ],
+          "pivotPx": [
+            64,
+            64
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cabin-bed",
+      "name": "Wool blanket bed",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        3
+      ],
+      "originCells": [
+        1.0,
+        1.5
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/cabin-bed.png",
+          "sizePx": [
+            384,
+            384
+          ],
+          "pivotPx": [
+            192,
+            366
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": false,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.92,
+          -1.42
+        ],
+        [
+          0.92,
+          -1.42
+        ],
+        [
+          0.92,
+          1.42
+        ],
+        [
+          -0.92,
+          1.42
+        ]
+      ]
+    },
+    {
+      "id": "cabin-desk",
+      "name": "Captain’s writing desk",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        1
+      ],
+      "originCells": [
+        1.0,
+        0.5
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/cabin-desk.png",
+          "sizePx": [
+            384,
+            384
+          ],
+          "pivotPx": [
+            192,
+            366
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": false,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.92,
+          -0.42
+        ],
+        [
+          0.92,
+          -0.42
+        ],
+        [
+          0.92,
+          0.42
+        ],
+        [
+          -0.92,
+          0.42
+        ]
+      ]
+    },
+    {
+      "id": "cabin-barrel",
+      "name": "Ironbound oak barrel",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        1,
+        1
+      ],
+      "originCells": [
+        0.5,
+        0.5
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/cabin-barrel.png",
+          "sizePx": [
+            384,
+            384
+          ],
+          "pivotPx": [
+            192,
+            366
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": false,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.42,
+          -0.42
+        ],
+        [
+          0.42,
+          -0.42
+        ],
+        [
+          0.42,
+          0.42
+        ],
+        [
+          -0.42,
+          0.42
+        ]
+      ]
+    },
+    {
+      "id": "cabin-shelf",
+      "name": "Oak bookshelves",
+      "kind": "static",
+      "placement": "cell",
+      "footprintCells": [
+        2,
+        1
+      ],
+      "originCells": [
+        1.0,
+        0.5
+      ],
+      "pixelsPerWorldUnit": 128,
+      "renderLayers": [
+        {
+          "kind": "upright",
+          "file": "objects/cabin-shelf.png",
+          "sizePx": [
+            384,
+            384
+          ],
+          "pivotPx": [
+            192,
+            366
+          ]
+        }
+      ],
+      "blocksMovement": true,
+      "blocksVision": true,
+      "occludesVisually": true,
+      "collisionPolygon": [
+        [
+          -0.92,
+          -0.42
+        ],
+        [
+          0.92,
+          -0.42
+        ],
+        [
+          0.92,
+          0.42
+        ],
+        [
+          -0.92,
+          0.42
+        ]
+      ],
+      "visionVolumes": [
+        {
+          "polygon": [
+            [
+              -0.92,
+              -0.42
+            ],
+            [
+              0.92,
+              -0.42
+            ],
+            [
+              0.92,
+              0.42
+            ],
+            [
+              -0.92,
+              0.42
+            ]
+          ],
+          "baseHeight": 0,
+          "height": 2.2
         }
       ]
     }

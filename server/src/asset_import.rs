@@ -86,6 +86,21 @@ pub fn validate_v2_shape(pack: &Pack) -> Result<(), String> {
         if let Some(origin) = object.origin_cells {
             finite_pair(origin, &format!("object {}/{} origin", pack.id, object.id))?;
         }
+        if let Some(structure) = &object.structure {
+            let expected = match structure.profile.as_str() {
+                "log-wall" => "wall",
+                "plank-door" => "door",
+                _ => return Err(format!("object {}/{} has an unknown structure profile", pack.id, object.id)),
+            };
+            if object.kind != expected || object.placement != "edge" {
+                return Err(format!("object {}/{} structure must be an edge {expected}", pack.id, object.id));
+            }
+            if !structure.height.is_finite() || !(1.0..=4.0).contains(&structure.height)
+                || !structure.thickness.is_finite() || !(0.1..=0.5).contains(&structure.thickness) {
+                return Err(format!("object {}/{} structure needs height 1–4 and thickness 0.1–0.5", pack.id, object.id));
+            }
+            check_path(&pack.id, &structure.texture)?;
+        }
         finite_polygon(&object.collision_polygon, &format!("object {}/{} collision", pack.id, object.id))?;
         for (index, volume) in object.vision_volumes.iter().enumerate() {
             finite_polygon(&volume.polygon, &format!("object {}/{} vision {index}", pack.id, object.id))?;
@@ -147,12 +162,18 @@ pub fn validate_v2_files(pack: &Pack, files: &BTreeMap<String, Vec<u8>>, decode:
         }
     }
     for object in &pack.objects {
+        if let Some(structure) = &object.structure {
+            let image = read_image(files, &structure.texture, &mut budget, decode)?;
+            if decode && image.has_alpha {
+                return Err(format!("{} is a structure surface and must be opaque", structure.texture));
+            }
+        }
         for layer in &object.render_layers {
             let image = read_image(files, &layer.file, &mut budget, decode)?;
             if image.width != layer.size_px[0] || image.height != layer.size_px[1] {
                 return Err(format!("{} is {} by {}, not the size the pack declares", layer.file, image.width, image.height));
             }
-            if decode && !image.has_alpha {
+            if decode && layer.kind == "upright" && !image.has_alpha {
                 warnings.push(format!("{} has no transparent pixels. Cutout art needs a transparent background", layer.file));
             }
         }
@@ -662,6 +683,28 @@ mod tests {
         assert!(err.contains("scale must be between 1 and 4096"), "{err}");
         assert!(!dir.join("packs/demo").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn architecture_profiles_validate_dimensions_paths_and_matching_edge_kinds() {
+        let mut value: serde_json::Value = serde_json::from_str(&manifest("")).unwrap();
+        value["objects"][0]["kind"] = "wall".into();
+        value["objects"][0]["placement"] = "edge".into();
+        value["objects"][0]["structure"] = serde_json::json!({
+            "profile": "log-wall", "height": 2.65, "thickness": 0.24, "texture": "objects/wood.png"
+        });
+        let mut pack: Pack = serde_json::from_value(value).unwrap();
+        validate_v2_shape(&pack).unwrap();
+        let serialized = serde_json::to_value(&pack).unwrap();
+        assert_eq!(serialized["objects"][0]["structure"]["height"], 2.65_f32);
+        pack.objects[0].kind = "static".into();
+        assert!(validate_v2_shape(&pack).unwrap_err().contains("edge wall"));
+        pack.objects[0].kind = "wall".into();
+        pack.objects[0].structure.as_mut().unwrap().height = f32::INFINITY;
+        assert!(validate_v2_shape(&pack).unwrap_err().contains("height"));
+        pack.objects[0].structure.as_mut().unwrap().height = 2.65;
+        pack.objects[0].structure.as_mut().unwrap().texture = "../wood.png".into();
+        assert!(validate_v2_shape(&pack).is_err());
     }
 
     #[test]

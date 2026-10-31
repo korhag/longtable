@@ -65,9 +65,11 @@ export class SceneLighting {
   private layout: MapLayout | null = null;
   private fog: FogView | null = null;
   private showAll = true;
-  private selected: SceneLight[] = [];
+  private selected: { light: SceneLight; height: number; color: THREE.Color; marker: THREE.Sprite | null }[] = [];
+  private selectionDirty = true;
+  private focusX = NaN;
+  private focusZ = NaN;
   private glowTexture: THREE.CanvasTexture | null = null;
-  private markerKey = '';
   private stateKey = '';
   private motionQuery = typeof matchMedia !== 'undefined' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   private reducedMotion = this.motionQuery?.matches ?? false;
@@ -81,30 +83,40 @@ export class SceneLighting {
   }
 
   sync(scene: LightingScene | null, fog: FogView | null, showAll: boolean) {
-    this.sources = (scene?.lights ?? []).filter(light => Number.isFinite(light.range) && light.range > 0 && (light.intensity ?? 1) > 0);
+    const sources = (scene?.lights ?? []).filter(light => Number.isFinite(light.range) && light.range > 0 && (light.intensity ?? 1) > 0);
     this.layout = scene?.layout ?? null;
     this.fog = fog;
     this.showAll = showAll;
     const environment = scene?.environment ?? (scene?.layout as (MapLayout & { environment?: EnvironmentLight }) | null)?.environment;
     this.uniforms.sceneAmbient.value.copy(ambientColor(environment));
-    const key = JSON.stringify([environment ?? null, this.sources, this.layout?.levels ?? '', fog?.explored ?? '', showAll]);
+    const key = JSON.stringify([environment ?? null, sources, this.layout?.width, this.layout?.height, this.layout?.levels ?? '', this.layout?.stairs, fog?.explored ?? '', showAll]);
     const changed = key !== this.stateKey;
     this.stateKey = key;
+    if (changed) { this.sources = sources; this.selectionDirty = true; }
     return changed;
   }
 
   update(seconds: number, focus: { x: number; z: number }) {
-    this.selected = closestLights(this.sources, focus);
-    this.animated = !this.reducedMotion && this.selected.some(light => light.kind === 'torch' || light.kind === 'magic');
-    this.uniforms.sourceCount.value = this.selected.length;
-    for (const [i, source] of this.selected.entries()) {
-      const pulse = lightPulse(source, seconds, this.reducedMotion);
-      const height = supportHeight(this.layout, source.x, source.y) + 0.8;
-      this.uniforms.sourcePositions.value[i]!.set(source.x, height, source.y, pulse.range);
-      const color = new THREE.Color(source.color);
-      this.uniforms.sourceColors.value[i]!.set(color.r, color.g, color.b, pulse.intensity);
+    if (this.selectionDirty || focus.x !== this.focusX || focus.z !== this.focusZ) {
+      const nearest = closestLights(this.sources, focus);
+      if (this.selectionDirty || nearest.length !== this.selected.length || nearest.some((light, i) => light !== this.selected[i]?.light)) {
+        this.selected = nearest.map(light => ({ light, height: supportHeight(this.layout, light.x, light.y) + 0.8, color: new THREE.Color(light.color), marker: null }));
+        this.syncMarkers();
+      }
+      this.focusX = focus.x; this.focusZ = focus.z; this.selectionDirty = false;
     }
-    this.updateMarkers(seconds);
+    this.animated = !this.reducedMotion && this.selected.some(({ light }) => light.kind === 'torch' || light.kind === 'magic');
+    this.uniforms.sourceCount.value = this.selected.length;
+    for (let i = 0; i < this.selected.length; i++) {
+      const { light, height, color, marker } = this.selected[i]!;
+      const pulse = lightPulse(light, seconds, this.reducedMotion);
+      this.uniforms.sourcePositions.value[i]!.set(light.x, height, light.y, pulse.range);
+      this.uniforms.sourceColors.value[i]!.set(color.r, color.g, color.b, pulse.intensity);
+      if (marker) {
+        const size = 0.35 + Math.min(0.4, pulse.range * 0.045);
+        marker.scale.set(size, size * (light.kind === 'torch' ? 1.45 : 1), 1);
+      }
+    }
   }
 
   /** Leave fog, outlines, selection affordances and editor guides unlit. */
@@ -150,30 +162,22 @@ export class SceneLighting {
     }
   }
 
-  private updateMarkers(seconds: number) {
-    const visible = this.selected.filter(light => this.showAll || seen(this.fog, light.x, light.y));
-    const key = visible.map(light => `${light.x},${light.y},${supportHeight(this.layout, light.x, light.y)},${light.color},${light.kind}`).join(';');
-    if (key !== this.markerKey) {
-      this.clearMarkers();
-      this.markerKey = key;
-      if (!this.glowTexture && visible.length) {
-        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
-        const context = canvas.getContext('2d')!;
-        const glow = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-        glow.addColorStop(0, '#ffffff'); glow.addColorStop(0.12, '#fffffff0'); glow.addColorStop(0.4, '#ffffff55'); glow.addColorStop(1, '#ffffff00');
-        context.fillStyle = glow; context.fillRect(0, 0, 64, 64);
-        this.glowTexture = new THREE.CanvasTexture(canvas);
-      }
-      for (const source of visible) {
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTexture, color: source.color, transparent: true, opacity: 0.85, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending }));
-        sprite.position.set(source.x, supportHeight(this.layout, source.x, source.y) + 0.8, source.y);
-        this.markers.add(sprite);
-      }
+  private syncMarkers() {
+    this.clearMarkers();
+    const visible = this.selected.filter(({ light }) => this.showAll || seen(this.fog, light.x, light.y));
+    if (!this.glowTexture && visible.length) {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+      const context = canvas.getContext('2d')!;
+      const glow = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+      glow.addColorStop(0, '#ffffff'); glow.addColorStop(0.12, '#fffffff0'); glow.addColorStop(0.4, '#ffffff55'); glow.addColorStop(1, '#ffffff00');
+      context.fillStyle = glow; context.fillRect(0, 0, 64, 64);
+      this.glowTexture = new THREE.CanvasTexture(canvas);
     }
-    visible.forEach((light, index) => {
-      const pulse = lightPulse(light, seconds, this.reducedMotion);
-      const size = 0.35 + Math.min(0.4, pulse.range * 0.045);
-      this.markers.children[index]?.scale.set(size, size * (light.kind === 'torch' ? 1.45 : 1), 1);
-    });
+    for (const source of visible) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTexture, color: source.light.color, transparent: true, opacity: 0.85, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending }));
+      sprite.position.set(source.light.x, source.height, source.light.y);
+      this.markers.add(sprite);
+      source.marker = sprite;
+    }
   }
 }

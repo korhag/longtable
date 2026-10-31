@@ -540,6 +540,12 @@ pub enum ClientMsg {
         x: f32,
         y: f32,
     },
+    /// Deliberate GM placement; ordinary movement always follows walkable ground.
+    TeleportToken {
+        token_id: String,
+        x: f32,
+        y: f32,
+    },
     Roll {
         formula: String,
         visibility: RollVisibility,

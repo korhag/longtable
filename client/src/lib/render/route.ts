@@ -1,252 +1,557 @@
-// ------------------------------------------------------------
-// Module: route
-// Purpose: The walk a dragged figure will ask the server for.
-//          A clear straight line stays straight. A wall on that
-//          line can send the walk around it. A cliff needs a stair.
-// ------------------------------------------------------------
-
+// Cached collision grids and deterministic A* shared in behavior with server navigation.
 import { findIn, type Pack } from '../assets/catalog';
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
-import { cellLevel } from './levels';
-
+import { decodeCells } from '../editor/cells';
 export interface WalkPoint {
   x: number;
   y: number;
   z: number;
 }
-
-interface Segment {
+export interface Segment {
   a: [number, number];
   b: [number, number];
   kind: 'wall' | 'block';
 }
-
-interface Cell {
-  x: number;
-  y: number;
-}
-
+export type RouteLayout = Pick<MapLayout, 'width' | 'height' | 'levels' | 'stairs'>;
+type Cell = [number, number];
+type Walk = { points: WalkPoint[]; note: string | null };
+const EPS = 0.0001,
+  PROP = 1,
+  WALL = 2;
+const OFF = 'that square is off the map',
+  BLOCK = 'something is in the way',
+  WALL_NOTE = 'a wall is in the way',
+  SPLIT = 'that body does not fit on one level',
+  CLIFF = 'that drop is more than one step',
+  STAIRS = 'there are no stairs on that edge';
+const grids = new WeakMap<
+  RouteLayout,
+  {
+    levels: RouteLayout['levels'];
+    stairs: RouteLayout['stairs'];
+    width: number;
+    height: number;
+    segments: Segment[];
+    grid: Grid;
+    lastKey?: string;
+    last?: Walk;
+  }
+>();
+const segmentsCache = new WeakMap<
+  MapLayout,
+  { pieces: MapLayout['pieces']; props: MapLayout['props']; doors: string; packs: Pack[]; value: Segment[] }
+>();
 export function walkRoute(
-  layout: MapLayout | null | undefined,
+  layout: RouteLayout | null | undefined,
   from: { x: number; y: number },
   to: { x: number; y: number },
   segments: Segment[],
   footprint: [number, number] = [1, 1],
-): { points: WalkPoint[]; note: string | null } {
-  if (!layout) {
-    return { points: [point(null, from.x, from.y), point(null, to.x, to.y)], note: null };
+): Walk {
+  if (!layout)
+    return {
+      points: [
+        { x: from.x, y: 0.04, z: from.y },
+        { x: to.x, y: 0.04, z: to.y },
+      ],
+      note: null,
+    };
+  if (
+    ![from.x, from.y, to.x, to.y].every(Number.isFinite) ||
+    layout.width * layout.height > 250000 ||
+    layout.width * layout.height < 1
+  )
+    return { points: [], note: 'Choose a square on the map' };
+  let cache = grids.get(layout);
+  if (
+    !cache ||
+    cache.levels !== layout.levels ||
+    cache.stairs !== layout.stairs ||
+    cache.width !== layout.width ||
+    cache.height !== layout.height ||
+    cache.segments !== segments
+  ) {
+    cache = {
+      levels: layout.levels,
+      stairs: layout.stairs,
+      width: layout.width,
+      height: layout.height,
+      segments,
+      grid: new Grid(layout, segments),
+    };
+    grids.set(layout, cache);
   }
-  const walls = segments.filter((segment) => segment.kind === 'wall');
-  const blockers = segments.filter((segment) => segment.kind !== 'wall');
-  const direct = crossed(from, to);
-  const directNote = routeNote(layout, direct, walls, blockers, footprint);
-  const cells = directNote ? search(layout, direct[0] ?? cellOf(from), direct[direct.length - 1] ?? cellOf(to), walls, blockers, footprint) ?? direct : direct;
-  const note = directNote && cells === direct ? sentence(directNote) : null;
-  return { points: line(layout, from, to, cells), note };
+  const key = `${from.x},${from.y}:${to.x},${to.y}:${footprint}`;
+  if (cache.lastKey === key && cache.last) return cache.last;
+  const grid = cache.grid,
+    start: Cell = [Math.floor(from.x), Math.floor(from.y)],
+    goal: Cell = [Math.floor(to.x), Math.floor(to.y)],
+    search = new Search(grid, footprint);
+  const goalNote = search.standing(goal);
+  if (grid.index(start) < 0 || grid.index(goal) < 0) return { points: [], note: 'That square is off the map' };
+  const direct = crossed(start, goal);
+  let reason: string | null = typeof goalNote === 'string' ? goalNote : null;
+  if (!reason)
+    for (let i = 1; i < direct.length; i++) {
+      reason = search.step(direct[i - 1]!, direct[i]!);
+      if (reason) break;
+    }
+  const cells = typeof goalNote === 'string' ? null : search.route(start, goal);
+  const point = (x: number, z: number): WalkPoint => ({ x, y: grid.level([Math.floor(x), Math.floor(z)]) + 0.04, z });
+  const route = cells ?? direct;
+  const points =
+    route.length < 2
+      ? []
+      : [
+          point(from.x, from.y),
+          ...route
+            .slice(1, -1)
+            .map(([x, y]) => point(x + (footprint[0] % 2 ? 0.5 : 0), y + (footprint[1] % 2 ? 0.5 : 0))),
+          point(to.x, to.y),
+        ];
+  const note = cells ? null : (reason ?? 'there is no walkable path to that square');
+  const walk = { points, note: note ? note.charAt(0).toUpperCase() + note.slice(1) : null };
+  cache.lastKey = key;
+  cache.last = walk;
+  return walk;
 }
-
-/** Walls, closed doors, and objects that stop walking. */
+/** Immutable snapshots let pointer events reuse collision data instead of scanning every object. */
 export function blockingSegments(layout: MapLayout | null | undefined, doors: DoorView[], packs: Pack[]): Segment[] {
-  const segments: Segment[] = [];
-  for (const piece of layout?.pieces ?? []) {
-    if (piece.kind !== 'wall') continue;
-    const edge = piece.axis === 'h'
-      ? { a: [piece.x, piece.y] as [number, number], b: [piece.x + 1, piece.y] as [number, number] }
-      : { a: [piece.x, piece.y] as [number, number], b: [piece.x, piece.y + 1] as [number, number] };
-    segments.push({ ...edge, kind: 'wall' });
+  const doorKey = doors.map((d) => `${d.id}:${+d.open}`).join('|'),
+    cached = layout && segmentsCache.get(layout);
+  if (
+    cached &&
+    cached.pieces === layout.pieces &&
+    cached.props === layout.props &&
+    cached.doors === doorKey &&
+    cached.packs === packs
+  )
+    return cached.value;
+  const value: Segment[] = [],
+    placed = new Set<string>(),
+    doorStates = new Map(doors.map((d) => [d.id, d.open]));
+  for (const p of layout?.pieces ?? []) {
+    if (p.kind === 'door') {
+      placed.add(p.id);
+      if (doorStates.get(p.id) ?? p.open) continue;
+    }
+    value.push({ a: [p.x, p.y], b: p.axis === 'h' ? [p.x + 1, p.y] : [p.x, p.y + 1], kind: 'wall' });
   }
-  for (const door of doors) {
-    if (door.open) continue;
-    segments.push({ a: [door.a[0], door.a[1]], b: [door.b[0], door.b[1]], kind: 'wall' });
-  }
+  for (const d of doors)
+    if (!d.open && !placed.has(d.id)) value.push({ a: [d.a[0], d.a[1]], b: [d.b[0], d.b[1]], kind: 'wall' });
   for (const prop of layout?.props ?? []) {
     const polygon = movementPolygon(prop, packs);
     if (!polygon) continue;
-    for (let index = 0; index < polygon.length; index += 1) {
-      const a = polygon[index] ?? [0, 0];
-      const b = polygon[(index + 1) % polygon.length] ?? a;
-      segments.push({ a: [a[0], a[1]], b: [b[0], b[1]], kind: 'block' });
+    for (let i = 0; i < polygon.length; i++)
+      value.push({ a: polygon[i]!, b: polygon[(i + 1) % polygon.length]!, kind: 'block' });
+  }
+  if (layout) segmentsCache.set(layout, { pieces: layout.pieces, props: layout.props, doors: doorKey, packs, value });
+  return value;
+}
+class Grid {
+  readonly width: number;
+  readonly height: number;
+  readonly levels: Uint8Array;
+  readonly blocked: Uint8Array;
+  readonly edges: Uint8Array;
+  readonly stairs = new Set<number>();
+  readonly searches = new Map<string, { stance: Int16Array; steps: Uint8Array }>();
+  constructor(layout: RouteLayout, segments: Segment[]) {
+    this.width = layout.width;
+    this.height = layout.height;
+    const count = this.width * this.height;
+    this.blocked = new Uint8Array(count);
+    this.edges = new Uint8Array(count);
+    try {
+      this.levels = layout.levels ? decodeCells(layout.levels) : new Uint8Array(count);
+    } catch {
+      this.levels = new Uint8Array(count);
     }
-  }
-  return segments;
-}
-
-function line(layout: MapLayout, from: { x: number; y: number }, to: { x: number; y: number }, cells: Cell[]): WalkPoint[] {
-  if (cells.length < 2) return [];
-  const middle = cells.slice(1, -1).map((cell) => point(layout, cell.x + 0.5, cell.y + 0.5));
-  return [point(layout, from.x, from.y), ...middle, point(layout, to.x, to.y)];
-}
-
-function point(layout: MapLayout | null, x: number, z: number): WalkPoint {
-  return { x, y: cellLevel(layout, x, z) + 0.04, z };
-}
-
-function sentence(note: string): string {
-  return note.charAt(0).toUpperCase() + note.slice(1);
-}
-
-function cellOf(point: { x: number; y: number }): Cell {
-  return { x: Math.floor(point.x), y: Math.floor(point.y) };
-}
-
-function crossed(from: { x: number; y: number }, to: { x: number; y: number }): Cell[] {
-  let x = Math.floor(from.x);
-  let y = Math.floor(from.y);
-  const endX = Math.floor(to.x);
-  const endY = Math.floor(to.y);
-  const cells = [{ x, y }];
-  while (x !== endX || y !== endY) {
-    if (x !== endX) {
-      x += Math.sign(endX - x);
-      cells.push({ x, y });
-    }
-    if (y !== endY) {
-      y += Math.sign(endY - y);
-      cells.push({ x, y });
-    }
-  }
-  return cells;
-}
-
-function routeNote(layout: MapLayout, cells: Cell[], walls: Segment[], blockers: Segment[], footprint: [number, number]): string | null {
-  for (let index = 1; index < cells.length; index += 1) {
-    const note = stepNote(layout, cells[index - 1] ?? cells[0]!, cells[index] ?? cells[0]!, walls, blockers, footprint);
-    if (note) return note;
-  }
-  return null;
-}
-
-function stepNote(layout: MapLayout, from: Cell, to: Cell, walls: Segment[], blockers: Segment[], footprint: [number, number]): string | null {
-  const arrived = stanceLevel(layout, to, footprint);
-  if (typeof arrived === 'string') return arrived;
-  const standing = stanceLevel(layout, from, footprint);
-  const here = typeof standing === 'string' ? cellLevel(layout, from.x, from.y) : standing;
-  const diff = Math.abs(here - arrived);
-  if (diff > 1) return 'that drop is more than one step';
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const old = occupied(anchorPoint(from, footprint), footprint);
-  for (const cell of occupied(anchorPoint(to, footprint), footprint)) {
-    if (old.some((item) => item.x === cell.x && item.y === cell.y)) continue;
-    const prev = { x: cell.x - dx, y: cell.y - dy };
-    if (diff === 1 && !stairBetween(layout, prev, cell)) return 'there are no stairs on that edge';
-    const start = { x: prev.x + 0.5, y: prev.y + 0.5 };
-    const end = { x: cell.x + 0.5, y: cell.y + 0.5 };
-    if (hits(start, end, walls)) return 'a wall is in the way';
-    if (hits(start, end, blockers)) return 'something is in the way';
-  }
-  return null;
-}
-
-function stanceLevel(layout: MapLayout, cell: Cell, footprint: [number, number]): number | string {
-  let level: number | null = null;
-  for (const square of occupied(anchorPoint(cell, footprint), footprint)) {
-    if (square.x < 0 || square.y < 0 || square.x >= layout.width || square.y >= layout.height) return 'that square is off the map';
-    const here = cellLevel(layout, square.x, square.y);
-    if (level == null) level = here;
-    else if (level !== here) return 'that body does not fit on one level';
-  }
-  return level ?? 0;
-}
-
-function anchorPoint(cell: Cell, footprint: [number, number]): { x: number; y: number } {
-  const width = Math.max(1, footprint[0]);
-  const depth = Math.max(1, footprint[1]);
-  return {
-    x: width % 2 === 1 ? cell.x + 0.5 : cell.x,
-    y: depth % 2 === 1 ? cell.y + 0.5 : cell.y,
-  };
-}
-
-function occupied(center: { x: number; y: number }, footprint: [number, number]): Cell[] {
-  const cells: Cell[] = [];
-  for (const y of axisCells(center.y, footprint[1])) {
-    for (const x of axisCells(center.x, footprint[0])) cells.push({ x, y });
-  }
-  return cells;
-}
-
-function axisCells(center: number, span: number): number[] {
-  const size = Math.max(1, span);
-  const start = Math.floor(center - size / 2);
-  return Array.from({ length: size }, (_, step) => start + step);
-}
-
-function search(layout: MapLayout, start: Cell, goal: Cell, walls: Segment[], blockers: Segment[], footprint: [number, number]): Cell[] | null {
-  if (start.x === goal.x && start.y === goal.y) return [start];
-  const limit = Math.max(1, layout.width * layout.height);
-  const queue = [start];
-  const previous = new Map<string, Cell>();
-  const seen = new Set<string>([key(start)]);
-  let expanded = 0;
-  while (queue.length > 0) {
-    const cell = queue.shift();
-    if (!cell) break;
-    expanded += 1;
-    if (expanded > limit) return null;
-    const neighbors = [
-      { x: cell.x + 1, y: cell.y },
-      { x: cell.x, y: cell.y + 1 },
-      { x: cell.x - 1, y: cell.y },
-      { x: cell.x, y: cell.y - 1 },
-    ];
-    for (const next of neighbors) {
-      if (seen.has(key(next))) continue;
-      if (stepNote(layout, cell, next, walls, blockers, footprint)) continue;
-      seen.add(key(next));
-      previous.set(key(next), cell);
-      if (next.x === goal.x && next.y === goal.y) {
-        const path = [goal];
-        let cursor = goal;
-        while (cursor.x !== start.x || cursor.y !== start.y) {
-          const prior = previous.get(key(cursor));
-          if (!prior) break;
-          cursor = prior;
-          path.push(cursor);
-        }
-        path.reverse();
-        return path;
+    let polygon: Cell[] = [];
+    for (const s of segments) {
+      if (s.kind === 'wall') {
+        this.wall(s);
+        continue;
       }
-      queue.push(next);
+      this.paint(s, PROP);
+      if (polygon.length && !same(polygon[polygon.length - 1]!, s.a)) polygon = [];
+      if (!polygon.length) polygon.push(s.a);
+      polygon.push(s.b);
+      if (polygon.length >= 4 && same(polygon[0]!, s.b)) {
+        this.fill(polygon);
+        polygon = [];
+      }
+    }
+    for (const s of layout.stairs ?? []) {
+      const a = this.index([s.x, s.y]),
+        b = this.index([s.x2, s.y2]);
+      if (a >= 0 && b >= 0) this.stairs.add(this.pair(a, b));
     }
   }
-  return null;
+  index([x, y]: Cell) {
+    return x < 0 || y < 0 || x >= this.width || y >= this.height ? -1 : y * this.width + x;
+  }
+  cell(i: number): Cell {
+    return [i % this.width, Math.floor(i / this.width)];
+  }
+  level(cell: Cell) {
+    return this.levels[this.index(cell)] ?? 0;
+  }
+  pair(a: number, b: number) {
+    return Math.min(a, b) * this.blocked.length + Math.max(a, b);
+  }
+  edge(a: Cell, b: Cell) {
+    const dx = b[0] - a[0],
+      dy = b[1] - a[1],
+      bit = dx === 1 ? 1 : dy === 1 ? 2 : dx === -1 ? 4 : dy === -1 ? 8 : 0;
+    return ((this.edges[this.index(a)] ?? 0) & bit) !== 0;
+  }
+  wall(s: Segment) {
+    const [ax, ay] = s.a,
+      [bx, by] = s.b;
+    if (Math.abs(ax - bx) < EPS && Math.abs(ax - Math.round(ax)) < EPS) {
+      const x = Math.round(ax);
+      for (
+        let y = Math.max(0, Math.floor(Math.min(ay, by)));
+        y < Math.min(this.height, Math.ceil(Math.max(ay, by)));
+        y++
+      ) {
+        const l = this.index([x - 1, y]),
+          r = this.index([x, y]);
+        if (l >= 0) this.edges[l]! |= 1;
+        if (r >= 0) this.edges[r]! |= 4;
+      }
+    } else if (Math.abs(ay - by) < EPS && Math.abs(ay - Math.round(ay)) < EPS) {
+      const y = Math.round(ay);
+      for (
+        let x = Math.max(0, Math.floor(Math.min(ax, bx)));
+        x < Math.min(this.width, Math.ceil(Math.max(ax, bx)));
+        x++
+      ) {
+        const t = this.index([x, y - 1]),
+          b = this.index([x, y]);
+        if (t >= 0) this.edges[t]! |= 2;
+        if (b >= 0) this.edges[b]! |= 8;
+      }
+    } else this.paint(s, WALL);
+  }
+  paint(s: Segment, bit: number) {
+    const [ax, ay] = s.a,
+      [bx, by] = s.b;
+    for (
+      let y = Math.max(0, Math.floor(Math.min(ay, by)) - 1);
+      y <= Math.min(this.height - 1, Math.floor(Math.max(ay, by)));
+      y++
+    ) {
+      // Clip to a row so long diagonal barriers don't scan a whole bounding rectangle.
+      let left = Math.min(ax, bx),
+        right = Math.max(ax, bx);
+      if (Math.abs(by - ay) >= EPS) {
+        const p = (y + EPS - ay) / (by - ay),
+          q = (y + 1 - EPS - ay) / (by - ay);
+        const lo = Math.max(0, Math.min(p, q)),
+          hi = Math.min(1, Math.max(p, q));
+        if (lo > hi) continue;
+        const x0 = ax + (bx - ax) * lo,
+          x1 = ax + (bx - ax) * hi;
+        left = Math.min(x0, x1);
+        right = Math.max(x0, x1);
+      }
+      for (let x = Math.max(0, Math.floor(left) - 1); x <= Math.min(this.width - 1, Math.floor(right)); x++) {
+        if (intersectsCell(s.a, s.b, x, y)) this.blocked[y * this.width + x]! |= bit;
+      }
+    }
+  }
+  fill(poly: Cell[]) {
+    const min = Math.floor(Math.min(...poly.map((p) => p[1]))),
+      max = Math.ceil(Math.max(...poly.map((p) => p[1])));
+    for (let y = Math.max(0, min); y < Math.min(this.height, max); y++) {
+      const scan = y + 0.5,
+        cuts: number[] = [];
+      for (let i = 1; i < poly.length; i++) {
+        const a = poly[i - 1]!,
+          b = poly[i]!;
+        if (a[1] > scan !== b[1] > scan) cuts.push(a[0] + ((scan - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
+      }
+      cuts.sort((a, b) => a - b);
+      for (let i = 1; i < cuts.length; i += 2)
+        for (
+          let x = Math.max(0, Math.ceil(cuts[i - 1]! - 0.5 + EPS));
+          x <= Math.min(this.width - 1, Math.floor(cuts[i]! - 0.5 - EPS));
+          x++
+        )
+          this.blocked[y * this.width + x]! |= PROP;
+    }
+  }
 }
-
-function key(cell: Cell): string {
-  return `${cell.x},${cell.y}`;
+function same(a: Cell, b: Cell) {
+  return Math.abs(a[0] - b[0]) < EPS && Math.abs(a[1] - b[1]) < EPS;
 }
-
-function stairBetween(layout: MapLayout, from: Cell, to: Cell): boolean {
-  return (layout.stairs ?? []).some((stair) => {
-    const there = stair.x === from.x && stair.y === from.y && stair.x2 === to.x && stair.y2 === to.y;
-    const back = stair.x === to.x && stair.y === to.y && stair.x2 === from.x && stair.y2 === from.y;
-    return there || back;
-  });
+function intersectsCell(a: Cell, b: Cell, x: number, y: number) {
+  let lo = 0,
+    hi = 1;
+  const axes: [number, number, number, number][] = [
+    [a[0], b[0] - a[0], x + EPS, x + 1 - EPS],
+    [a[1], b[1] - a[1], y + EPS, y + 1 - EPS],
+  ];
+  for (const [start, delta, min, max] of axes) {
+    if (Math.abs(delta) < EPS) {
+      if (start < min || start > max) return false;
+    } else {
+      const p = (min - start) / delta,
+        q = (max - start) / delta;
+      lo = Math.max(lo, Math.min(p, q));
+      hi = Math.min(hi, Math.max(p, q));
+      if (lo > hi) return false;
+    }
+  }
+  return true;
 }
-
-function hits(from: { x: number; y: number }, to: { x: number; y: number }, walls: Segment[]): boolean {
-  return walls.some((wall) => crosses(from, to, { x: wall.a[0], y: wall.a[1] }, { x: wall.b[0], y: wall.b[1] }));
+class Search {
+  readonly stance: Int16Array;
+  readonly steps: Uint8Array;
+  readonly single: boolean;
+  constructor(
+    readonly grid: Grid,
+    readonly footprint: [number, number],
+  ) {
+    this.single = footprint[0] === 1 && footprint[1] === 1;
+    const key = footprint.join(',');
+    let cached = grid.searches.get(key);
+    if (!cached) {
+      if (grid.searches.size >= 4) grid.searches.delete(grid.searches.keys().next().value!);
+      const stance = new Int16Array(grid.blocked.length);
+      stance.fill(-1);
+      const steps = new Uint8Array(grid.blocked.length * 8);
+      steps.fill(255);
+      cached = { stance, steps };
+      grid.searches.set(key, cached);
+    }
+    this.stance = cached.stance;
+    this.steps = cached.steps;
+  }
+  body([cx, cy]: Cell) {
+    const w = Math.max(1, this.footprint[0]),
+      h = Math.max(1, this.footprint[1]);
+    return { x: cx - Math.floor(w / 2), y: cy - Math.floor(h / 2), w, h };
+  }
+  standing(cell: Cell): number | string {
+    const index = this.grid.index(cell);
+    if (index < 0) return OFF;
+    const saved = this.stance[index]!;
+    if (saved >= 0) return decode(saved);
+    if (this.single) {
+      const blocked = this.grid.blocked[index]!;
+      const result = blocked & PROP ? BLOCK : blocked & WALL ? WALL_NOTE : this.grid.levels[index]!;
+      this.stance[index] = encode(result);
+      return result;
+    }
+    const { x, y, w, h } = this.body(cell);
+    let result: number | string = this.grid.level(cell);
+    body: for (let cy = y; cy < y + h; cy++)
+      for (let cx = x; cx < x + w; cx++) {
+        const i = this.grid.index([cx, cy]);
+        if (i < 0) {
+          result = OFF;
+          break body;
+        }
+        if (this.grid.blocked[i]! & PROP) {
+          result = BLOCK;
+          break body;
+        }
+        if (
+          this.grid.blocked[i]! & WALL ||
+          (cx > x && this.grid.edge([cx - 1, cy], [cx, cy])) ||
+          (cy > y && this.grid.edge([cx, cy - 1], [cx, cy]))
+        ) {
+          result = WALL_NOTE;
+          break body;
+        }
+        if (this.grid.levels[i] !== this.grid.level(cell)) {
+          result = SPLIT;
+          break body;
+        }
+      }
+    this.stance[index] = encode(result);
+    return result;
+  }
+  cardinal(from: Cell, to: Cell): string | null {
+    const there = this.standing(to);
+    if (typeof there === 'string') return there;
+    const diff = Math.abs(this.grid.level(from) - there);
+    if (diff > 1) return CLIFF;
+    if (this.single) {
+      if (this.grid.edge(from, to)) return WALL_NOTE;
+      if (diff === 1 && !this.grid.stairs.has(this.grid.pair(this.grid.index(from), this.grid.index(to))))
+        return STAIRS;
+      return null;
+    }
+    const { x, y, w, h } = this.body(to),
+      dx = to[0] - from[0],
+      dy = to[1] - from[1];
+    for (let cy = y; cy < y + h; cy++)
+      for (let cx = x; cx < x + w; cx++) {
+        if (
+          (dx === 1 && cx !== x + w - 1) ||
+          (dx === -1 && cx !== x) ||
+          (dy === 1 && cy !== y + h - 1) ||
+          (dy === -1 && cy !== y)
+        )
+          continue;
+        const prev: Cell = [cx - dx, cy - dy],
+          next: Cell = [cx, cy];
+        if (this.grid.edge(prev, next)) return WALL_NOTE;
+        if (diff === 1) {
+          const a = this.grid.index(prev),
+            b = this.grid.index(next);
+          if (a < 0 || b < 0) return OFF;
+          if (!this.grid.stairs.has(this.grid.pair(a, b))) return STAIRS;
+        }
+      }
+    return null;
+  }
+  step(from: Cell, to: Cell): string | null {
+    if (from[0] === to[0] || from[1] === to[1]) return this.cardinal(from, to);
+    const a: Cell = [to[0], from[1]],
+      b: Cell = [from[0], to[1]];
+    if ([a, b, to].some((p) => this.grid.level(p) !== this.grid.level(from))) return STAIRS;
+    if (this.single) {
+      for (const cell of [a, b, to]) {
+        const stance = this.standing(cell);
+        if (typeof stance === 'string') return stance;
+      }
+      return this.grid.edge(from, a) || this.grid.edge(from, b) || this.grid.edge(a, to) || this.grid.edge(b, to)
+        ? WALL_NOTE
+        : null;
+    }
+    return this.cardinal(from, a) ?? this.cardinal(from, b) ?? this.cardinal(a, to) ?? this.cardinal(b, to);
+  }
+  route(start: Cell, goal: Cell): Cell[] | null {
+    const startI = this.grid.index(start),
+      goalI = this.grid.index(goal);
+    if (startI < 0 || goalI < 0) return null;
+    if (startI === goalI) return [start];
+    const distance = new Uint32Array(this.grid.blocked.length);
+    distance.fill(0xffffffff);
+    const previous = new Int32Array(this.grid.blocked.length);
+    previous.fill(-1);
+    const closed = new Uint8Array(this.grid.blocked.length),
+      heap = new Heap();
+    let serial = 0;
+    const h = heuristic(start, goal);
+    distance[startI] = 0;
+    heap.push([h, h, serial, startI]);
+    while (heap.length) {
+      const index = heap.pop()![3];
+      if (closed[index]) continue;
+      closed[index] = 1;
+      const from = this.grid.cell(index);
+      if (index === goalI) {
+        const path = [goal];
+        let cursor = index;
+        while (cursor !== startI) {
+          cursor = previous[cursor]!;
+          path.push(this.grid.cell(cursor));
+        }
+        return path.reverse();
+      }
+      for (let direction = 0; direction < DIRS.length; direction++) {
+        const [dx, dy] = DIRS[direction]!;
+        const next: Cell = [from[0] + dx, from[1] + dy],
+          ni = this.grid.index(next);
+        if (ni < 0 || closed[ni]) continue;
+        const stepIndex = index * 8 + direction;
+        if (this.steps[stepIndex] === 255) this.steps[stepIndex] = this.step(from, next) ? 1 : 0;
+        if (this.steps[stepIndex]) continue;
+        const cost = distance[index]! + (dx && dy ? 14 : 10);
+        if (cost >= distance[ni]!) continue;
+        distance[ni] = cost;
+        previous[ni] = index;
+        const h = heuristic(next, goal);
+        heap.push([cost + h, h, ++serial, ni]);
+      }
+    }
+    return null;
+  }
 }
-
-function crosses(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }, d: { x: number; y: number }): boolean {
-  const abC = cross(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y);
-  const abD = cross(b.x - a.x, b.y - a.y, d.x - a.x, d.y - a.y);
-  const cdA = cross(d.x - c.x, d.y - c.y, a.x - c.x, a.y - c.y);
-  const cdB = cross(d.x - c.x, d.y - c.y, b.x - c.x, b.y - c.y);
-  const opposite = (left: number, right: number) => (left > 1e-5 && right < -1e-5) || (left < -1e-5 && right > 1e-5);
-  return opposite(abC, abD) && opposite(cdA, cdB);
+const DIRS: Cell[] = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+  [1, -1],
+];
+type Entry = [number, number, number, number];
+const before = (a: Entry, b: Entry) =>
+  a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2])));
+class Heap {
+  items: Entry[] = [];
+  get length() {
+    return this.items.length;
+  }
+  push(e: Entry) {
+    let i = this.items.length;
+    this.items.push(e);
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!before(e, this.items[p]!)) break;
+      this.items[i] = this.items[p]!;
+      i = p;
+    }
+    this.items[i] = e;
+  }
+  pop() {
+    const first = this.items[0],
+      last = this.items.pop();
+    if (last && this.items.length) {
+      let i = 0;
+      while (i * 2 + 1 < this.items.length) {
+        let c = i * 2 + 1;
+        if (c + 1 < this.items.length && before(this.items[c + 1]!, this.items[c]!)) c++;
+        if (!before(this.items[c]!, last)) break;
+        this.items[i] = this.items[c]!;
+        i = c;
+      }
+      this.items[i] = last;
+    }
+    return first;
+  }
 }
-
-function cross(ax: number, ay: number, bx: number, by: number): number {
-  return ax * by - ay * bx;
+function heuristic(a: Cell, b: Cell) {
+  const dx = Math.abs(a[0] - b[0]),
+    dy = Math.abs(a[1] - b[1]);
+  return 10 * Math.max(dx, dy) + 4 * Math.min(dx, dy);
 }
-
+function encode(r: number | string) {
+  return typeof r === 'number' ? r : r === OFF ? 10 : r === BLOCK ? 11 : r === WALL_NOTE ? 12 : 13;
+}
+function decode(v: number): number | string {
+  return v === 10 ? OFF : v === 11 ? BLOCK : v === 12 ? WALL_NOTE : v === 13 ? SPLIT : v;
+}
+function crossed(start: Cell, goal: Cell) {
+  let [x, y] = start;
+  const cells: Cell[] = [start];
+  while (x !== goal[0] || y !== goal[1]) {
+    if (x !== goal[0]) {
+      x += Math.sign(goal[0] - x);
+      cells.push([x, y]);
+    }
+    if (y !== goal[1]) {
+      y += Math.sign(goal[1] - y);
+      cells.push([x, y]);
+    }
+  }
+  return cells;
+}
 function movementPolygon(prop: { asset: string; x: number; y: number }, packs: Pack[]): [number, number][] | null {
   const object = findIn(packs, prop.asset, (pack) => pack.objects ?? []);
   if (object) {
-    if (object.def.kind === 'stairs' || object.def.placement === 'connection' || !object.def.blocksMovement) return null;
+    if (object.def.kind === 'stairs' || object.def.placement === 'connection' || !object.def.blocksMovement)
+      return null;
     const origin = object.def.originCells ?? [object.def.footprintCells[0] / 2, object.def.footprintCells[1] / 2];
     const polygon = object.def.collisionPolygon ?? [];
     if (polygon.length >= 3) return polygon.map(([x, y]) => [prop.x + origin[0] + x, prop.y + origin[1] + y]);

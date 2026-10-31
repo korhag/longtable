@@ -14,12 +14,13 @@ const layout = {
 
 describe('stairLanding', () => {
   it('lands on the nearer end of the stair', () => {
-    expect(stairLanding(layout, 1.6, 1.5)).toEqual({ x: 1.5, y: 1.5 });
+    expect(stairLanding(layout, 1.25, 1.5)).toEqual({ x: 1.5, y: 1.5 });
+    expect(stairLanding(layout, 1.8, 1.5)).toEqual({ x: 2.5, y: 1.5 });
     expect(stairLanding(layout, 2.3, 1.5)).toEqual({ x: 2.5, y: 1.5 });
   });
 
   it('lands on the higher square when the click is exactly in the middle', () => {
-    expect(stairLanding(layout, 2, 1.5)).toEqual({ x: 2.5, y: 1.5 });
+    expect(stairLanding(layout, 1.5, 1.5)).toEqual({ x: 2.5, y: 1.5 });
   });
 
   it('leaves a click beside the stair on the ground', () => {

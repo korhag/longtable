@@ -28,7 +28,9 @@ import { SceneLighting } from './lighting';
 import { ringPaint, type CastPaint, type RingMark } from './rings';
 import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
-import { blockingSegments, walkRoute } from './route';
+import { blockingSegments, walkRoute, type RouteLayout, type Segment } from './route';
+import { motionFacing, motionPosition, walkMotion, type WalkMotion } from './motion';
+import { figurePress, isClick } from './interaction';
 import { stairLanding } from './stairLanding';
 import { fogStamp, sameFogPicture, sameFogStamp, type FogStamp } from './fogStamp';
 import { fogShell, gridPositions, TerrainLayer } from './terrain';
@@ -43,7 +45,7 @@ export interface EngineHooks {
   onMeasure?: (delta: { dx: number; dy: number; x: number; y: number; landX: number; landY: number; note: string | null } | null) => void;
   onWarning?: (message: string) => void;
   onTarget?: (tokenId: string | null) => void;
-  onMenu?: (tokenId: string | null, x: number, y: number) => void;
+  onMenu?: (tokenId: string | null, x: number, y: number, point?: { x: number; y: number }) => void;
   onPaint?: () => void;
   onPlace?: (point: { x: number; y: number }) => void;
   onCancelPlace?: () => void;
@@ -130,6 +132,11 @@ export class TableEngine {
   private lightTimer: ReturnType<typeof setTimeout> | null = null;
   private tokenGroup = new THREE.Group();
   private nodes = new Map<string, TokenNode>();
+  private movements = new Map<string, WalkMotion>();
+  private tokenPositions = new Map<string, { x: number; y: number }>();
+  private skipMotion = new Set<string>();
+  private legacyNavigation: RouteLayout = { width: 0, height: 0 };
+  private legacyBlocks: { walls: SceneView['walls'] | undefined; doors: DoorView[]; segments: Segment[] } | null = null;
   private raycaster = new THREE.Raycaster();
   private ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private dragging: { id: string; moved: boolean } | null = null;
@@ -199,6 +206,8 @@ export class TableEngine {
       geometries: this.renderer.info.memory.geometries,
       draws: this.stats.draws,
       calls: this.lastCalls,
+      sceneryPasses: this.outlines.sceneryDraws,
+      castPasses: this.outlines.castDraws,
       renderer: info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'unavailable',
     };
   }
@@ -210,7 +219,13 @@ export class TableEngine {
   }
 
   private onVisible = () => {
-    if (!document.hidden) this.invalidate();
+    if (document.hidden) {
+      if (this.lightTimer !== null) clearTimeout(this.lightTimer);
+      this.lightTimer = null;
+      cancelAnimationFrame(this.frameId);
+      this.frameId = 0;
+      this.queued = false;
+    } else this.invalidate();
   };
 
   invalidate() {
@@ -219,17 +234,24 @@ export class TableEngine {
   }
 
   private requestFrame() {
-    if (!this.running || this.queued || !this.dirty) return;
+    if (!this.running || document.hidden || this.queued || !this.dirty) return;
     this.queued = true;
     this.stats.scheduled += 1;
     this.frameId = requestAnimationFrame(() => {
       this.queued = false;
       this.frameId = 0;
       if (!this.running || document.hidden || !this.dirty) return;
-      this.draw();
       this.dirty = false;
-      if (this.lighting.animated && this.lightTimer === null) {
+      this.draw();
+      if (this.movements.size > 0) {
+        if (this.lightTimer !== null) clearTimeout(this.lightTimer);
+        this.lightTimer = null;
+        this.invalidate();
+      } else if (this.lighting.animated && this.lightTimer === null) {
         this.lightTimer = setTimeout(() => { this.lightTimer = null; this.invalidate(); }, this.lowPower ? 66 : 33);
+      } else if (!this.lighting.animated && this.lightTimer !== null) {
+        clearTimeout(this.lightTimer);
+        this.lightTimer = null;
       }
     });
   }
@@ -251,6 +273,7 @@ export class TableEngine {
   }
 
   private draw() {
+    this.advanceMovement(performance.now());
     this.stats.draws += 1;
     this.lighting.update(Date.now() / 1000, this.focus);
     try {
@@ -284,6 +307,7 @@ export class TableEngine {
   }
 
   sync(view: View) {
+    if (view.scene?.id !== this.view.scene?.id) { this.movements.clear(); this.tokenPositions.clear(); }
     const changed = !sameView(this.view, view);
     if (!sameScenery(this.view, view)) this.sceneryToken += 1;
     const wasPlacing = this.view.placeSpan != null;
@@ -559,7 +583,16 @@ export class TableEngine {
         this.tokenGroup.add(node.group);
       }
       const dragging = this.dragging?.id === token.id;
-      if (!dragging) node.group.position.set(token.x, supportHeight(this.view.scene?.layout, token.x, token.y), token.y);
+      const previous = this.tokenPositions.get(token.id);
+      const changed = previous && (previous.x !== token.x || previous.y !== token.y);
+      if (changed && !dragging && !this.skipMotion.delete(token.id) && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const from = { x: node.group.position.x, y: node.group.position.z };
+        const walk = walkRoute(this.movementLayout(), from, token, this.movementSegments(), token.footprint ?? [1, 1]);
+        if (!walk.note && walk.points.length > 1) this.movements.set(token.id, walkMotion(walk.points, performance.now()));
+        else this.movements.delete(token.id);
+      } else if (changed) this.movements.delete(token.id);
+      if (!dragging && !this.movements.has(token.id)) node.group.position.set(token.x, supportHeight(this.view.scene?.layout, token.x, token.y), token.y);
+      this.tokenPositions.set(token.id, { x: token.x, y: token.y });
       paintToken(node, token, ringMark(token.id, this.view), this.view, () => this.invalidate());
     }
     for (const [id, node] of this.nodes) {
@@ -567,8 +600,25 @@ export class TableEngine {
       node.group.removeFromParent();
       disposeToken(node);
       this.nodes.delete(id);
+      this.movements.delete(id);
+      this.tokenPositions.delete(id);
+      this.skipMotion.delete(id);
     }
   }
+
+  private advanceMovement(now: number) {
+    for (const [id, motion] of this.movements) {
+      const node = this.nodes.get(id);
+      if (!node) { this.movements.delete(id); continue; }
+      const point = motionPosition(motion, now);
+      const token = this.view.tokens.find(token => token.id === id);
+      if (token) paintBody(node, { ...token, facing: point.done ? token.facing : motionFacing(motion, now, token.facing) }, this.view.packs, () => this.invalidate());
+      node.group.position.set(point.x, supportHeight(this.view.scene?.layout, point.x, point.z), point.z);
+      if (point.done) this.movements.delete(id);
+    }
+  }
+
+  skipNextMovement(tokenId: string) { this.skipMotion.add(tokenId); }
 
   setInsets(insets: { left: number; right: number; top: number; bottom: number }) {
     this.insets = insets;
@@ -595,7 +645,7 @@ export class TableEngine {
     const node = this.nodes.get(id);
     if (!node) return null;
     const point = node.group.position.clone();
-    point.y = 0.8;
+    point.y += 0.8;
     point.project(this.camera);
     if (point.z < -1 || point.z > 1) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -751,9 +801,9 @@ export class TableEngine {
     for (const hit of hits) {
       if (!shown(hit.object)) continue;
       const mesh = hit.object as THREE.Mesh;
-      if (mesh.userData.body && hit.uv) {
+      if (hit.uv) {
         const map = (mesh.material as THREE.MeshBasicMaterial).map;
-        if (!opaqueTexel(map?.image as CanvasImageSource | undefined, hit.uv.x, hit.uv.y)) return null;
+        if (!opaqueTexel(map?.image as CanvasImageSource | undefined, hit.uv.x, hit.uv.y)) continue;
       }
       let object: THREE.Object3D | null = hit.object;
       while (object) {
@@ -804,7 +854,8 @@ export class TableEngine {
     if (event.button === 2) {
       const tokenId = this.tokenAt(event);
       if (tokenId && tokenId !== this.view.selectedId) this.hooks.onTarget?.(tokenId);
-      this.hooks.onMenu?.(tokenId, event.clientX, event.clientY);
+      const hit = this.hitMap(event);
+      this.hooks.onMenu?.(tokenId, event.clientX, event.clientY, hit ? { x: hit.x, y: hit.z } : undefined);
       this.acted = true;
       return;
     }
@@ -822,29 +873,20 @@ export class TableEngine {
     }
     const token = this.view.tokens.find((item) => item.id === tokenId);
     this.acted = true;
-    if (!this.view.selectedId) {
-      if (token && this.hooks.canDrag(token)) this.hooks.onSelect(tokenId);
-      else this.hooks.onTarget?.(tokenId);
-      return;
-    }
-    if (tokenId === this.view.selectedId) {
-      if (token && this.hooks.canDrag(token)) {
-        this.dragging = { id: tokenId, moved: false };
-        this.dragOrigin = { x: token.x, y: token.y };
-      }
-      return;
-    }
-    if (tokenId === this.view.targetId && this.view.role === 'gm' && token && this.hooks.canDrag(token)) {
+    const intent = figurePress(this.view.selectedId, this.view.targetId, tokenId, !!token && this.hooks.canDrag(token));
+    if (intent === 'select') {
       this.hooks.onSelect(tokenId);
       this.hooks.onTarget?.(null);
-      return;
-    }
-    this.hooks.onTarget?.(tokenId);
+    } else if (intent === 'drag' && token) {
+      this.movements.delete(token.id);
+      this.dragging = { id: tokenId, moved: false };
+      this.dragOrigin = { x: token.x, y: token.y };
+    } else if (intent === 'target') this.hooks.onTarget?.(tokenId);
   };
 
   private onMove = (event: PointerEvent) => {
     if (this.panning) {
-      this.pan(event);
+      if (!isClick(this.pointer, event)) this.pan(event);
       return;
     }
     if (this.view.buildMode && this.hooks.onBuild) {
@@ -872,6 +914,7 @@ export class TableEngine {
       else this.hideCell();
       return;
     }
+    if (!this.dragging.moved && isClick(this.pointer, event)) return;
     const hit = this.hitMap(event);
     if (!hit) return;
     const { width, height } = this.bounds();
@@ -907,10 +950,20 @@ export class TableEngine {
     }
     if (this.dragging?.moved) {
       const node = this.nodes.get(this.dragging.id);
-      if (node) this.hooks.onMove(this.dragging.id, node.group.position.x, node.group.position.z);
-    } else if (!this.dragging && !this.brushing && !this.acted && this.view.role === 'gm') {
-      const travel = Math.hypot(event.clientX - this.pointer.x, event.clientY - this.pointer.y);
-      if (travel < 5) this.toggleNearestDoor(event);
+      if (node) {
+        this.requestMove(this.dragging.id, node.group.position.x, node.group.position.z);
+        // The server response starts the route; a rejected move keeps the original position.
+        const original = this.view.tokens.find(token => token.id === this.dragging?.id);
+        if (original) node.group.position.set(original.x, supportHeight(this.view.scene?.layout, original.x, original.y), original.y);
+        this.invalidate();
+      }
+    } else if (!this.dragging && !this.brushing && !this.acted && event.button === 0 && event.type !== 'pointerleave' && isClick(this.pointer, event)) {
+      const usedDoor = this.view.role === 'gm' && this.toggleNearestDoor(event);
+      if (!usedDoor) {
+        const selected = this.view.tokens.find(token => token.id === this.view.selectedId);
+        const hit = this.hitMap(event);
+        if (selected && hit && this.hooks.canDrag(selected)) this.requestMove(selected.id, hit.x, hit.z);
+      }
     }
     this.dragging = null;
     this.dragOrigin = null;
@@ -920,6 +973,40 @@ export class TableEngine {
     this.panning = false;
     this.brushing = false;
   };
+
+  private movementLayout(): RouteLayout | null {
+    const scene = this.view.scene;
+    if (!scene) return null;
+    if (scene.layout) return scene.layout;
+    this.legacyNavigation.width = Math.ceil(scene.width);
+    this.legacyNavigation.height = Math.ceil(scene.height);
+    return this.legacyNavigation;
+  }
+
+  private movementSegments(): Segment[] {
+    const scene = this.view.scene;
+    if (scene?.layout) return blockingSegments(scene.layout, this.view.doors, this.view.packs);
+    if (this.legacyBlocks?.walls === scene?.walls && this.legacyBlocks?.doors === this.view.doors) return this.legacyBlocks.segments;
+    const segments = blockingSegments(null, this.view.doors, this.view.packs);
+    for (const wall of scene?.walls ?? []) segments.push({ a: [wall.a[0], wall.a[1]], b: [wall.b[0], wall.b[1]], kind: 'wall' });
+    this.legacyBlocks = { walls: scene?.walls, doors: this.view.doors, segments };
+    return segments;
+  }
+
+  moveTo(tokenId: string, x: number, y: number) { this.requestMove(tokenId, x, y); }
+
+  private requestMove(tokenId: string, x: number, y: number) {
+    const token = this.view.tokens.find(item => item.id === tokenId);
+    if (!token || !this.hooks.canDrag(token)) return;
+    this.skipMotion.delete(tokenId);
+    const { width, height } = this.bounds();
+    const span = token.footprint ?? [1, 1];
+    const landX = placeAnchor(x, span[0], width), landY = placeAnchor(y, span[1], height);
+    if (landX == null || landY == null) return;
+    const route = walkRoute(this.movementLayout(), token, { x: landX, y: landY }, this.movementSegments(), span);
+    if (route.note) { this.hooks.onWarning?.(route.note); return; }
+    this.hooks.onMove(tokenId, landX, landY);
+  }
 
   private onWheel = (event: WheelEvent) => {
     event.preventDefault();
@@ -956,20 +1043,11 @@ export class TableEngine {
 
   private showDrag(x: number, y: number, footprint: [number, number]) {
     if (!this.dragOrigin) return;
-    const layout = this.view.scene?.layout ?? null;
     const from = this.dragOrigin;
     let points: { x: number; y: number; z: number }[];
-    if (this.view.role === 'gm') {
-      this.dragNote = null;
-      points = [
-        { x: from.x, y: cellLevel(layout, from.x, from.y) + 0.04, z: from.y },
-        { x, y: cellLevel(layout, x, y) + 0.04, z: y },
-      ];
-    } else {
-      const walk = walkRoute(layout, from, { x, y }, blockingSegments(layout, this.view.doors, this.view.packs), footprint);
-      points = walk.points;
-      this.dragNote = walk.note;
-    }
+    const walk = walkRoute(this.movementLayout(), from, { x, y }, this.movementSegments(), footprint);
+    points = walk.points;
+    this.dragNote = walk.note;
     if (points.length < 2) {
       if (this.dragLine) this.dragLine.visible = false;
       return;
@@ -1010,7 +1088,10 @@ export class TableEngine {
 
   private toggleNearestDoor(event: PointerEvent) {
     const hit = this.hitMap(event);
-    if (!hit) return;
+    const pictured = this.objects.doorAt(this.raycaster);
+    const door = this.view.doors.find(item => item.id === pictured);
+    if (door) { this.hooks.onToggleDoor(door.id, !door.open); return true; }
+    if (!hit) return false;
     let best: { id: string; open: boolean; distance: number } | null = null;
     for (const door of this.view.doors) {
       const distance = distanceToSegment(hit.x, hit.z, door.a, door.b);
@@ -1018,7 +1099,8 @@ export class TableEngine {
         best = { id: door.id, open: door.open, distance };
       }
     }
-    if (best) this.hooks.onToggleDoor(best.id, !best.open);
+    if (best) { this.hooks.onToggleDoor(best.id, !best.open); return true; }
+    return false;
   }
 }
 
@@ -1333,7 +1415,7 @@ function sameStairs(left: NonNullable<NonNullable<View['scene']>['layout']>['sta
   const b = right ?? [];
   if (a === b) return true;
   if (a.length !== b.length) return false;
-  return a.every((stair, index) => stair.x === b[index]?.x && stair.y === b[index]?.y && stair.x2 === b[index]?.x2 && stair.y2 === b[index]?.y2);
+  return a.every((stair, index) => stair.asset === b[index]?.asset && stair.x === b[index]?.x && stair.y === b[index]?.y && stair.x2 === b[index]?.x2 && stair.y2 === b[index]?.y2);
 }
 
 function samePacks(left: View['packs'], right: View['packs']) {

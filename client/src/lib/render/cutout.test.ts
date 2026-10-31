@@ -17,3 +17,19 @@ describe('cutout placement', () => {
     expect(placed.offsetY).toBeCloseTo(0);
   });
 });
+
+it('ignores transparent sprite pixels and caches alpha sampling for later hits', async () => {
+  const { opaqueTexel } = await import('./cutout');
+  const { vi } = await import('vitest');
+  const drawImage = vi.fn();
+  const getImageData = vi.fn(() => ({ data: new Uint8ClampedArray([0, 0, 0, 0, 1, 1, 1, 255]) }));
+  vi.stubGlobal('document', { createElement: () => ({ getContext: () => ({ drawImage, getImageData }) }) });
+  const image = { width: 2, height: 1 } as HTMLImageElement;
+  try {
+    expect(opaqueTexel(image, 0.1, 0.5)).toBe(false);
+    expect(opaqueTexel(image, 0.9, 0.5)).toBe(true);
+    expect(opaqueTexel(image, 0.1, 0.5)).toBe(false);
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(getImageData).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});

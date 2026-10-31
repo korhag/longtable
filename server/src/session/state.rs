@@ -24,7 +24,7 @@ use crate::systems::{
     SystemDef,
     Campaign,
 };
-use crate::vision::{cells_for, path_blocked, point_in_poly, reveal_height, sees_actor, visibility_polygon, Explored, CELLS_PER_SQUARE, TALL_WALL};
+use crate::vision::{cells_for, point_in_poly, reveal_height, sees_actor, visibility_polygon, Explored, CELLS_PER_SQUARE, TALL_WALL};
 
 use super::permissions::{can_see_roll, conceal_notice, snapshot};
 
@@ -620,6 +620,10 @@ impl Table {
                     Ok(CommandEffect::Quiet)
                 }
             }
+            ClientMsg::TeleportToken { token_id, x, y } => {
+                self.require_gm(viewer)?;
+                if self.relocate_token(viewer, &token_id, x, y, true)? { Ok(CommandEffect::Refresh) } else { Ok(CommandEffect::Quiet) }
+            }
             ClientMsg::Roll { .. } | ClientMsg::Attack { .. } | ClientMsg::Strike { .. } => {
                 Err("rolls are started by the socket, not the table".into())
             }
@@ -966,6 +970,11 @@ impl Table {
     }
 
     fn move_token(&mut self, viewer: &Viewer, token_id: &str, x: f32, y: f32) -> Result<bool, String> {
+        self.relocate_token(viewer, token_id, x, y, false)
+    }
+
+    fn relocate_token(&mut self, viewer: &Viewer, token_id: &str, x: f32, y: f32, teleport: bool) -> Result<bool, String> {
+        if !x.is_finite() || !y.is_finite() { return Err("choose a square on the map".into()); }
         let (width, height) = self.bounds();
         let index = self.token_index(token_id).ok_or_else(|| "that token is not on the table".to_string())?;
         let footprint = self.tokens[index].footprint;
@@ -984,21 +993,26 @@ impl Table {
         if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.as_ref()) {
             support_footprint(layout, x, y, footprint)?;
         }
-        if !gm {
+        let mut last_step = (Vec2::new(token.x, token.y), Vec2::new(x, y));
+        if !teleport {
             let from = Vec2::new(token.x, token.y);
             let to = Vec2::new(x, y);
             let walls = self.blocking_walls();
-            let blockers = self.scene.as_ref().map(|scene| scene.move_blockers.clone()).unwrap_or_default();
-            if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.as_ref()) {
-                crate::map::navigation::find_route(layout, from, to, &walls, &blockers, footprint)?;
-            } else if path_blocked(from, to, &walls) {
-                return Err("a wall is in the way".into());
-            } else if path_blocked(from, to, &blockers) {
-                return Err("something is in the way".into());
+            let blockers = self.scene.as_ref().map(|scene| scene.move_blockers.as_slice()).unwrap_or_default();
+            let flat;
+            let layout = if let Some(layout) = self.scene.as_ref().and_then(|scene| scene.layout.as_ref()) { layout } else {
+                if width.ceil() * height.ceil() > 250_000.0 { return Err("this map is too large to find a walking route".into()); }
+                flat = crate::map::layout::MapLayout::blank(width.ceil() as u32, height.ceil() as u32, "");
+                &flat
+            };
+            let route = crate::map::navigation::find_route(layout, from, to, &walls, blockers, footprint)?;
+            if route.len() >= 2 {
+                let before = route[route.len()-2]; let after = route[route.len()-1];
+                last_step = (Vec2::new(before.0 as f32, before.1 as f32), Vec2::new(after.0 as f32, after.1 as f32));
             }
         }
         let token = &mut self.tokens[index];
-        let facing = cardinal_facing(token.x, token.y, x, y, &token.facing);
+        let facing = cardinal_facing(last_step.0.x, last_step.0.y, last_step.1.x, last_step.1.y, &token.facing);
         token.x = x;
         token.y = y;
         token.facing = facing;
@@ -2706,7 +2720,9 @@ mod tests {
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
         let blocked = table.move_token(&player, "ada", 1.5, 6.5);
         assert!(blocked.is_err());
-        assert!(table.move_token(&gm(), "ada", 1.5, 6.5).unwrap());
+        assert!(table.move_token(&gm(), "ada", 1.5, 6.5).is_err(), "GM walking respects walls too");
+        assert!(table.command(&player, ClientMsg::TeleportToken { token_id: "ada".into(), x: 1.5, y: 6.5 }, None).is_err());
+        table.command(&gm(), ClientMsg::TeleportToken { token_id: "ada".into(), x: 1.5, y: 6.5 }, None).unwrap();
         assert!((table.tokens[0].y - 6.5).abs() < 0.01);
     }
 
@@ -2810,7 +2826,7 @@ mod tests {
             footprint: [1, 1],
             });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "t".into() };
-        assert!(table.move_token(&player, "ada", 2.5, 7.5).is_err());
+        assert!(table.move_token(&player, "ada", 2.5, 7.5).unwrap(), "the walk routes around the table");
         let south = table
             .vision_polygons("p")
             .into_iter()
@@ -3384,7 +3400,7 @@ mod tests {
         assert!((table.tokens[0].x - 1.5).abs() < 0.01);
         let high = table.command(&player, ClientMsg::MoveToken { token_id: id.clone(), x: 2.5, y: 0.5 }, None).err().expect("the next rise has no stair");
         assert!(high.contains("no stairs"), "{high}");
-        table.command(&gm(), ClientMsg::MoveToken { token_id: id, x: 2.5, y: 0.5 }, None).unwrap();
+        table.command(&gm(), ClientMsg::TeleportToken { token_id: id, x: 2.5, y: 0.5 }, None).unwrap();
         assert!((table.tokens[0].x - 2.5).abs() < 0.01);
     }
 
