@@ -26,8 +26,21 @@ export function damageThresholds(blow: Blow | null): string {
 }
 
 export function damageApplication(blow: Blow): string {
-  if (blow.pendingArmor) return `Awaiting armor choice · ${blow.marks} HP before armor`;
+  if (blow.pendingArmor) return `Awaiting damage choice · ${blow.marks} HP before armor`;
   if (blow.marks === 0) return 'No HP marked';
   const applied = blow.appliedMarks;
-  return `${applied} HP marked${applied < blow.marks ? ` (reduced from ${blow.marks})` : ''}`;
+  return `${applied} HP marked${blow.armorUsed ? ` · Armor used (${blow.marks} → ${Math.max(0, blow.marks - 1)} HP)` : applied < blow.marks ? ' (HP limit reached)' : ''}${blow.direct ? ' · Direct damage' : ''}`;
+}
+
+export function severityName(marks: number): string {
+  return ['None', 'Minor', 'Major', 'Severe'][marks] ?? `${marks} HP`;
+}
+
+export function damageSteps(major: number | null, severe: number | null) {
+  return [
+    { name: 'None', marks: 0, range: '0' },
+    { name: 'Minor', marks: 1, range: major == null ? 'Below Major' : `1–${Math.max(1, major - 1)}` },
+    { name: 'Major', marks: 2, range: major == null || severe == null ? 'Major' : `${major}–${severe - 1}` },
+    { name: 'Severe', marks: 3, range: severe == null ? 'Severe' : `${severe}+` },
+  ];
 }

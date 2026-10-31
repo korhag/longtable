@@ -3,7 +3,7 @@ import type { Character } from '../net/bindings/Character';
 import type { Contest } from '../net/bindings/Contest';
 import type { RollEvent } from '../net/bindings/RollEvent';
 import type { Blow } from '../net/bindings/Blow';
-import { damageApplication, damageThresholds, mayRollDamage } from './damageFlow';
+import { damageApplication, damageThresholds, damageSteps, mayRollDamage } from './damageFlow';
 
 const hero: Character = { id: 'hero', name: 'Hero', kind: 'pc', ownerId: 'alice', systemId: 'daggerheart', numbers: {}, texts: {} };
 const contest: Contest = {
@@ -11,7 +11,7 @@ const contest: Contest = {
   defenseName: 'Difficulty', defense: 12, verdict: 'hit', blow: null, damageRolled: false, attackRollId: null,
 };
 const hit = { id: 'attack', rollerId: 'alice', contest } as RollEvent;
-const major: Blow = { step: 'Major', marks: 2, appliedMarks: 2, pendingArmor: false, majorThreshold: 9, severeThreshold: 18 };
+const major: Blow = { step: 'Major', marks: 2, appliedMarks: 2, pendingArmor: false, direct: false, armorUsed: false, majorThreshold: 9, severeThreshold: 18 };
 
 describe('manual Daggerheart damage', () => {
   it('allows the current owner or GM after a hit, but never spectators or GM player preview', () => {
@@ -34,8 +34,15 @@ describe('manual Daggerheart damage', () => {
     expect(damageThresholds(major)).toBe('Major 9+ · Severe 18+');
     expect(damageThresholds({ ...major, majorThreshold: null, severeThreshold: null })).toBe('');
     expect(damageApplication(major)).toBe('2 HP marked');
-    expect(damageApplication({ ...major, step: 'Severe', marks: 3, appliedMarks: 1 })).toBe('1 HP marked (reduced from 3)');
-    expect(damageApplication({ ...major, appliedMarks: 0, pendingArmor: true })).toBe('Awaiting armor choice · 2 HP before armor');
+    expect(damageApplication({ ...major, step: 'Severe', marks: 3, appliedMarks: 1 })).toBe('1 HP marked (HP limit reached)');
+    expect(damageApplication({ ...major, appliedMarks: 0, pendingArmor: true })).toBe('Awaiting damage choice · 2 HP before armor');
     expect(damageApplication({ ...major, step: 'None', marks: 0, appliedMarks: 0 })).toBe('No HP marked');
   });
+  it('shows the four severity positions and an armor reduction down to no HP', () => {
+    expect(damageSteps(9, 18).map(step => step.range)).toEqual(['0', '1–8', '9–17', '18+']);
+    expect(damageApplication({ ...major, armorUsed: true, appliedMarks: 1 })).toBe('1 HP marked · Armor used (2 → 1 HP)');
+    expect(damageApplication({ ...major, step: 'Minor', marks: 1, armorUsed: true, appliedMarks: 0 })).toBe('0 HP marked · Armor used (1 → 0 HP)');
+    expect(damageApplication({ ...major, direct: true })).toBe('2 HP marked · Direct damage');
+  });
+
 });

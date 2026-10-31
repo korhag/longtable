@@ -116,23 +116,10 @@
     adjust(id, next - (character.numbers[id] ?? 0));
   }
 
-  const strikeReady = $derived(
-    Boolean(table.strike) && (!table.activeRoll || (table.landedRollId === table.activeRoll.id && table.activeRoll.contest?.blow)),
-  );
-
 </script>
 
 {#if system && (character || gm)}
   <section class="character-command-bar glass pointer-events-auto rounded-2xl px-3 py-2">
-    {#if !preview && strikeReady && table.strike}
-      <div class="mb-2 flex flex-wrap items-center gap-2">
-        <p class="text-sm">{table.strike.targetName} takes {table.strike.step} damage, {table.strike.marks} HP.</p>
-        <button class="btn quiet px-2 py-1 text-sm" type="button" onclick={() => send({ type: 'answerStrike', useArmor: false })}>Take it</button>
-        <button class="btn px-2 py-1 text-sm" type="button" onclick={() => send({ type: 'answerStrike', useArmor: true })}>
-          Mark armor → {table.strike.withArmor} HP
-        </button>
-      </div>
-    {/if}
     <div class="command-heading flex items-center gap-2">
       {#if gm}
         <select

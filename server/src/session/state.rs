@@ -119,7 +119,7 @@ pub struct StoredRoll {
     pub contest: Option<Contest>,
 }
 
-/// Damage that is waiting for an armor answer.
+/// Damage waiting for its defender to choose armor or take the HP marks.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingStrike {
     pub target_id: String,
@@ -127,6 +127,14 @@ pub struct PendingStrike {
     pub marks: i32,
     #[serde(default)]
     pub damage_roll_id: Option<String>,
+    #[serde(default)]
+    pub damage_total: Option<i32>,
+    #[serde(default)]
+    pub major_threshold: Option<i32>,
+    #[serde(default)]
+    pub severe_threshold: Option<i32>,
+    #[serde(default)]
+    pub direct: bool,
 }
 
 /// One number, as it was before the last mark.
@@ -813,8 +821,8 @@ impl Table {
                 self.apply_damage(viewer, &character_id, &field_id, amount, system)?;
                 Ok(CommandEffect::Refresh)
             }
-            ClientMsg::AnswerStrike { use_armor } => {
-                self.answer_strike(viewer, use_armor, system)?;
+            ClientMsg::AnswerStrike { use_armor, damage_roll_id, target_id } => {
+                self.answer_strike(viewer, use_armor, damage_roll_id.as_deref(), target_id.as_deref(), system)?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::Undo => {
@@ -2461,7 +2469,7 @@ impl Table {
         })
     }
 
-    /// Compare a damage total with the target's thresholds. Armor, when a slot is free, waits for an answer.
+    /// Compare damage with thresholds. PCs choose armor or accept damage before marking HP.
     pub fn receive_blow(&mut self, target_id: &str, amount: i32, direct: bool, system: &SystemDef) -> Result<Blow, String> {
         if self.strike.is_some() {
             return Err("answer the last blow first".into());
@@ -2471,7 +2479,7 @@ impl Table {
             .iter()
             .find(|field| field.kind == FieldKind::Thresholds)
             .ok_or_else(|| "this system has no damage thresholds".to_string())?;
-        let (step, marks, open, hp_before, major_threshold, severe_threshold) = {
+        let (step, marks, player_character, hp_before, major_threshold, severe_threshold) = {
             let character = self
                 .characters
                 .iter()
@@ -2480,20 +2488,20 @@ impl Table {
             let (step, marks) = if amount <= 0 { ("None".into(), 0) } else {
                 threshold_blow(field, amount, &character.numbers).unwrap_or_else(|| ("None".into(), 0))
             };
-            let open = if direct || character.kind == CharacterKind::Adversary { 0 } else { armor_open(character) };
             let pool_id = field.pool.as_deref().unwrap_or("hp");
             let threshold = |id: &str| field.steps.iter().find(|step| step.id == id)
                 .map(|step| character.numbers.get(id).copied().unwrap_or(step.default));
-            (step, marks, open, character.numbers.get(pool_id).copied().unwrap_or(0), threshold("major"), threshold("severe"))
+            (step, marks, character.kind == CharacterKind::Pc, character.numbers.get(pool_id).copied().unwrap_or(0), threshold("major"), threshold("severe"))
         };
         let mut blow = Blow {
-            step: step.clone(), marks, applied_marks: 0, pending_armor: open > 0 && marks > 0, major_threshold, severe_threshold,
+            step: step.clone(), marks, applied_marks: 0, pending_armor: player_character && marks > 0, major_threshold, severe_threshold, direct, armor_used: false,
         };
         if marks <= 0 {
             return Ok(blow);
         }
-        if open > 0 {
-            self.strike = Some(PendingStrike { target_id: target_id.to_string(), step, marks, damage_roll_id: None });
+        if player_character {
+            self.strike = Some(PendingStrike { target_id: target_id.to_string(), step, marks, damage_roll_id: None,
+                damage_total: Some(amount), major_threshold, severe_threshold, direct });
             return Ok(blow);
         }
         if let Some(slot) = self.add_pool(target_id, field, marks, system)? {
@@ -2506,8 +2514,11 @@ impl Table {
         Ok(blow)
     }
 
-    fn answer_strike(&mut self, viewer: &Viewer, use_armor: bool, system: Option<&SystemDef>) -> Result<(), String> {
+    fn answer_strike(&mut self, viewer: &Viewer, use_armor: bool, damage_roll_id: Option<&str>, target_id: Option<&str>, system: Option<&SystemDef>) -> Result<(), String> {
         let pending = self.strike.clone().ok_or_else(|| "there is no blow waiting".to_string())?;
+        if damage_roll_id.is_some_and(|id| pending.damage_roll_id.as_deref() != Some(id)) || target_id.is_some_and(|id| id != pending.target_id) {
+            return Err("that damage decision is no longer pending".into());
+        }
         let system = system.ok_or_else(|| "this table has no system".to_string())?;
         let field = system
             .fields
@@ -2532,6 +2543,9 @@ impl Table {
                 character.numbers.get("armor").copied().unwrap_or(0),
             )
         };
+        if use_armor && (pending.direct || open <= 0) {
+            return Err("armor cannot reduce this blow; choose Take damage".into());
+        }
         let spend = use_armor && open > 0 && pending.marks > 0;
         let hp_marks = if spend { (pending.marks - 1).max(0) } else { pending.marks };
         let mut changes = Vec::new();
@@ -2559,6 +2573,7 @@ impl Table {
             if let Some(blow) = self.rolls.iter_mut().find(|roll| roll.id == id)
                 .and_then(|roll| roll.contest.as_mut()).and_then(|contest| contest.blow.as_mut()) {
                 blow.pending_armor = false;
+                blow.armor_used = spend;
                 blow.applied_marks = (hp_after - hp_before).max(0);
             }
         }
@@ -3658,8 +3673,12 @@ mod tests {
         table.characters[0].kind = CharacterKind::Pc;
         table.characters[0].numbers.insert("hp".into(), 0);
         let direct = table.receive_blow(&target, 7, true, system).unwrap();
-        assert!(!direct.pending_armor);
-        assert_eq!(direct.applied_marks, 2);
+        assert!(direct.pending_armor);
+        assert_eq!(direct.applied_marks, 0);
+        assert!(table.answer_strike(&gm(), true, None, Some(&target), Some(system)).is_err());
+        assert_eq!(table.characters[0].numbers["hp"], 0);
+        table.answer_strike(&gm(), false, None, Some(&target), Some(system)).unwrap();
+        assert_eq!(table.characters[0].numbers["hp"], 2);
         assert!(table.strike.is_none());
     }
 
@@ -3708,13 +3727,14 @@ mod tests {
         });
 
         table
-            .command(&gm(), ClientMsg::AnswerStrike { use_armor: true }, Some(system))
+            .command(&gm(), ClientMsg::AnswerStrike { use_armor: true, damage_roll_id: None, target_id: None }, Some(system))
             .unwrap();
         assert!(table.strike.is_none());
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(1));
         assert_eq!(table.characters[0].numbers.get("armor").copied(), Some(1));
         let receipt = table.rolls.last().unwrap().contest.as_ref().unwrap().blow.as_ref().unwrap();
         assert_eq!(receipt.applied_marks, 1);
+        assert!(receipt.armor_used);
         assert!(!receipt.pending_armor, "the saved damage receipt follows the armor answer");
 
         table.command(&gm(), ClientMsg::Undo, Some(system)).unwrap();
@@ -3725,10 +3745,48 @@ mod tests {
         table.characters[0].numbers.insert("armorscore".into(), 0);
         let bare = table.receive_blow(&ada, 7, false, system).unwrap();
         assert_eq!(bare.marks, 2);
-        assert!(table.strike.is_none());
+        assert!(table.strike.is_some());
+        assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+        assert!(table.answer_strike(&gm(), true, None, Some(&ada), Some(system)).is_err());
+        table.answer_strike(&gm(), false, None, Some(&ada), Some(system)).unwrap();
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(2));
         table.command(&gm(), ClientMsg::Undo, Some(system)).unwrap();
         assert_eq!(table.characters[0].numbers.get("hp").copied(), Some(0));
+    }
+
+    #[test]
+    fn damage_choices_survive_reload_check_owner_and_reject_stale_answers() {
+        use crate::systems::{load_systems, CharacterKind};
+        let catalog = load_systems(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems").as_path());
+        let system = catalog.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Hero".into(), kind: CharacterKind::Pc }, Some(system)).unwrap();
+        let target = table.characters[0].id.clone();
+        table.characters[0].owner_id = Some("alice".into());
+        table.characters[0].numbers.extend(BTreeMap::from([
+            ("major".into(), 7), ("severe".into(), 13), ("hpmax".into(), 6), ("armorscore".into(), 2),
+        ]));
+        let owner = Viewer { player_id: "alice".into(), role: Role::Player, ..gm() };
+        let stranger = Viewer { player_id: "bob".into(), role: Role::Player, ..gm() };
+        for (amount, marks) in [(1, 1), (7, 2), (13, 3)] {
+            table.characters[0].numbers.insert("hp".into(), 0);
+            table.characters[0].numbers.insert("armor".into(), 0);
+            let blow = table.receive_blow(&target, amount, false, system).unwrap();
+            assert!(blow.pending_armor);
+            table.strike.as_mut().unwrap().damage_roll_id = Some(format!("damage-{amount}"));
+            let saved = serde_json::to_string(&table.strike).unwrap();
+            table.strike = serde_json::from_str(&saved).unwrap();
+            assert_eq!(table.strike.as_ref().unwrap().damage_total, Some(amount));
+            assert!(table.answer_strike(&stranger, false, None, None, Some(system)).is_err());
+            assert!(table.answer_strike(&owner, true, Some("old-roll"), Some(&target), Some(system)).is_err());
+            assert!(table.answer_strike(&owner, true, None, Some("wrong-target"), Some(system)).is_err());
+            assert_eq!(table.characters[0].numbers["hp"], 0);
+            table.answer_strike(&owner, true, Some(&format!("damage-{amount}")), Some(&target), Some(system)).unwrap();
+            assert_eq!(table.characters[0].numbers["hp"], marks - 1);
+            assert_eq!(table.characters[0].numbers["armor"], 1);
+            assert!(table.answer_strike(&owner, true, None, None, Some(system)).is_err());
+            assert_eq!(table.characters[0].numbers["armor"], 1);
+        }
     }
 
     #[test]

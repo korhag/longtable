@@ -53,8 +53,12 @@ function open() {
   if (!seat) return;
   closeSocket();
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  socket = new WebSocket(`${protocol}://${location.host}/ws`);
-  socket.addEventListener('open', () => {
+  // Replaced sockets can still dispatch queued close/open events. Only the
+  // current connection may change status or schedule a reconnect.
+  const current = new WebSocket(`${protocol}://${location.host}/ws`);
+  socket = current;
+  current.addEventListener('open', () => {
+    if (socket !== current) return;
     attempt = 0;
     table.connected = true;
     table.error = null;
@@ -63,7 +67,8 @@ function open() {
     pingTimer = window.setInterval(ping, 4000);
     ping();
   });
-  socket.addEventListener('message', (event) => {
+  current.addEventListener('message', (event) => {
+    if (socket !== current) return;
     const message = parse(String(event.data));
     if (!message) return;
     if (message.type === 'pong') {
@@ -82,7 +87,8 @@ function open() {
     }
     table.apply(message);
   });
-  socket.addEventListener('close', () => {
+  current.addEventListener('close', () => {
+    if (socket !== current) return;
     table.connected = false;
     window.clearInterval(pingTimer);
     if (!allowReconnect || !seat) return;

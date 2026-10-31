@@ -4,13 +4,15 @@
   import { DicePlayer } from '../dice/dicePlayer';
   import { damageApplication, damageThresholds, mayRollDamage } from '../dice/damageFlow';
   import { dieLook } from '../dice/palette';
-  import { rollDuration } from '../dice/playback';
+  import { ROLL_SPEED, rollDuration } from '../dice/playback';
   import { impacts, playBounces, playRollSettle } from '../dice/sound';
   import { sound } from '../dice/sound.svelte';
   import { systems } from '../systems/store.svelte';
   import { prefs } from '../prefs.svelte';
   import { send } from '../net/socket';
   import { table } from '../table.svelte';
+  import type { StrikeOffer } from '../net/bindings/StrikeOffer';
+  import DamageResolution from './DamageResolution.svelte';
 
   let canvas: HTMLCanvasElement;
   let player: DicePlayer | undefined;
@@ -18,6 +20,10 @@
   let pendingRollId = $state<string | null>(null);
   let damageError = $state<string | null>(null);
   let previousRollId: string | undefined;
+  let decision = $state<StrikeOffer | null>(null);
+  let answering = $state(false);
+  let answerError = $state<string | null>(null);
+  let decisionContext = '';
 
   const showing = $derived(table.activeRoll);
   const landed = $derived(showing !== null && table.landedRollId === showing.id);
@@ -25,16 +31,18 @@
   const blow = $derived(recorded?.blow ?? showing?.contest?.blow ?? null);
   const canDamage = $derived(mayRollDamage(showing, table.campaign.systemId, table.characters, table.role, table.playerId, table.viewAs, recorded));
   const thresholds = $derived(damageThresholds(blow));
+  const decisionPending = $derived(!!decision && table.strike?.targetId === decision.targetId && table.strike?.damageRollId === decision.damageRollId);
+  const decisionReceipt = $derived(decision?.damageRollId ? table.rolls.find(roll => roll.id === decision?.damageRollId)?.contest?.blow ?? null : null);
+  const decisionCritical = $derived.by(() => {
+    const attackId = table.rolls.find(roll => roll.id === decision?.damageRollId)?.contest?.attackRollId;
+    return !!attackId && table.rolls.find(roll => roll.id === attackId)?.outcome?.tone === 'critical';
+  });
+  const locked = $derived(!!pendingRollId || answering || decisionPending || !!blow?.pendingArmor);
 
   onMount(() => {
-    player = new DicePlayer(canvas);
     const observer = new ResizeObserver(() => player?.resize());
     observer.observe(canvas);
     ready = true;
-    void loadCatalog().then((packs) => {
-      const tray = trayTextures(packs);
-      player?.setTray(tray.felt, tray.wood);
-    });
     return () => {
       ready = false;
       observer.disconnect();
@@ -43,11 +51,19 @@
   });
 
   $effect(() => {
-    if (!ready || !player) return;
+    if (!ready) return;
     const roll = table.activeRoll;
     if (!roll) {
-      player.stop();
+      player?.stop();
       return;
+    }
+    if (!player) {
+      player = new DicePlayer(canvas);
+      void loadCatalog().then(packs => {
+        if (!ready) return;
+        const tray = trayTextures(packs);
+        player?.setTray(tray.felt, tray.wood);
+      });
     }
     const meshes = table.diceMeshes;
     const started = player.play(
@@ -58,17 +74,14 @@
         table.finishRoll(roll.id);
         playRollSettle();
       },
-      () => {
-        if (table.activeRoll?.id === roll.id && !canDamage && pendingRollId !== roll.id) table.dismissRoll();
-      },
       systems.active?.dieTags ?? [],
     );
     if (!started) return;
     const frames = Math.max(0, ...roll.dice.map((die) => die.keyframes.length));
-    const ends = roll.playAt + rollDuration(frames, roll.keyframeDt) * 1000;
+    const ends = roll.playAt + rollDuration(frames, roll.keyframeDt) / ROLL_SPEED * 1000;
     if (!sound.muted && table.clock.serverNow() < ends) {
       for (const die of roll.dice) {
-        playBounces(die.sides, impacts(die.keyframes, roll.keyframeDt), roll.playAt, () => table.clock.serverNow(), die.keyframes[0]?.p[0] ?? 0);
+        playBounces(die.sides, impacts(die.keyframes, roll.keyframeDt / ROLL_SPEED), roll.playAt, () => table.clock.serverNow(), die.keyframes[0]?.p[0] ?? 0);
       }
     }
   });
@@ -109,7 +122,42 @@
     send({ type: 'strike', attackRollId: showing.id, attackerId: showing.contest.attackerId, targetId: showing.contest.targetId, plus: 0, minus: 0 });
   }
 
+  $effect(() => {
+    const context = `${table.playerId}:${table.viewAs}:${table.campaign.id}`;
+    if (context !== decisionContext) { decisionContext = context; decision = null; answering = false; answerError = null; }
+    if (table.strike) decision = table.strike;
+    else if (showing && decision && showing.id !== decision.damageRollId) decision = null;
+  });
+
+  $effect(() => {
+    if (!answering) return;
+    if (!decisionPending) { answering = false; answerError = null; }
+    else if (table.error || !table.connected) { answering = false; answerError = table.error || 'Reconnecting… Try again when connected.'; }
+  });
+
+  $effect(() => {
+    if (!answering) return;
+    const timeout = window.setTimeout(() => { answering = false; answerError = 'No response yet. Reconnect or try again; this decision can only apply once.'; }, 15_000);
+    return () => clearTimeout(timeout);
+  });
+
+  // Hits and damage stay readable. Defender decisions never time out here.
+  $effect(() => {
+    if (!showing || !landed || locked || canDamage || decision || blow) return;
+    const id = showing.id;
+    const timeout = window.setTimeout(() => { if (table.activeRoll?.id === id) table.dismissRoll(); }, 2500);
+    return () => clearTimeout(timeout);
+  });
+
+  function answer(useArmor: boolean) {
+    if (!decision || !decisionPending || answering || !table.connected || table.viewAs) return;
+    answering = true; answerError = null; table.error = null;
+    send({ type: 'answerStrike', useArmor, damageRollId: decision.damageRollId ?? undefined, targetId: decision.targetId });
+  }
+
   function dismiss() {
+    if (locked) return;
+    decision = null;
     if (showing) table.dismissRoll();
   }
 
@@ -123,24 +171,24 @@
   }
 </script>
 
-<div class="dice-overlay" class:away={!showing} class:quarter={prefs.diceTray !== 'cover'} class:corner-top-left={prefs.diceCorner === 'top-left'} class:corner-top-right={prefs.diceCorner === 'top-right'} class:corner-bottom-left={prefs.diceCorner === 'bottom-left'} class:corner-bottom-right={prefs.diceCorner === 'bottom-right'}>
+<div class="dice-overlay" class:away={!showing && !decision} class:quarter={prefs.diceTray !== 'cover'} class:corner-top-left={prefs.diceCorner === 'top-left'} class:corner-top-right={prefs.diceCorner === 'top-right'} class:corner-bottom-left={prefs.diceCorner === 'bottom-left'} class:corner-bottom-right={prefs.diceCorner === 'bottom-right'}>
   <button class="dice-dim" type="button" aria-label="Dismiss the roll" onclick={dismiss}></button>
-  <div class="dice-tray">
-    {#if showing}
+  <div class="dice-tray" class:with-decision={!!decision} class:decision-ready={!!decision && (!showing || landed)} class:decision-only={!showing}>
+    {#if showing || decision}
       <div class="dice-tray-heading">
         <svg aria-hidden="true" width="22" height="24" viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.2">
           <path d="M12 1 22 7v12l-10 6L2 19V7L12 1Z M12 1 7 9h10l-5-8ZM2 7l5 2-5 10m20-12-5 2 5 10M7 9l5 16 5-16M2 19l10-5 10 5M7 9l5 5 5-5" />
         </svg>
         <div class="min-w-0 flex-1">
           <p class="dice-tray-title">Dice tray</p>
-          <p class="dice-tray-caption">{landed ? 'Roll resolved' : 'The dice are rolling'}</p>
+          <p class="dice-tray-caption">{decisionPending ? 'Resolve damage' : !showing || landed ? 'Roll resolved' : 'The dice are rolling'}</p>
         </div>
-        <button class="dice-tray-close" type="button" aria-label="Close dice tray" title="Close dice tray" onclick={dismiss}>
+        <button class="dice-tray-close" type="button" aria-label="Close dice tray" title={locked ? 'Resolve the pending damage first' : 'Close dice tray'} disabled={locked} onclick={dismiss}>
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 4 8 8M12 4l-8 8" /></svg>
         </button>
       </div>
     {/if}
-    <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" onclick={dismiss}></canvas>
+    <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" class:hidden={!showing} onclick={dismiss}></canvas>
     {#if showing}
       <button class="dice-result flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left" type="button" onclick={dismiss}>
         {#if showing.contest}
@@ -184,7 +232,7 @@
           <p class="ml-auto text-sm tracking-[0.22em] text-[var(--color-gold)] uppercase">Rolling</p>
         {/if}
       </button>
-      {#if landed && table.campaign.systemId === 'daggerheart' && blow}
+      {#if landed && table.campaign.systemId === 'daggerheart' && blow && !decision}
         <div class="dice-resolution shrink-0 border-t border-[var(--color-gold)]/20 px-4 py-2 text-sm" role="status">
           <p>{showing.total} damage{#if thresholds} · {thresholds}{/if}</p>
           <p class="mt-1 text-[var(--color-gold-bright)]">{damageApplication(blow)}</p>
@@ -200,6 +248,9 @@
           {#if damageError}<p class="w-full text-sm text-[#e7a090]" role="alert">{damageError}</p>{/if}
         </div>
       {/if}
+    {/if}
+    {#if decision && (!showing || landed)}
+      <DamageResolution offer={decision} pending={decisionPending} receipt={decisionReceipt} busy={answering || !table.connected} error={answerError} readOnly={!!table.viewAs} critical={decisionCritical} onanswer={answer} />
     {/if}
   </div>
 </div>

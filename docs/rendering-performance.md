@@ -1,16 +1,18 @@
 # Rendering performance
 
-The table draws on demand. Walking positions update with animation frames until the route finishes; stationary torch and magic effects update at most 15 times per second in the default power-saving configuration. Automatic cast idle uses a stable drawn pose with gentle breathing and sway, sampled at most 12.5 times per second by default (25 outside power-saving mode). Each figure has its own phase, with no six-second frozen interval. Camera redraws reuse the current sample instead of restarting the pose. The motion updates the existing four vertices; it does not create textures, change atlas UVs, or send server messages. Drawn action frames still advance at their manifest rate, and the explicit idle preview still displays the four drawn poses. A scene without cast or animated lights can sleep. Hidden tabs cancel rendering and timers, then refresh when shown again; reduced-motion preferences hold a still pose.
+The table draws on demand. Static miniatures do not schedule idle frames. They use a four-vertex, two-triangle card with shared directional textures. Smooth route interpolation runs only while a figure moves. Torch and magic pulses normally update at most 15 times per second in power-saving mode, and pause their background ticks while dice roll. Camera, state and movement updates still render. Hidden tabs suspend rendering; reduced-motion preferences skip route interpolation.
 
-The default drawing buffer uses at most one device pixel per CSS pixel and caps its longest edge at 1920 pixels. Terrain and repeated prop artwork already share geometry and textures. Changes to one character do not rebuild the map.
+The default drawing buffer uses at most one device pixel per CSS pixel and caps its longest edge at 1920 pixels. Terrain and repeated prop artwork share geometry and textures. Updating one character does not rebuild scenery. Fog reuses its canvas and texture; decoded elevation and visibility grids are cached. Silhouette masks are reused across light flicker and invalidated by camera, visibility, facing, movement and scenery changes.
 
-The forest revision adds three caches:
+## Dice tray
 
-- Up to eight decoded elevation grids, keyed by their immutable encoded contents. Moving feet, hit tests and lights reuse them; painting a height gets a new grid immediately.
-- Light colors, height, source selection and glow markers stay prepared while the map and camera are unchanged. Only pulse values change each tick.
-- Character silhouette masks are reused during light flicker. Movement, facing/artwork, frame UVs, deformed fallback vertices, camera, visibility and scenery changes invalidate the mask. Mask materials belong to their renderer and are released when characters leave or the renderer closes.
+The tray creates its WebGL renderer on the first roll. It uses a fixed 1× pixel ratio, no multisample antialiasing, one body mesh and one combined number mesh per die. Number atlases use 128-pixel cells rather than separate 256-pixel textures for every face. A tray retains at most eight warm atlases and six standard shapes; excess textures are released after their roll. Badges and result halos are released between rolls, and every retained resource is released on disposal.
 
-Drawn characters use a four-vertex, two-triangle card. Frame updates reuse its UV buffer instead of allocating images, geometry or materials per frame. Picking and silhouettes read the same atlas frame. A refcounted cache holds at most 12 atlas loads/textures, including pending requests; unused settled sheets are evicted first. Generic procedural fallback assets retain a small subdivided card and effects. Fog updates reuse their canvas, texture and map geometry; decoded visibility masks are cached. Server sight masks are shared between exploration updates and snapshots, while exploration itself remains private to each player seat.
+Server-authoritative keyframes and face values are unchanged. Playback interpolates them on a monotonic local clock anchored to the server at roll start, preventing later clock corrections from causing jumps. Motion plays at 1.35× with a shorter lineup glide. Bounce sounds follow the same speed. Once result badges settle, no further frames are scheduled. Hidden tabs stop rendering and catch up when shown again.
+
+A browser comparison of ten identical two-d12 rolls measured **36 → 14 draw calls**, **26 → 4 uploaded textures**, and **32 → 9 uploaded geometries** after settling. The optimized counts remained unchanged from the first to the tenth roll, with zero idle frames and no WebGL errors. Both trays used the same server meshes and orientations at 540 × 300 on the cloud SwiftShader renderer. These are fixture counts, not total application memory or a hardware FPS claim.
+
+The static forest check recorded zero extra frames over an 800 ms stationary window with lights disabled (37 textures, 35 geometries). Re-enabling sources and then marking dice as rolling suspended background light ticks. All four cast directions rendered without WebGL errors.
 
 ## Movement routing
 
@@ -20,18 +22,10 @@ A CPU-only Node/Vite check of the saved 26 × 22 forest layout, with 128 collisi
 
 ## Reproduce the checks
 
-Run the server with the forest pack and the development client, then open `/perf.html?lighting=1`. The fixture loads real forest artwork, 18 trees, eight characters and two animated sources at a 1280 × 720 drawing buffer. It reports frame timings, the graphics driver, texture/geometry counts, scene passes and silhouette-mask passes. `/occlusion.html` and `/lighting.html` verify the corresponding rendered pixels.
+Run the server and client, then open `/perf.html?lighting=1`. This loads real forest artwork, 18 trees, eight characters and two light sources at 1280 × 720 and reports timings and retained graphics resources. `/occlusion.html` and `/lighting.html` exercise their pixel effects. There is no animation showroom.
 
-`/animations.html` shows all eight characters and six poses, with a selector for each of the four directions. It checks frame-aware alpha picking, transparent intersections, WebGL errors and retained resource counts across the 192 character/view/action combinations. These checks establish correctness and retention, not a target hardware frame rate.
+From `client`, run `node scripts/fog-render.mjs` for production fog pixel checks. Server tests verify real LOS; the browser fixture isolates rendering with synthetic masks. Client tests verify batched dice geometry and label UVs, including d4 corner numbers.
 
-The final drawn-sheet check found all 768 frames alpha-pickable, rejected 619 transparent intersections, and reported no WebGL errors. After warming all directions, its 48 displayed cards retained 48 uploaded geometries and 12 textures, with eight atlases actively shared by the six action rows. Repeated playback kept those counts stable.
+Cloud browser checks use SwiftShader software rendering. Measurements establish draw-call reductions, correct behavior and bounded retention; minimum hardware frame-rate claims require testing on actual devices.
 
-The continuous-idle check in the expanded forest encounter confirmed changing poses before, during and after wheel zoom, with zero character movement/update messages. Repeated zoom retained 41 textures and 35 geometries at a 1400 × 813 drawing buffer. Hiding the tab stopped rendering; showing it resumed idle. These are resource and behavior checks on the cloud software renderer, not a hardware frame-rate guarantee.
-
-From `client`, run `node scripts/fog-render.mjs` for browser pixel checks of the production fog rendering. The fixture verifies different west/east viewpoints, a closed/open door, a boulder's visible near face, opaque unknown ground, dim remembered ground and props, and retained scenery on sight changes. The matching server tests calculate real LOS; the browser fixture uses synthetic masks to isolate rendering.
-
-Before character animation was added, the cloud software-rendering check rebuilt the character mask zero times over 16 stationary light frames (previously 16 times). The unlit idle check recorded zero extra frames and retained 29 textures and 26 geometries. Those are historical baseline measurements; active character poses now intentionally invalidate the cast mask, and their retained effect meshes add geometry. These counts describe the fixture, not every campaign.
-
-The cloud machine uses SwiftShader rather than a hardware GPU. Its frame timings varied substantially under concurrent browser work, so they do not establish a frame-rate guarantee for low-end devices. Actual hardware testing is still needed for minimum-system requirements. The fixture reports its renderer and drawing-buffer size so results can be compared on the same device and scene.
-
-Built maps share their obstacle layout with clients, which reconstruct the walk animation along the route. The server also enforces routes on older imported image maps. Those maps omit wall geometry from player snapshots, so player-side animation cannot reproduce every server detour; the authoritative destination and collision checks still apply.
+Built maps share obstacle layouts so clients reconstruct sliding motion along the route. Imported image maps may omit walls from player snapshots; authoritative server collision checks still apply.

@@ -52,11 +52,11 @@ Right-click a character for the action dial. It shows selection, targeting, char
 
 Movement animates locally along the route. Reduced-motion preferences keep movement immediate. Rendering reuses scenery, textures, elevation grids and silhouette masks; stationary lighting updates are capped, and hidden tabs stop drawing. See [performance notes](rendering-performance.md) for the measured checks and limits.
 
-## Character animation
+## Static miniatures
 
-All eight characters have newly drawn frames for idle, melee attack, ranged attack, movement, taking damage and spellcasting in all four directions. During ordinary play, idle uses subtle continuous breathing on a stable drawn pose, avoiding the jump between four different silhouettes and the old long pauses. Zooming does not restart or suspend it. The pack includes 32 animation sheets containing 768 frames. Right-click a controllable character and open **Animations** to preview each state; previews do not roll dice or change game stats. Walking and combat also trigger animations. Spellcasting currently runs through the preview menu. Reduced-motion preferences hold a still pose.
+All eight characters use four static directional views. Figures turn toward their target and slide smoothly along valid routes; there is no continuous idle or action playback. The 32 animation sheets and their runtime have been removed. See [asset sizes](static-assets.md).
 
-See [asset size measurements](animation-assets.md) for the before/after count and download size.
+Damage rolls stay open. For player characters, the defender (or GM) sees the character's threshold track and chooses **Use armor** or **Take damage** before HP is marked. Armor spends one available slot and shifts severity left by one step, including Minor to no HP. Direct damage bypasses armor; exhausted armor is disabled. Critical bonuses already included in the total are identified. A pending choice survives reconnecting. Adversary damage continues to apply automatically after the explicit damage roll.
 
 ## Roll and apply damage
 
@@ -66,7 +66,7 @@ For PC attacks, choose **Normal**, **Advantage (+d6)** or **Disadvantage (−d6)
 
 Once the attack dice settle on a hit, **Roll damage** appears directly below the dice. Nothing damages the target until that button is pressed. A miss has no damage button. Standalone damage dice in a sheet or the dice tray are free rolls; they do not apply HP. The command bar uses the linked attack flow instead of its former standalone Damage button.
 
-The damage result shows the target's thresholds and the HP actually marked. Damage below Major marks 1 HP, meeting Major marks 2, and meeting Severe marks 3; zero damage marks none. Adversaries receive these marks immediately. Their public health label and portrait marker update with marked HP, ending at **Defeated** when every HP slot is marked. PCs keep the **Near Death** label at their HP limit, leaving their death move to the table. Critical hits add the maximum of the damage dice, and PCs with available armor can answer the armor prompt. Each successful attack permits one damage roll, including after reconnecting.
+The damage result shows the target's thresholds and the HP actually marked. Damage below Major marks 1 HP, meeting Major marks 2, and meeting Severe marks 3; zero damage marks none. Adversaries receive these marks immediately. Their public health label and portrait marker update with marked HP, ending at **Defeated** when every HP slot is marked. PCs keep the **Near Death** label at their HP limit, leaving their death move to the table. Critical hits add the maximum of the damage dice, and PCs resolve the damage choice in that same window. Each successful attack permits one damage roll, including after reconnecting.
 
 ## Each player's sight
 

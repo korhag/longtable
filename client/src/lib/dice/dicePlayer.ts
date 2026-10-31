@@ -9,14 +9,13 @@ import * as THREE from 'three';
 
 import type { DieMesh } from '../net/bindings/DieMesh.ts';
 import type { RollEvent } from '../net/bindings/RollEvent.ts';
-import { d4CornerLabels } from './faceLabels';
+import { DiceAssets, disposeObjects } from './diceAssets';
 import { lineUpSlots, type Slot } from './lineup';
 import { dieLook, type TagColor } from './palette';
-import { sampleFrame, settleTime } from './playback';
+import { ROLL_SPEED, sampleFrame, settleTime } from './playback';
 
-const HOLD_MS = 2500;
-const GLIDE_S = 0.7;
-const TAG_POP_S = 0.22;
+const GLIDE_S = 0.4;
+const TAG_POP_S = 0.18;
 
 interface DieActor {
   group: THREE.Group;
@@ -47,9 +46,18 @@ export class DicePlayer {
   private felt: THREE.MeshLambertMaterial;
   private wood: THREE.MeshLambertMaterial;
   private tagColors: TagColor[] = [];
+  private assets = new DiceAssets();
+  private resume: (() => void) | null = null;
+  private disposed = false;
+  private visibilityChanged = () => {
+    cancelAnimationFrame(this.frameId);
+    this.frameId = 0;
+    if (!document.hidden) this.resume?.();
+  };
 
   constructor(private canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'low-power' });
+    document.addEventListener('visibilitychange', this.visibilityChanged);
     this.renderer.setPixelRatio(1);
     this.renderer.setClearColor(0x000000, 0);
     this.scene.add(new THREE.AmbientLight(0xfff4e4, 0.85));
@@ -71,9 +79,11 @@ export class DicePlayer {
     const loader = new THREE.TextureLoader();
     if (feltUrl) {
       loader.load(feltUrl, (texture) => {
+        if (this.disposed) { texture.dispose(); return; }
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
+        this.felt.map?.dispose();
         this.felt.map = texture;
         this.felt.color.set(0xffffff);
         this.felt.needsUpdate = true;
@@ -82,9 +92,11 @@ export class DicePlayer {
     }
     if (woodUrl) {
       loader.load(woodUrl, (texture) => {
+        if (this.disposed) { texture.dispose(); return; }
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
+        this.wood.map?.dispose();
         this.wood.map = texture;
         this.wood.color.set(0xffffff);
         this.wood.needsUpdate = true;
@@ -98,7 +110,6 @@ export class DicePlayer {
     meshes: DieMesh[],
     serverNow: () => number,
     onLand: () => void,
-    onDone: () => void,
     tags: TagColor[] = [],
   ): boolean {
     if (this.currentId === roll.id && this.playing) return false;
@@ -107,6 +118,7 @@ export class DicePlayer {
     this.currentId = roll.id;
     this.resize();
     this.tagColors = tags;
+    this.assets.beginRoll();
     const order = tags.map((tag) => tag.letter);
     const ordered = roll.dice
       .map((die, index) => ({ die, index }))
@@ -117,7 +129,7 @@ export class DicePlayer {
     for (const [place, item] of ordered.entries()) {
       const die = item.die;
       const mesh = meshes.find((candidate) => candidate.sides === die.sides);
-      const group = mesh ? buildDie(mesh, die.tag, this.tagColors) : new THREE.Group();
+      const group = mesh ? this.assets.build(mesh, die.tag, this.tagColors) : new THREE.Group();
       const shadow = new THREE.Mesh(
         new THREE.CircleGeometry(0.42, 20),
         new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }),
@@ -140,10 +152,13 @@ export class DicePlayer {
     let landed = false;
     let landedAt = 0;
     const restAt = Math.max(0, ...roll.dice.map((die) => settleTime(die.keyframes, roll.keyframeDt)));
+    // Anchor once to server time; later clock corrections cannot jerk a rolling die.
+    const initialElapsed = (serverNow() - roll.playAt) / 1000;
+    const startedAt = performance.now();
     const loop = () => {
-      if (!this.playing) return;
+      if (!this.playing || document.hidden) return;
       this.frameId = 0;
-      const elapsed = (serverNow() - roll.playAt) / 1000;
+      const elapsed = (initialElapsed + (performance.now() - startedAt) / 1000) * ROLL_SPEED;
       const glide = elapsed >= restAt && elapsed >= 0 ? smoothstep((elapsed - restAt) / GLIDE_S) : 0;
       for (const actor of this.actors) {
         const sample = sampleFrame(glide > 0 ? restAt : elapsed, roll.keyframeDt, actor.frames.length);
@@ -177,16 +192,14 @@ export class DicePlayer {
         this.revealFaces();
         this.raiseTags();
         this.placeTags(0);
-        const rollId = this.currentId;
         onLand();
-        window.setTimeout(() => {
-          if (this.playing && this.currentId === rollId) onDone();
-        }, HOLD_MS);
       }
       // A hit can remain here until its owner chooses to roll damage. Once the
       // badges have appeared the tray is static, so it needs no further frames.
       if (this.playing && (!landed || elapsed - landedAt < TAG_POP_S)) this.frameId = requestAnimationFrame(loop);
+      else this.resume = null;
     };
+    this.resume = loop;
     loop();
     return true;
   }
@@ -194,25 +207,22 @@ export class DicePlayer {
   stop(clear = true) {
     this.playing = false;
     this.currentId = '';
+    this.resume = null;
     cancelAnimationFrame(this.frameId);
     this.frameId = 0;
     if (!clear) return;
-    for (const actor of this.actors) {
-      disposeObject(actor.group);
-      actor.group.removeFromParent();
-      actor.shadow.geometry.dispose();
-      (actor.shadow.material as THREE.Material).dispose();
-      actor.shadow.removeFromParent();
-      if (actor.badge) {
-        disposeObject(actor.badge);
-        actor.badge.removeFromParent();
-      }
-    }
+    const objects = this.actors.flatMap(actor => [actor.group, actor.shadow, ...(actor.badge ? [actor.badge] : [])]);
+    this.assets.release(objects);
+    for (const object of objects) object.removeFromParent();
     this.actors = [];
   }
 
   dispose() {
+    this.disposed = true;
+    document.removeEventListener('visibilitychange', this.visibilityChanged);
     this.stop();
+    this.assets.dispose();
+    disposeObjects([this.scene]);
     this.renderer.dispose();
   }
 
@@ -300,28 +310,7 @@ export class DicePlayer {
   }
 
   private revealFaces() {
-    for (const actor of this.actors) {
-      const rings: THREE.Mesh[] = [];
-      actor.group.traverse((child) => {
-        if (!(child instanceof THREE.Mesh) || typeof child.userData.value !== 'number') return;
-        const material = child.material as THREE.MeshBasicMaterial;
-        const wins = child.userData.value === actor.value;
-        material.transparent = true;
-        material.opacity = wins ? 1 : 0.3;
-        if (!wins) return;
-        const width = (child.geometry as THREE.PlaneGeometry).parameters?.width ?? 0.35;
-        const ring = new THREE.Mesh(
-          new THREE.RingGeometry(width * 0.46, width * 0.58, 36),
-          new THREE.MeshBasicMaterial({ color: 0xf2d48a, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
-        );
-        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(child.quaternion);
-        ring.quaternion.copy(child.quaternion);
-        ring.position.copy(child.position).addScaledVector(normal, 0.012);
-        ring.renderOrder = 3;
-        rings.push(ring);
-      });
-      for (const ring of rings) actor.group.add(ring);
-    }
+    for (const actor of this.actors) this.assets.highlight(actor.group, actor.value);
   }
 
   private raiseTags() {
@@ -347,151 +336,6 @@ function tagRank(tag: string | null, order: string[]) {
   if (!tag) return order.length + 1;
   const index = order.indexOf(tag);
   return index === -1 ? order.length : index;
-}
-
-function buildDie(mesh: DieMesh, tag: string | null, tags: TagColor[]) {
-  const group = new THREE.Group();
-  const look = dieLook(mesh.sides, tag, tags);
-  group.add(new THREE.Mesh(bodyGeometry(mesh), new THREE.MeshLambertMaterial({ color: look.bodyHex })));
-  const ink = look.ink;
-  const stroke = look.stroke;
-  if (mesh.sides === 4) {
-    for (const label of d4CornerLabels(mesh)) {
-      const plate = cornerPlate(mesh, label.face, label.vertex, label.value, ink, stroke);
-      if (plate) group.add(plate);
-    }
-  } else {
-    for (const face of mesh.faces) {
-      const plate = numberPlate(face.indices, mesh.vertices, face.normal, face.value, ink, stroke, mesh.sides >= 9);
-      if (plate) group.add(plate);
-    }
-  }
-  return group;
-}
-
-function numberPlate(
-  indices: number[],
-  vertices: DieMesh['vertices'],
-  normal: [number, number, number],
-  value: number,
-  ink: string,
-  stroke: string,
-  underline: boolean,
-) {
-  const points = facePoints(indices, vertices);
-  if (points.length < 3) return null;
-  const center = average(points);
-  const direction = new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
-  const radius = inscribedRadius(points, center);
-  const plate = texturedPlate(radius * 2.1, value, ink, stroke, underline);
-  plate.position.copy(center).addScaledVector(direction, 0.014);
-  alignPlate(plate, direction, new THREE.Vector3(0, 1, 0));
-  return plate;
-}
-
-function cornerPlate(mesh: DieMesh, faceIndex: number, vertexIndex: number, value: number, ink: string, stroke: string) {
-  const face = mesh.faces[faceIndex];
-  const vertex = mesh.vertices[vertexIndex];
-  if (!face || !vertex) return null;
-  const points = facePoints(face.indices, mesh.vertices);
-  if (points.length < 3) return null;
-  const center = average(points);
-  const corner = new THREE.Vector3(vertex[0], vertex[1], vertex[2]);
-  const toward = corner.clone().sub(center);
-  const direction = new THREE.Vector3(face.normal[0], face.normal[1], face.normal[2]).normalize();
-  const radius = inscribedRadius(points, center);
-  const plate = texturedPlate(radius * 1.05, value, ink, stroke, false);
-  plate.position.copy(center).addScaledVector(toward, 0.58).addScaledVector(direction, 0.016);
-  alignPlate(plate, direction, toward);
-  return plate;
-}
-
-function texturedPlate(side: number, value: number, ink: string, stroke: string, underline: boolean) {
-  const texture = paintNumber(value, ink, stroke, underline);
-  const plate = new THREE.Mesh(
-    new THREE.PlaneGeometry(Math.max(side, 0.05), Math.max(side, 0.05)),
-    new THREE.MeshBasicMaterial({
-      map: texture ?? undefined,
-      transparent: true,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-    }),
-  );
-  plate.userData.value = value;
-  plate.renderOrder = 2;
-  return plate;
-}
-
-const NUMBER_PX = 256;
-const numberTextures = new Map<string, THREE.CanvasTexture>();
-const bodyGeometries = new Map<number, THREE.BufferGeometry>();
-
-function bodyGeometry(mesh: DieMesh) {
-  const cached = bodyGeometries.get(mesh.sides);
-  if (cached) return cached;
-  const positions: number[] = [];
-  const normals: number[] = [];
-  for (const face of mesh.faces) {
-    const vertices = face.indices.map((index) => mesh.vertices[index]).filter((vertex) => vertex);
-    for (let corner = 1; corner < vertices.length - 1; corner += 1) {
-      for (const vertex of [vertices[0], vertices[corner], vertices[corner + 1]]) {
-        if (!vertex) continue;
-        positions.push(vertex[0], vertex[1], vertex[2]);
-        normals.push(face.normal[0], face.normal[1], face.normal[2]);
-      }
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  bodyGeometries.set(mesh.sides, geometry);
-  return geometry;
-}
-
-function paintNumber(value: number, ink: string, stroke: string, underline: boolean) {
-  const key = `${value}|${ink}|${stroke}|${underline ? 1 : 0}`;
-  const cached = numberTextures.get(key);
-  if (cached) return cached;
-  const canvas = document.createElement('canvas');
-  canvas.width = NUMBER_PX;
-  canvas.height = NUMBER_PX;
-  const context = canvas.getContext('2d');
-  if (!context) return null;
-  const unit = NUMBER_PX / 512;
-  context.clearRect(0, 0, NUMBER_PX, NUMBER_PX);
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.lineJoin = 'round';
-  const text = String(value);
-  let size = 400 * unit;
-  context.font = `600 ${size}px Inter, sans-serif`;
-  const measured = context.measureText(text).width;
-  const limit = 450 * unit;
-  if (measured > limit) size = Math.floor(size * (limit / measured));
-  context.font = `600 ${size}px Inter, sans-serif`;
-  context.lineWidth = Math.max(18 * unit, Math.round(28 * (size / 320)));
-  context.strokeStyle = stroke;
-  const midY = 270 * unit;
-  context.strokeText(text, NUMBER_PX / 2, midY);
-  context.fillStyle = ink;
-  context.fillText(text, NUMBER_PX / 2, midY);
-  if (underline && (value === 6 || value === 9)) {
-    const scale = size / 320;
-    const underlineY = midY + 120 * scale;
-    const half = 86 * scale;
-    context.strokeStyle = ink;
-    context.lineWidth = Math.max(12 * unit, Math.round(18 * scale));
-    context.beginPath();
-    context.moveTo(NUMBER_PX / 2 - half, underlineY);
-    context.lineTo(NUMBER_PX / 2 + half, underlineY);
-    context.stroke();
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  numberTextures.set(key, texture);
-  return texture;
 }
 
 function valueTag(value: number, sign: number, tag: string | null, tags: TagColor[]) {
@@ -533,71 +377,7 @@ function roundRect(context: CanvasRenderingContext2D, x: number, y: number, widt
   context.closePath();
 }
 
-function facePoints(indices: number[], vertices: DieMesh['vertices']) {
-  return indices
-    .map((index) => vertices[index])
-    .filter((vertex) => vertex)
-    .map((vertex) => new THREE.Vector3(vertex[0], vertex[1], vertex[2]));
-}
-
-function average(points: THREE.Vector3[]) {
-  const center = new THREE.Vector3();
-  for (const point of points) center.add(point);
-  return center.multiplyScalar(1 / points.length);
-}
-
-function inscribedRadius(points: THREE.Vector3[], center: THREE.Vector3) {
-  let best = Infinity;
-  for (let index = 0; index < points.length; index += 1) {
-    const start = points[index];
-    const end = points[(index + 1) % points.length];
-    if (!start || !end) continue;
-    best = Math.min(best, pointSegmentDistance(center, start, end));
-  }
-  return Number.isFinite(best) ? best : 0.2;
-}
-
-function pointSegmentDistance(point: THREE.Vector3, start: THREE.Vector3, end: THREE.Vector3) {
-  const edge = end.clone().sub(start);
-  const lengthSq = edge.lengthSq() || 1;
-  const t = Math.min(1, Math.max(0, point.clone().sub(start).dot(edge) / lengthSq));
-  return point.distanceTo(start.clone().addScaledVector(edge, t));
-}
-
-function alignPlate(plate: THREE.Mesh, normal: THREE.Vector3, up: THREE.Vector3) {
-  const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-  const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation).projectOnPlane(normal);
-  const targetUp = up.clone().projectOnPlane(normal);
-  if (currentUp.lengthSq() > 1e-8 && targetUp.lengthSq() > 1e-8) {
-    currentUp.normalize();
-    targetUp.normalize();
-    const twist = Math.atan2(currentUp.clone().cross(targetUp).dot(normal), currentUp.dot(targetUp));
-    rotation.premultiply(new THREE.Quaternion().setFromAxisAngle(normal, twist));
-  }
-  plate.quaternion.copy(rotation);
-}
-
 function smoothstep(amount: number) {
   const t = Math.min(1, Math.max(0, amount));
   return t * t * (3 - 2 * t);
-}
-
-function disposeObject(object: THREE.Object3D) {
-  object.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      if (![...bodyGeometries.values()].includes(child.geometry)) child.geometry.dispose();
-      disposeMaterial(child.material);
-    } else if (child instanceof THREE.Sprite) {
-      disposeMaterial(child.material);
-    }
-  });
-}
-
-function disposeMaterial(material: THREE.Material | THREE.Material[]) {
-  const materials = Array.isArray(material) ? material : [material];
-  for (const item of materials) {
-    const mapped = item as THREE.Material & { map?: THREE.Texture | null };
-    if (mapped.map && ![...numberTextures.values()].includes(mapped.map as THREE.CanvasTexture)) mapped.map.dispose();
-    item.dispose();
-  }
 }

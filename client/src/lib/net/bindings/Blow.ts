@@ -3,4 +3,4 @@
 /**
  * Damage resolution receipt. Marks are before armor; applied marks reflect the HP actually marked.
  */
-export type Blow = { step: string, marks: number, appliedMarks: number, pendingArmor: boolean, majorThreshold: number | null, severeThreshold: number | null, };
+export type Blow = { step: string, marks: number, appliedMarks: number, pendingArmor: boolean, direct: boolean, armorUsed: boolean, majorThreshold: number | null, severeThreshold: number | null, };

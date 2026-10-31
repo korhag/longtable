@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 
-import { animationFileUrl, fileUrl, findIn, loadTexture, resolveAnimationView, type CastDef, type Pack } from '../assets/catalog';
+import { fileUrl, findIn, loadTexture, type CastDef, type Pack } from '../assets/catalog';
 import type { DoorView } from '../net/bindings/DoorView.ts';
 import type { FogView } from '../net/bindings/FogView.ts';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
@@ -20,7 +20,7 @@ import { cameraDepth, centeredSpan, framedDistance, pan, sceneBasis } from './ca
 import { footprintCells, placeAnchor } from './footprint';
 import { cellLevel, FOG_LIFT, sceneRise, supportHeight } from './levels';
 import { inSight } from './seen';
-import { opaqueTexel, orientUpright } from './cutout';
+import { opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { DecalLayer } from './decals';
 import { OcclusionOutlines } from './occlusion';
 import { roomCutaway } from './roomCutaway';
@@ -30,8 +30,6 @@ import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
 import { blockingSegments, walkRoute, type RouteLayout, type Segment } from './route';
 import { motionFacing, motionPosition, walkMotion, type WalkMotion } from './motion';
-import { CastAnimator, type CastAnimationKind } from './castAnimation';
-import { AtlasTextureCache } from './atlasTextureCache';
 import { figureCandidates, figurePress, isClick } from './interaction';
 import { stairLanding } from './stairLanding';
 import { fogStamp, sameFogPicture, sameFogStamp, type FogStamp } from './fogStamp';
@@ -85,7 +83,6 @@ interface TokenNode {
   label: THREE.Sprite;
   card: THREE.Mesh;
   bodyKey: string;
-  animator: CastAnimator;
 }
 
 const EMPTY = { width: 40, height: 30 };
@@ -100,6 +97,7 @@ export class TableEngine {
   private dirty = true;
   private queued = false;
   private lowPower = preferLowPower();
+  private diceRolling = false;
   readonly stats = { draws: 0, scheduled: 0 };
   private running = false;
   private view: View = {
@@ -134,11 +132,9 @@ export class TableEngine {
   private doorGroup = new THREE.Group();
   private lighting: SceneLighting;
   private lightTimer: ReturnType<typeof setTimeout> | null = null;
-  private animationDelay = Infinity;
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private tokenGroup = new THREE.Group();
   private nodes = new Map<string, TokenNode>();
-  private atlasTextures = new AtlasTextureCache(12);
   private movements = new Map<string, WalkMotion>();
   private tokenPositions = new Map<string, { x: number; y: number }>();
   private skipMotion = new Set<string>();
@@ -237,7 +233,7 @@ export class TableEngine {
     } else this.invalidate();
   };
 
-  private onMotionPreference = () => { for (const node of this.nodes.values()) node.animator.clear(); this.invalidate(); };
+  private onMotionPreference = () => { this.movements.clear(); this.syncTokens(); this.invalidate(); };
 
   invalidate() {
     this.dirty = true;
@@ -261,7 +257,7 @@ export class TableEngine {
       } else {
         if (this.lightTimer !== null) clearTimeout(this.lightTimer);
         this.lightTimer = null;
-        const delay = Math.min(this.animationDelay, this.lighting.animated ? (this.lowPower ? 66 : 33) : Infinity);
+        const delay = this.lighting.animated && !this.diceRolling ? (this.lowPower ? 66 : 33) : Infinity;
         if (Number.isFinite(delay)) this.lightTimer = setTimeout(() => { this.lightTimer = null; this.invalidate(); }, Math.max(16, delay));
       }
     });
@@ -283,12 +279,20 @@ export class TableEngine {
     this.draw();
   }
 
+  /** Give the dice renderer the frame budget while it rolls. Camera changes,
+   * movement and incoming state still repaint the table immediately.
+   */
+  setDiceRolling(rolling: boolean) {
+    if (this.diceRolling === rolling) return;
+    this.diceRolling = rolling;
+    if (this.lightTimer !== null) clearTimeout(this.lightTimer);
+    this.lightTimer = null;
+    this.invalidate();
+  }
+
   private draw() {
     const now = performance.now();
     this.advanceMovement(now);
-    this.animationDelay = Infinity;
-    for (const [id, node] of this.nodes) this.animationDelay = Math.min(this.animationDelay,
-      node.animator.tick(now, this.movements.has(id), this.lowPower, this.reducedMotion.matches, !this.view.buildMode));
     this.stats.draws += 1;
     this.lighting.update(Date.now() / 1000, this.focus);
     try {
@@ -320,7 +324,6 @@ export class TableEngine {
     this.fogMesh?.geometry.dispose();
     (this.fogMesh?.material as THREE.Material | undefined)?.dispose();
     for (const node of this.nodes.values()) disposeToken(node);
-    this.atlasTextures.dispose();
     this.nodes.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -329,7 +332,6 @@ export class TableEngine {
   sync(view: View) {
     if (view.scene?.id !== this.view.scene?.id) {
       this.movements.clear(); this.tokenPositions.clear();
-      for (const node of this.nodes.values()) node.animator.clear();
     }
     const changed = !sameView(this.view, view);
     if (!sameScenery(this.view, view)) this.sceneryToken += 1;
@@ -609,7 +611,7 @@ export class TableEngine {
       seen.add(token.id);
       let node = this.nodes.get(token.id);
       if (!node) {
-        node = createToken(token, this.atlasTextures);
+        node = createToken(token);
         this.nodes.set(token.id, node);
         this.tokenGroup.add(node.group);
       }
@@ -650,14 +652,6 @@ export class TableEngine {
   }
 
   skipNextMovement(tokenId: string) { this.skipMotion.add(tokenId); }
-
-  /** Local visual feedback only; game actions still travel through the rules protocol. */
-  playAnimation(tokenId: string, kind: CastAnimationKind) {
-    const node = this.nodes.get(tokenId);
-    if (!node || this.reducedMotion.matches) return;
-    node.animator.play(kind, performance.now());
-    this.invalidate();
-  }
 
   setInsets(insets: { left: number; right: number; top: number; bottom: number }) {
     this.insets = insets;
@@ -1195,7 +1189,7 @@ function segmentQuad(a: [number, number], b: [number, number], width: number, co
   );
 }
 
-function createToken(token: TokenView, atlasTextures: AtlasTextureCache): TokenNode {
+function createToken(token: TokenView): TokenNode {
   const group = new THREE.Group();
   group.userData.tokenId = token.id;
   const disc = new THREE.Mesh(
@@ -1238,7 +1232,7 @@ function createToken(token: TokenView, atlasTextures: AtlasTextureCache): TokenN
   card.userData.body = true;
   group.add(disc, ring, halo, ticks, label, card);
   group.position.set(token.x, 0, token.y);
-  return { id: token.id, group, disc, ring, halo, ticks, label, card, bodyKey: '', animator: new CastAnimator(card, atlasTextures) };
+  return { id: token.id, group, disc, ring, halo, ticks, label, card, bodyKey: '' };
 }
 
 function tickRing(): THREE.Group {
@@ -1301,11 +1295,8 @@ function paintBody(node: TokenNode, token: TokenView, packs: View['packs'], onPa
   const size = frame?.sizePx ?? [64, 128];
   const pivot = frame?.pivotPx ?? [32, 120];
   const pixels = found?.def.pixelsPerWorldUnit ?? 128;
-  node.animator.setFrame(size, pivot, pixels, facing, !!found?.def.animations);
-  if (found) {
-    const sheet = resolveAnimationView(found.def.animations, facing);
-    void node.animator.setAnimationAtlas(sheet?.definition, animationFileUrl(found.pack, sheet?.file), found.pack.filtering, onPaint);
-  }
+  node.card.geometry.dispose();
+  node.card.geometry = uprightGeometry(size, pivot, pixels);
   orientUpright(node.card);
   const material = node.card.material as THREE.MeshBasicMaterial;
   material.color.set(token.color);
@@ -1321,7 +1312,7 @@ function paintBody(node: TokenNode, token: TokenView, packs: View['packs'], onPa
   }
   void loadTexture(url, found.pack.filtering).then((texture) => {
     if (!texture || node.bodyKey !== key || !node.group.parent) return;
-    node.animator.setRestTexture(texture);
+    material.map = texture;
     material.color.set('#ffffff');
     material.needsUpdate = true;
     onPaint();
@@ -1349,7 +1340,6 @@ function castFrame(actor: CastDef, facing: string) {
 }
 
 function disposeToken(node: TokenNode) {
-  node.animator.dispose();
   node.group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.geometry.dispose();

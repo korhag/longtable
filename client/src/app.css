@@ -518,3 +518,13 @@ button:disabled { cursor: default; opacity: .45; }
   .dock.open .dock-grip { display: none; }
 }
 .dock.open { z-index: 20; }
+
+.dice-tray.with-decision, .dice-overlay.quarter .dice-tray.with-decision { width: min(540px, calc(100vw - 24px)); height: min(640px, calc(100dvh - 32px)); overflow-y: auto; }
+.dice-overlay.quarter .dice-tray.with-decision { top: auto; bottom: 16px; }
+.dice-tray.with-decision .dice-tray-heading { position: sticky; top: 0; z-index: 1; }
+.dice-tray.with-decision > canvas { min-height: 90px; }
+.dice-tray.with-decision > .damage-decision { flex-shrink: 0; }
+.dice-tray.decision-only { height: auto !important; max-height: calc(100dvh - 32px); }
+@media (max-height: 600px) {
+  .dice-tray.with-decision.decision-ready > canvas, .dice-tray.with-decision.decision-ready > .dice-result { display: none; }
+}

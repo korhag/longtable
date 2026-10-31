@@ -37,9 +37,7 @@ Four matching views per character: north/back, east/right, south/front, west/lef
 
 These are screen-facing artwork views, not world X/Z directions on the diamond grid. Back looks toward screen-up, right toward screen-right, front toward screen-down and left toward screen-left. The app projects movement and attack directions through its fixed camera before choosing the nearest view. Four views approximate diagonals; do not rotate a top-down token or a flat drawing to imitate a new upright direction.
 
-For drawn animations, make one separate transparent atlas per direction. A recommended atlas is 1024 × 1536 pixels: four 256 × 256 frames per row, with rows idle, melee, ranged, move, hurt and spell in that order. Use zero gutter and margin, no labels, and the same frame-local foot pivot in every cell. Import these four atlases through **Import pack**, with the optional `animations` metadata described in docs/assets.md; the simple Cast sheet importer creates static directional views. The pack keeps its four static views for previews and includes frame dimensions, pivot, scale, row indices, frame counts and FPS for playback.
-
-Animation directions use objects, for example `"east": {"file": "cast/elf/animation-east.png", "pixelsPerWorldUnit": 96.75, "pivotPx": [128,224]}`. Only `file` is required; omitted density and pivot inherit the shared animation defaults. Directional density accepts fractional finite values from 1–4096. If you shrink a direction's drawings to fit broad weapon poses inside its cells, reduce its density proportionally to preserve the character's world height. Keep every complete pose and effect within its own cell, with transparent padding; align all feet in that direction to the declared pivot.
+Cast uses four static directional views per character. Keep body scale and foot pivots consistent across all four columns. No action frames are required.
 
 ## Walls and doors
 

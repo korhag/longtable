@@ -156,12 +156,16 @@ pub struct Blow {
     #[serde(default)]
     pub pending_armor: bool,
     #[serde(default)]
+    pub direct: bool,
+    #[serde(default)]
+    pub armor_used: bool,
+    #[serde(default)]
     pub major_threshold: Option<i32>,
     #[serde(default)]
     pub severe_threshold: Option<i32>,
 }
 
-/// The armor question waiting on the defender, or the GM when nobody owns them.
+/// A pending damage choice visible to its defender and the GM.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
@@ -171,6 +175,14 @@ pub struct StrikeOffer {
     pub step: String,
     pub marks: i32,
     pub with_armor: i32,
+    pub damage_roll_id: Option<String>,
+    pub damage_total: Option<i32>,
+    pub major_threshold: Option<i32>,
+    pub severe_threshold: Option<i32>,
+    pub armor_available: i32,
+    pub direct: bool,
+    pub hp_marked: i32,
+    pub hp_max: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -738,6 +750,12 @@ pub enum ClientMsg {
     },
     AnswerStrike {
         use_armor: bool,
+        #[serde(default)]
+        #[ts(optional)]
+        damage_roll_id: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        target_id: Option<String>,
     },
     Undo,
     CreateCampaign {

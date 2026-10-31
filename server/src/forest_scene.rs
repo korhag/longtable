@@ -292,51 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn showroom_animation_atlases_have_all_drawn_frames_without_cell_clipping() {
-        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
-        let catalog = crate::assets::load_catalog(&assets).unwrap();
-        let mut sheets = std::collections::HashSet::new();
-        let mut frame_count = 0;
-        for id in ["human", "elf", "dwarf", "orc", "bandit-scout", "bandit-archer", "bandit-brute", "bandit-captain"] {
-            let cast = catalog.cast(&format!("forest/{id}")).unwrap();
-            let animation = cast.animations.as_ref().expect("each showroom cast has drawn animation sheets");
-            for (view, still) in [
-                (&animation.views.north, &cast.views.north), (&animation.views.east, &cast.views.east),
-                (&animation.views.south, &cast.views.south), (&animation.views.west, &cast.views.west),
-            ] {
-                let path = &view.file;
-                assert!(sheets.insert(path.clone()), "directional sheets must be distinct");
-                let picture = image::open(assets.join("packs/forest").join(path)).unwrap().to_rgba8();
-                assert_eq!([picture.width(), picture.height()], [1024, 1536]);
-                let opaque_height = |image: &image::RgbaImage| {
-                    let rows: Vec<_> = image.enumerate_pixels().filter(|(_, _, pixel)| pixel[3] >= 128).map(|(_, y, _)| y).collect();
-                    (rows.iter().max().unwrap() - rows.iter().min().unwrap() + 1) as f32
-                };
-                let reference = image::open(assets.join("packs/forest").join(&still.file)).unwrap().to_rgba8();
-                let idle_height: f32 = (0..4).map(|column| opaque_height(&image::imageops::crop_imm(&picture, column * 256, 0, 256, 256).to_image())).sum::<f32>() / 4.;
-                let source_height = opaque_height(&reference) / cast.pixels_per_world_unit as f32;
-                let drawn_height = idle_height / view.pixels_per_world_unit.unwrap_or(animation.pixels_per_world_unit as f32);
-                assert!((source_height - drawn_height).abs() <= source_height * 0.1,
-                    "{path}: drawn body must keep its original world scale ({source_height} vs {drawn_height})");
-                for row in 0..6 {
-                    let mut poses = std::collections::HashSet::new();
-                    for column in 0..4 {
-                        let cell = image::imageops::crop_imm(&picture, column * 256, row * 256, 256, 256).to_image();
-                        assert!(cell.pixels().any(|pixel| pixel[3] >= 128), "{path} frame {row}/{column} is empty");
-                        assert!(cell.enumerate_pixels().all(|(x, y, pixel)| {
-                            pixel[3] < 128 || (x > 1 && x < 254 && y > 1 && y < 254)
-                        }), "{path} frame {row}/{column} crosses its cell boundary");
-                        assert!(poses.insert(cell.into_raw()), "{path} action {row} repeats the same picture");
-                        frame_count += 1;
-                    }
-                }
-            }
-        }
-        assert_eq!(sheets.len(), 32);
-        assert_eq!(frame_count, 768);
-    }
-
-    #[test]
     fn showroom_figures_turn_in_place_and_keep_their_facing_after_reload() {
         let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
         let catalog = crate::assets::load_catalog(&assets).unwrap();

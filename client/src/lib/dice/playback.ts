@@ -4,6 +4,8 @@
 //          The numbers and the motion both come from the server.
 // ------------------------------------------------------------
 
+export const ROLL_SPEED = 1.35;
+
 export interface Frame {
   p: [number, number, number];
   q: [number, number, number, number];

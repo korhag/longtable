@@ -17,7 +17,6 @@
   import { chrome } from './lib/chrome.svelte';
   import { PROFILE_ID } from './lib/render/cameraProfile';
   import { TableEngine } from './lib/render/engine';
-  import { attackAnimation } from './lib/render/castCues';
   import { castFor } from './lib/render/rings';
   import { cellLevel, tierLabel } from './lib/render/levels';
   import { measure } from './lib/systems/measure';
@@ -47,10 +46,6 @@
   let measureLabel = $state<string | null>(null);
   let measureAt = $state({ x: 0, y: 0 });
   let aimPoint = $state<{ x: number; y: number } | null>(null);
-  let animatedAttackId: string | null = null;
-  let animatedDamageId: string | null = null;
-  let animationSceneId: string | null = null;
-  const previousHp = new Map<string, number>();
   const noSightSource = $derived(table.fog?.mode === 'player' && !table.tokens.some(token =>
     token.ownerId === (table.viewAs ?? table.playerId) && token.grantsVision && !token.hidden && token.visionRadius > 0));
 
@@ -221,41 +216,16 @@
   });
 
   $effect(() => {
+    if (!ready || !engine) return;
+    engine.setDiceRolling(!!table.activeRoll && table.landedRollId !== table.activeRoll.id);
+  });
+
+  $effect(() => {
     if (!table.joined || !account.token) return;
     const timer = window.setInterval(() => {
       void account.refresh();
     }, 8000);
     return () => window.clearInterval(timer);
-  });
-
-  $effect(() => {
-    if (!ready || !engine) return;
-    const sceneId = table.scene?.id ?? null;
-    if (sceneId !== animationSceneId) { animationSceneId = sceneId; previousHp.clear(); animatedAttackId = null; animatedDamageId = null; }
-    const roll = table.activeRoll;
-    if (roll?.contest?.verdict && !roll.contest.blow && roll.id !== animatedAttackId) {
-      animatedAttackId = roll.id;
-      const actor = table.characters.find(character => character.id === roll.contest?.attackerId);
-      for (const token of table.tokens) if (token.characterId === roll.contest.attackerId) engine.playAnimation(token.id, attackAnimation(actor, token.castAsset));
-    }
-    // Player snapshots contain their own sheets only. A visible adversary's
-    // public damage receipt supplies the hurt cue without exposing its sheet.
-    if (roll?.contest?.blow && roll.contest.blow.appliedMarks > 0 && roll.id !== animatedDamageId) {
-      animatedDamageId = roll.id;
-      if (!table.characters.some(character => character.id === roll.contest?.targetId)) {
-        for (const token of table.tokens) if (token.characterId === roll.contest.targetId) engine.playAnimation(token.id, 'hurt');
-      }
-    }
-    // Daggerheart stores marked HP: a rising count is damage, a falling count is healing.
-    // Authoritative HP changes also cover armor resolution and manual damage.
-    for (const character of table.characters) {
-      const hp = character.numbers.hp ?? 0;
-      const previous = previousHp.get(character.id);
-      if (character.systemId === 'daggerheart' && previous !== undefined && hp > previous) {
-        for (const token of table.tokens) if (token.characterId === character.id) engine.playAnimation(token.id, 'hurt');
-      }
-      previousHp.set(character.id, hp);
-    }
   });
 
   $effect(() => {
@@ -421,7 +391,7 @@
 
     <DiceStage />
     {#if !editor.active}
-      <ContextDial onCenter={(x, y) => engine?.centerOn(x, y)} onMove={(id, x, y) => engine?.moveTo(id, x, y)} onTeleport={(tokenId, x, y) => { engine?.skipNextMovement(tokenId); send({ type: 'teleportToken', tokenId, x, y }); }} onAnimate={(id, kind) => engine?.playAnimation(id, kind)} />
+      <ContextDial onCenter={(x, y) => engine?.centerOn(x, y)} onMove={(id, x, y) => engine?.moveTo(id, x, y)} onTeleport={(tokenId, x, y) => { engine?.skipNextMovement(tokenId); send({ type: 'teleportToken', tokenId, x, y }); }} />
     {/if}
 
     {#if chrome.settings}

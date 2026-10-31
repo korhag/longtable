@@ -240,6 +240,16 @@ fn strike_offer(table: &Table, viewer: &Viewer) -> Option<StrikeOffer> {
         step: pending.step.clone(),
         marks: pending.marks,
         with_armor: (pending.marks - 1).max(0),
+        damage_roll_id: pending.damage_roll_id.clone(),
+        damage_total: pending.damage_total,
+        major_threshold: pending.major_threshold.or_else(|| character.numbers.get("major").copied()),
+        severe_threshold: pending.severe_threshold.or_else(|| character.numbers.get("severe").copied()),
+        armor_available: if pending.direct { 0 } else {
+            (character.numbers.get("armorscore").copied().unwrap_or(0) - character.numbers.get("armor").copied().unwrap_or(0)).max(0)
+        },
+        direct: pending.direct,
+        hp_marked: character.numbers.get("hp").copied().unwrap_or(0),
+        hp_max: character.numbers.get("hpmax").copied().unwrap_or(6),
     })
 }
 
@@ -386,6 +396,30 @@ mod tests {
     use crate::net::protocol::Role;
     use crate::session::state::{StoredRoll, Token};
     use crate::systems::{Character, CharacterKind, RollOutcome};
+
+    #[test]
+    fn damage_offer_exposes_thresholds_to_the_defender_and_gm_only() {
+        let mut table = Table::new();
+        table.characters.push(Character {
+            id: "hero".into(), name: "Hero".into(), kind: CharacterKind::Pc, owner_id: Some("p1".into()),
+            system_id: Some("daggerheart".into()), numbers: [("hp".into(), 1), ("hpmax".into(), 6), ("armor".into(), 1), ("armorscore".into(), 3)].into(),
+            texts: Default::default(), cast_asset_id: None,
+        });
+        table.strike = Some(crate::session::state::PendingStrike {
+            target_id: "hero".into(), step: "Major".into(), marks: 2, damage_roll_id: Some("roll".into()),
+            damage_total: Some(10), major_threshold: Some(7), severe_threshold: Some(13), direct: false,
+        });
+        let offer = strike_offer(&table, &viewer(Role::Player, "p1")).unwrap();
+        assert_eq!((offer.damage_total, offer.major_threshold, offer.severe_threshold), (Some(10), Some(7), Some(13)));
+        assert_eq!((offer.hp_marked, offer.hp_max, offer.armor_available, offer.with_armor), (1, 6, 2, 1));
+        assert!(strike_offer(&table, &viewer(Role::Player, "p2")).is_none());
+        assert!(strike_offer(&table, &viewer(Role::Gm, "gm")).is_some());
+        let mut preview = viewer(Role::Gm, "gm");
+        preview.view_as = Some("p2".into());
+        assert!(strike_offer(&table, &preview).is_none());
+        table.strike.as_mut().unwrap().direct = true;
+        assert_eq!(strike_offer(&table, &viewer(Role::Player, "p1")).unwrap().armor_available, 0);
+    }
 
     #[test]
     fn marked_health_never_reads_uninjured_when_legacy_capacity_is_missing() {
