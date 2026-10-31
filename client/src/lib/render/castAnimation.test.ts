@@ -45,9 +45,9 @@ describe('compact four-view cast animation', () => {
     animator.dispose(); card.geometry.dispose(); card.material.dispose();
   });
 
-  it('sleeps between idle breaths and disables all continuous motion for reduced-motion users', () => {
+  it('keeps automatic idle moving without a multi-second hold, and honors reduced motion', () => {
     const { card, animator } = fixture();
-    expect(animator.tick(6000, false, true, false)).toBe(2000);
+    expect(animator.tick(6000, false, true, false)).toBe(80);
     expect(animator.tick(8400, false, true, false)).toBe(80);
     animator.play('spell', 8500);
     expect(animator.tick(8800, true, true, true)).toBe(Infinity);

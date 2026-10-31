@@ -2,7 +2,8 @@
 // Module: engine
 // Purpose: The tabletop. One fixed camera, upright figures,
 //          and a fog sheet. It redraws only when the view or
-//          the camera changes, so an idle table costs nothing.
+//          the camera changes. Character motion and lighting
+//          use bounded ticks; quiet scenes can sleep.
 // ------------------------------------------------------------
 
 import * as THREE from 'three';

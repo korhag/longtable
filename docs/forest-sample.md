@@ -54,7 +54,7 @@ Movement animates locally along the route. Reduced-motion preferences keep movem
 
 ## Character animation
 
-All eight characters have newly drawn frames for idle, melee attack, ranged attack, movement, taking damage and spellcasting in all four directions. The pack includes 32 animation sheets containing 768 frames. Right-click a controllable character and open **Animations** to preview each state; previews do not roll dice or change game stats. Walking and combat also trigger animations. Spellcasting currently runs through the preview menu. Reduced-motion preferences hold a still pose.
+All eight characters have newly drawn frames for idle, melee attack, ranged attack, movement, taking damage and spellcasting in all four directions. During ordinary play, idle uses subtle continuous breathing on a stable drawn pose, avoiding the jump between four different silhouettes and the old long pauses. Zooming does not restart or suspend it. The pack includes 32 animation sheets containing 768 frames. Right-click a controllable character and open **Animations** to preview each state; previews do not roll dice or change game stats. Walking and combat also trigger animations. Spellcasting currently runs through the preview menu. Reduced-motion preferences hold a still pose.
 
 See [asset size measurements](animation-assets.md) for the before/after count and download size.
 

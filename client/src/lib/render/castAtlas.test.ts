@@ -109,3 +109,41 @@ it('does not install a late atlas when facing changes or the actor is removed', 
   expect(cache.inUse).toBe(0);
   cache.dispose();
 });
+
+it('breathes continuously across the old idle hold and camera redraws without texture or UV churn', async () => {
+  const texture = new THREE.Texture();
+  const cache = new AtlasTextureCache(12, async () => texture);
+  const { animator, card } = await figure(cache);
+  const geometry = card.geometry, position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const rest = new Float32Array(position.array);
+  const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+  const uvVersion = uv.version, materialVersion = card.material.version;
+  let previous = '', changes = 0;
+  for (let now = 0; now < 16000; now += 80) {
+    const delay = animator.tick(now, false, true, false);
+    expect(delay).toBeGreaterThan(0);
+    expect(delay).toBeLessThanOrEqual(80);
+    const signature = [...position.array].join(',');
+    if (signature !== previous) changes++;
+    previous = signature;
+    const version = position.version;
+    // Zoom/pan/hover can request pictures between useful animation samples.
+    animator.tick(now + 10, false, true, false);
+    expect(position.version).toBe(version);
+    for (let i = 0; i < rest.length; i += 3) {
+      if (rest[i + 1]! <= 0) expect([...position.array.slice(i, i + 3)]).toEqual([...rest.slice(i, i + 3)]);
+      expect(Math.abs(position.array[i + 1]! - rest[i + 1]!)).toBeLessThan(.012);
+    }
+  }
+  expect(changes).toBeGreaterThan(190);
+  expect(card.geometry).toBe(geometry);
+  expect(card.material.map).toBe(texture);
+  expect(card.material.version).toBe(materialVersion);
+  expect(uv.version).toBe(uvVersion);
+  animator.play('melee', 16000);
+  animator.tick(16001, false, true, false);
+  expect(position.array).toEqual(rest);
+  animator.tick(16150, false, true, true);
+  expect(position.array).toEqual(rest);
+  animator.dispose(); cache.dispose();
+});

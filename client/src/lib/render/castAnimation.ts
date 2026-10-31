@@ -8,7 +8,7 @@ export const ANIMATION_KINDS = ['idle', 'melee', 'ranged', 'move', 'hurt', 'spel
 export type CastAnimationKind = typeof ANIMATION_KINDS[number];
 export type CastFacing = 'north' | 'east' | 'south' | 'west';
 export const CLIP_MS: Record<CastAnimationKind, number> = { idle: 2400, melee: 960, ranged: 1200, move: 1600, hurt: 680, spell: 1800 };
-const IDLE_PERIOD = 8000;
+const IDLE_CYCLE = 4200;
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 const ease = (v: number) => { const t = clamp(v); return t * t * (3 - 2 * t); };
 const pulse = (t: number, a: number, b: number) => t <= a || t >= b ? 0 : Math.sin((t - a) / (b - a) * Math.PI);
@@ -79,9 +79,14 @@ export class CastAnimator {
   private ring: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   private dart: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private atlas: CastAtlas;
+  private idleOffset: number;
 
   constructor(private card: THREE.Mesh, cache = new AtlasTextureCache()) {
     this.atlas = new CastAtlas(card, cache);
+    // Stable per-figure phase, so a group never inhales and stops in unison.
+    let phase = 0;
+    for (const char of String(card.userData.tokenId ?? card.uuid)) phase = (Math.imul(phase, 31) + char.charCodeAt(0)) >>> 0;
+    this.idleOffset = phase % 7800;
     const effectMaterial = (color: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
     this.ring = new THREE.Mesh(new THREE.RingGeometry(.2, .225, 24, 1, 0, Math.PI * 1.5), effectMaterial(0x90d7ff));
     this.dart = new THREE.Mesh(new THREE.PlaneGeometry(.3, .025), effectMaterial(0xffdc87));
@@ -180,9 +185,9 @@ export class CastAnimator {
       this.walkStarted = null;
       if (!idle) { this.restore(); return Infinity; }
       if (now < this.restUntil) { this.restore(); return this.restUntil - now; }
-      const phase = now % IDLE_PERIOD;
-      if (phase >= this.clipDuration('idle')) { this.restore(); return IDLE_PERIOD - phase; }
-      elapsed = phase; progress = phase / this.clipDuration('idle');
+      elapsed = Math.floor(now / interval) * interval + this.idleOffset;
+      if (this.atlas.configured) return this.atlas.breathe(elapsed, now, interval);
+      progress = elapsed % IDLE_CYCLE / IDLE_CYCLE;
     }
     if (this.atlas.configured) {
       this.ring.visible = this.dart.visible = false;

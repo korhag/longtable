@@ -30,6 +30,8 @@ export class CastAtlas {
   private active = false;
   private generation = 0;
   private retryAt = 0;
+  private breathing = false;
+  private breathSample = -1;
 
   constructor(private card: THREE.Mesh, private cache: AtlasTextureCache) {}
 
@@ -102,6 +104,13 @@ export class CastAtlas {
     const sequence = Math.max(0, Math.floor(elapsed / step));
     const column = kind === 'idle' || kind === 'move' ? sequence % clip.frames : Math.min(clip.frames - 1, sequence);
     const frame = clip.row * this.definition.columns + column;
+    if (this.breathing) {
+      const position = this.geometry.getAttribute('position');
+      (position.array as Float32Array).set(this.atlasPositions);
+      position.needsUpdate = true;
+      this.breathing = false;
+      this.breathSample = -1;
+    }
     if (!this.active) {
       const position = this.geometry.getAttribute('position');
       (position.array as Float32Array).set(this.atlasPositions); position.needsUpdate = true;
@@ -116,6 +125,38 @@ export class CastAtlas {
       this.frame = frame;
     }
     return step - elapsed % step;
+  }
+
+  /** Automatic idle uses one stable drawn pose with subpixel breathing, rather
+   * than flipping between four substantially different silhouettes. Reuses the
+   * existing four vertices and texture; feet stay anchored in world space.
+   */
+  breathe(elapsed: number, now: number, interval: number): number {
+    if (!this.definition || !this.geometry) return Infinity;
+    const idleFrame = this.definition.clips.idle.row * this.definition.columns;
+    if (!this.atlasTexture || !this.active || this.frame !== idleFrame) {
+      const delay = this.show('idle', 0, now);
+      if (!this.atlasTexture) return delay;
+    }
+    const sample = Math.floor(now / interval);
+    // Keep one bounded cadence with the lighting loop. Scheduling a separate
+    // fractional boundary after every light/camera draw doubles idle wake-ups.
+    const delay = interval;
+    if (this.breathing && sample === this.breathSample) return delay;
+    const breath = (1 - Math.cos(elapsed / 4200 * Math.PI * 2)) * .002;
+    const sway = Math.sin(elapsed / 7800 * Math.PI * 2) * .0015;
+    const position = this.geometry.getAttribute('position');
+    const vertices = position.array as Float32Array;
+    for (let i = 0; i < vertices.length; i += 3) {
+      const y = Math.max(0, this.atlasPositions[i + 1]!);
+      vertices[i] = this.atlasPositions[i]! + y * sway;
+      vertices[i + 1] = this.atlasPositions[i + 1]! + y * breath;
+      vertices[i + 2] = this.atlasPositions[i + 2]!;
+    }
+    position.needsUpdate = true;
+    this.breathing = true;
+    this.breathSample = sample;
+    return delay;
   }
 
   /** Keep the same drawn character artwork between clips and for reduced motion. */
@@ -133,6 +174,7 @@ export class CastAtlas {
       this.material.needsUpdate = true;
     }
     this.frame = -1; this.active = false;
+    this.breathing = false; this.breathSample = -1;
   }
 
   detach() {
