@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { ensureCatalog, findIn, loadCatalog } from './lib/assets/catalog';
   import CampaignPanel from './lib/campaign/CampaignPanel.svelte';
   import RulesPanel from './lib/designer/RulesPanel.svelte';
@@ -318,6 +318,13 @@
   });
   const Overlays = $derived(overlaysFor(table.campaign.systemId));
   const PlayChrome = $derived(playChromeFor(table.campaign.systemId));
+
+  $effect(() => {
+    const token = table.tokens.find(item => item.id === table.selectedTokenId);
+    if (token?.characterId && table.characters.some(character => character.id === token.characterId)) {
+      untrack(() => { systems.selectedId = token.characterId; });
+    }
+  });
 
   $effect(() => {
     if (table.role === 'gm' && !table.viewAs) { autoSelectedSeat = null; return; }

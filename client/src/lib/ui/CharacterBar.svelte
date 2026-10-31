@@ -1,5 +1,7 @@
 <script lang="ts">
   import { rollSetup } from '../dice/rollSetup.svelte';
+  import { attackCharacter } from '../dice/targetedAttack';
+  import ModifierBox from './ModifierBox.svelte';
   import type { Character } from '../net/bindings/Character.ts';
   import type { FieldDef } from '../net/bindings/FieldDef.ts';
   import type { SystemDef } from '../net/bindings/SystemDef.ts';
@@ -19,6 +21,7 @@
   const system = $derived(preview?.system ?? systems.active);
   const gm = $derived(!preview && table.role === 'gm' && !table.viewAs);
   const sheet = $derived(character && system ? system.sheets[character.kind] : null);
+  const targetedCombat = $derived(system?.id === 'daggerheart' && !!character);
 
   function fieldOf(id: string): FieldDef | undefined {
     return system?.fields.find((item) => item.id === id);
@@ -98,17 +101,7 @@
       return;
     }
     if (preview || !character) return;
-    if (!targetToken?.characterId) {
-      table.error = 'Pick a target.';
-      return;
-    }
-    send({
-      type: 'attack',
-      attackerId: character.id,
-      targetId: targetToken.characterId,
-      plus: rollSetup.plus,
-      minus: rollSetup.minus,
-    });
+    attackCharacter(character.id);
   }
 
   const voiceId = $derived(preview || table.viewAs ? null : character?.id ?? null);
@@ -146,7 +139,11 @@
           class="character-picker field max-w-40"
           aria-label="Active character"
           value={character?.id ?? ''}
-          onchange={(event) => (systems.selectedId = event.currentTarget.value || null)}
+          onchange={(event) => {
+            systems.selectedId = event.currentTarget.value || null;
+            table.selectedTokenId = table.tokens.find(token => token.characterId === systems.selectedId)?.id ?? null;
+            if (table.selectedTokenId === table.targetTokenId) table.targetTokenId = null;
+          }}
         >
           <option value="">Character</option>
           {#each table.characters as item (item.id)}
@@ -171,6 +168,20 @@
 
     {#if character && sheet}
       <fieldset class="contents" disabled={!!table.viewAs}>
+      {#if targetedCombat}
+        <div class="attack-controls mt-2 flex flex-wrap items-center gap-2">
+          <button class="btn text-sm" type="button" title={character.kind === 'pc' ? 'Hope d12 + Fear d12 + weapon trait; target Difficulty or Evasion' : 'd20 + attack modifier'} disabled={!!preview} onclick={() => press('attackroll')}>⚔ {targetToken ? `Attack ${targetToken.name}` : 'Attack · pick target'}</button>
+          {#if character.kind === 'pc'}
+            <select class="field !w-auto text-sm" aria-label="Attack circumstances" bind:value={rollSetup.attackEdge}>
+              <option value="none">Normal · Duality</option>
+              <option value="advantage">Advantage · +d6</option>
+              <option value="disadvantage">Disadvantage · −d6</option>
+            </select>
+          {/if}
+          <ModifierBox value={rollSetup.plus} sign="+" onchange={value => rollSetup.plus = value} />
+          <ModifierBox value={rollSetup.minus} sign="−" onchange={value => rollSetup.minus = value} />
+        </div>
+      {/if}
       <div class="command-resources mt-2 flex flex-wrap items-center gap-3">
         {#each sheet.toolbar.resources as id (id)}
           {@const field = fieldOf(id)}
@@ -222,7 +233,7 @@
         {/each}
       </div>
       <div class="command-actions mt-2 flex flex-wrap items-center gap-2">
-        {#each sheet.toolbar.actions as id (id)}
+        {#each sheet.toolbar.actions.filter(id => !targetedCombat || !['attackroll', 'damage', 'atkdamage'].includes(id)) as id (id)}
           {@const action = system.actions.find((item) => item.id === id)}
           {@const dice = system.fields.find((item) => item.id === id && item.kind === 'dice')}
           {#if action || dice}
@@ -245,6 +256,8 @@
 {/if}
 
 <style>
+  .attack-controls > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .attack-controls select { max-width: 100%; }
   @media (max-width: 760px) {
     .command-heading { flex-wrap: wrap; }
     .character-picker { flex: 1 0 100%; width: 100%; max-width: none; min-width: 0; }

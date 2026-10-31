@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { rollSetup } from '../dice/rollSetup.svelte';
+  import { attackCharacter } from '../dice/targetedAttack';
   import { layout } from '../layout/layout.svelte';
   import { send } from '../net/socket';
   import { systems } from '../systems/store.svelte';
@@ -91,7 +92,7 @@
       layout.patch('sheet', { floating: true, collapsed: false, w: Math.max(place.w, 600), h: Math.max(place.h, 560) });
     }
     if (id === 'hide' && clicked && gm) send({ type: 'updateToken', tokenId: clicked.id, name: null, ownerId: null, clearOwner: false, hidden: !clicked.hidden, visionRadius: null, grantsVision: null, color: null, characterId: null, clearCharacter: false, setCastAsset: false, castAsset: null, facing: null });
-    if (id === 'attack' && actor && target?.characterId) send({ type: 'attack', attackerId: actor.id, targetId: target.characterId, plus: rollSetup.plus, minus: rollSetup.minus });
+    if (id === 'attack' && actor && target?.characterId) attackCharacter(actor.id, target.id);
     if (id.startsWith('rule:') && actor) send({ type: 'rollAction', characterId: actor.id, actionId: id.slice(5), visibility: rollSetup.visibility, plus: rollSetup.plus, minus: rollSetup.minus });
     close();
   }

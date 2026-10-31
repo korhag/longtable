@@ -511,6 +511,16 @@ pub struct Snapshot {
     pub review: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum AttackEdge {
+    #[default]
+    None,
+    Advantage,
+    Disadvantage,
+}
+
 /// One line in the talk panel. The speaker is the character, when one is chosen.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -704,6 +714,14 @@ pub enum ClientMsg {
     Attack {
         attacker_id: String,
         target_id: String,
+        #[serde(default)]
+        edge: AttackEdge,
+        #[serde(default)]
+        #[ts(optional)]
+        attacker_token_id: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        target_token_id: Option<String>,
         #[serde(default)]
         plus: i32,
         #[serde(default)]

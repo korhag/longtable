@@ -270,6 +270,7 @@
         <div class="popover-body">
           <ViewControls {onZoom} {onFit} {onMe} {onCycle} {onSetGrid} />
           <p class="shortcut-hint">Wheel to zoom · middle-drag to pan</p>
+          <p class="shortcut-hint">Click a figure’s feet · Shift-click to cycle overlaps</p>
           <p class="shortcut-hint"><kbd>0</kbd> fit · <kbd>C</kbd> your figure · <kbd>G</kbd> grid</p>
         </div>
       </div>

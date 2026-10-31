@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { rollSetup } from '../../lib/dice/rollSetup.svelte';
-  import type { Character } from '../../lib/net/bindings/Character.ts';
+  import { attackCharacter } from '../../lib/dice/targetedAttack';
   import { send } from '../../lib/net/socket';
-  import { table } from '../../lib/table.svelte';
+  import type { Character } from '../../lib/net/bindings/Character.ts';
   import { adjust, writeCharacter } from './save';
   import './daggerheart.css';
 
@@ -21,19 +20,7 @@
   }
 
   function attack() {
-    if (preview) return;
-    const target = table.tokens.find((token) => token.id === table.targetTokenId);
-    if (!target?.characterId) {
-      table.error = 'Pick a target.';
-      return;
-    }
-    send({
-      type: 'attack',
-      attackerId: character.id,
-      targetId: target.characterId,
-      plus: rollSetup.plus,
-      minus: rollSetup.minus,
-    });
+    if (!preview) attackCharacter(character.id);
   }
 </script>
 

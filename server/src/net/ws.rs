@@ -537,12 +537,12 @@ async fn dispatch(app: &App, player_id: &str, epoch: u64, message: ClientMsg) ->
         return finish_roll(app, player_id, epoch, formula, visibility, label, None).await;
     }
 
-    if let ClientMsg::Attack { attacker_id, target_id, plus, minus } = message {
-        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, None).await;
+    if let ClientMsg::Attack { attacker_id, target_id, plus, minus, edge, attacker_token_id, target_token_id } = message {
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, None, edge, attacker_token_id, target_token_id).await;
     }
 
     if let ClientMsg::Strike { attack_roll_id, attacker_id, target_id, plus, minus } = message {
-        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, Some(attack_roll_id)).await;
+        return finish_attack(app, player_id, epoch, attacker_id, target_id, plus, minus, Some(attack_roll_id), crate::net::protocol::AttackEdge::None, None, None).await;
     }
 
     if let ClientMsg::RollAction { character_id, action_id, visibility, plus, minus } = message {
@@ -649,16 +649,23 @@ async fn finish_attack(
     plus: i32,
     minus: i32,
     attack_roll_id: Option<String>,
+    edge: crate::net::protocol::AttackEdge,
+    attacker_token_id: Option<String>,
+    target_token_id: Option<String>,
 ) -> bool {
     let plan = {
-        let table = app.table.lock().await;
+        let mut table = app.table.lock().await;
         let Some(viewer) = table.viewer(player_id, epoch) else {
             return false;
         };
         if let Some(attack_roll_id) = &attack_roll_id {
             table.prepare_strike(&viewer, attack_roll_id, &attacker_id, &target_id, plus, minus)
         } else {
-            table.prepare_attack(&viewer, &attacker_id, &target_id, plus, minus)
+            table.prepare_attack_with_edge(&viewer, &attacker_id, &target_id, plus, minus, edge).and_then(|plan| {
+                table.face_combatants(&viewer, &attacker_id, &target_id, attacker_token_id.as_deref(), target_token_id.as_deref())?;
+                table.broadcast_state();
+                Ok(plan)
+            })
         }
     };
     let plan = match plan {

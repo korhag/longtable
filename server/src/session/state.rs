@@ -83,25 +83,21 @@ fn one_by_one() -> [u32; 2] {
 pub fn cardinal_facing(from_x: f32, from_y: f32, to_x: f32, to_y: f32, previous: &str) -> String {
     let dx = to_x - from_x;
     let dy = to_y - from_y;
-    let ax = dx.abs();
-    let ay = dy.abs();
     let previous = match previous {
         "north" | "east" | "south" | "west" => previous,
         _ => "south",
     };
-    if ax < 0.01 && ay < 0.01 {
+    if dx.abs() + dy.abs() < 0.001 {
         return previous.to_string();
     }
-    // A tie keeps the current facing so a diagonal step does not flicker.
-    if (ax - ay).abs() <= 0.01 {
-        return previous.to_string();
-    }
-    if ax > ay {
-        if dx > 0.0 { "east".into() } else { "west".into() }
-    } else if dy > 0.0 {
-        "south".into()
+    // These are front/back/left/right artwork views. Project through the fixed
+    // dimetric camera before choosing, rather than interpreting grid axes as art.
+    let right = dx + dy;
+    let down = (dy - dx) * 0.5;
+    if right.abs() >= down.abs() {
+        if right >= 0.0 { "east".into() } else { "west".into() }
     } else {
-        "north".into()
+        if down >= 0.0 { "south".into() } else { "north".into() }
     }
 }
 
@@ -2316,6 +2312,48 @@ impl Table {
         self.engagement(viewer, attacker_id, target_id, plus, minus, false)
     }
 
+    pub fn prepare_attack_with_edge(&self, viewer: &Viewer, attacker_id: &str, target_id: &str, plus: i32, minus: i32, edge: crate::net::protocol::AttackEdge) -> Result<AttackPlan, String> {
+        let mut plan = self.prepare_attack(viewer, attacker_id, target_id, plus, minus)?;
+        use crate::net::protocol::AttackEdge;
+        match edge {
+            AttackEdge::None => {},
+            _ if plan.adversary => return Err("the Duality advantage die is for player-character attacks".into()),
+            AttackEdge::Advantage => plan.formula.push_str("+1d6"),
+            AttackEdge::Disadvantage => plan.formula.push_str("-1d6"),
+        }
+        Ok(plan)
+    }
+
+    /// Resolve exact selected figures when supplied, otherwise the nearest
+    /// visible pair. Both art views turn; positions and game stats stay put.
+    pub fn face_combatants(&mut self, viewer: &Viewer, attacker_id: &str, target_id: &str, attacker_token: Option<&str>, target_token: Option<&str>) -> Result<(), String> {
+        let visible: std::collections::HashSet<_> = snapshot(self, viewer).tokens.into_iter().map(|token| token.id).collect();
+        let candidates = |character: &str, requested: Option<&str>| self.tokens.iter().enumerate()
+            .filter(|(_, token)| token.character_id.as_deref() == Some(character) && visible.contains(&token.id) && requested.is_none_or(|id| token.id == id))
+            .map(|(index, _)| index).collect::<Vec<_>>();
+        let attackers = candidates(attacker_id, attacker_token);
+        let targets = candidates(target_id, target_token);
+        if viewer.role == crate::net::protocol::Role::Player && (attackers.is_empty() || targets.is_empty()) {
+            return Err("choose attacking and targeted figures visible to your player".into());
+        }
+        if attacker_token.is_some() && attackers.is_empty() || target_token.is_some() && targets.is_empty() {
+            return Err("choose visible figures linked to the attacking and targeted characters".into());
+        }
+        let mut pair = None;
+        for &a in &attackers { for &b in &targets {
+            if a == b { continue; }
+            let distance = (self.tokens[a].x - self.tokens[b].x).powi(2) + (self.tokens[a].y - self.tokens[b].y).powi(2);
+            if pair.is_none_or(|(_, _, best)| distance < best) { pair = Some((a, b, distance)); }
+        } }
+        if let Some((a, b, _)) = pair {
+            let left = &self.tokens[a]; let right = &self.tokens[b];
+            let face_a = cardinal_facing(left.x, left.y, right.x, right.y, &left.facing);
+            let face_b = cardinal_facing(right.x, right.y, left.x, left.y, &right.facing);
+            self.tokens[a].facing = face_a; self.tokens[b].facing = face_b;
+        }
+        Ok(())
+    }
+
     pub fn prepare_strike(
         &self,
         viewer: &Viewer,
@@ -2376,6 +2414,7 @@ impl Table {
         minus: i32,
         damage: bool,
     ) -> Result<AttackPlan, String> {
+        if attacker_id == target_id { return Err("choose another character as the target".into()); }
         let attacker = self
             .characters
             .iter()
@@ -2805,6 +2844,88 @@ mod tests {
         assert!(table.characters[0].owner_id.is_none());
         let old: Player = serde_json::from_value(serde_json::json!({"id":"old","name":"Old player","role":"player","color":"#ffffff","connected":false})).unwrap();
         assert!(!old.dummy, "old saved players remain ordinary seats");
+    }
+
+    #[test]
+    fn targeted_pc_attacks_use_duality_stats_and_edge_then_face_exact_figures_and_update_health() {
+        use crate::net::protocol::AttackEdge;
+        let systems = crate::systems::load_systems(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../systems"));
+        let system = systems.get("daggerheart").unwrap();
+        let mut table = Table::new();
+        table.players.push(Player { dummy: false, id: "gm".into(), name: "GM".into(), role: Role::Gm, color: "#ffffff".into(), connected: true });
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Hero".into(), kind: CharacterKind::Pc }, Some(system)).unwrap();
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Bandit".into(), kind: CharacterKind::Adversary }, Some(system)).unwrap();
+        let hero = table.characters[0].id.clone(); let foe = table.characters[1].id.clone();
+        table.characters[0].numbers.insert("strength".into(), 3);
+        table.characters[0].texts.insert("primary".into(), "Hammer · Strength · Melee".into());
+        table.characters[1].numbers.extend(BTreeMap::from([("attack".into(), 2), ("major".into(), 7), ("severe".into(), 13), ("hpmax".into(), 3)]));
+        let mut a = named_token("hero-body", 2.5, 2.5); a.character_id = Some(hero.clone());
+        let mut b = named_token("foe-body", 3.5, 3.5); b.character_id = Some(foe.clone());
+        table.tokens = vec![a, b];
+        for (edge, sign) in [(AttackEdge::Advantage, 1), (AttackEdge::Disadvantage, -1)] {
+            let plan = table.prepare_attack_with_edge(&gm(), &hero, &foe, 2, 1, edge).unwrap();
+            let dice = crate::dice::parse_formula(&plan.formula).unwrap();
+            assert_eq!(dice.modifier, 4, "weapon Strength + bonus - penalty");
+            assert_eq!(dice.groups.len(), 3);
+            assert_eq!(dice.groups[0].tag.as_deref(), Some("h"));
+            assert_eq!(dice.groups[1].tag.as_deref(), Some("f"));
+            assert_eq!(dice.groups[2].sides, 6);
+            assert_eq!(dice.groups[2].sign, sign);
+            assert!(!plan.adversary);
+        }
+        let pc = table.prepare_attack(&gm(), &hero, &foe, 0, 0).unwrap();
+        assert_eq!(pc.formula, "1d12h+1d12f+3");
+        assert_eq!(table.prepare_attack(&gm(), &foe, &hero, 0, 0).unwrap().formula, "1d20+2");
+        assert!(table.prepare_attack(&gm(), &hero, &hero, 0, 0).is_err());
+        table.face_combatants(&gm(), &hero, &foe, Some("hero-body"), Some("foe-body")).unwrap();
+        assert_eq!((&*table.tokens[0].facing, &*table.tokens[1].facing), ("east", "west"));
+        assert_eq!((table.tokens[0].x, table.tokens[0].y), (2.5, 2.5));
+        assert!(table.face_combatants(&gm(), &hero, &foe, Some("foe-body"), Some("hero-body")).is_err());
+        let mut far = named_token("far-foe", 4.5, 0.5); far.character_id = Some(foe.clone()); table.tokens.push(far);
+        table.face_combatants(&gm(), &hero, &foe, Some("hero-body"), Some("far-foe")).unwrap();
+        assert_eq!((&*table.tokens[0].facing, &*table.tokens[2].facing), ("north", "south"));
+        let blow = table.receive_blow(&foe, 8, false, system).unwrap();
+        assert_eq!(blow.applied_marks, 2);
+        let seen = snapshot(&table, &gm());
+        assert!(seen.figures.iter().filter(|figure| figure.kind == CharacterKind::Adversary).all(|figure| figure.health != "Uninjured"));
+        table.receive_blow(&foe, 1, false, system).unwrap();
+        assert!(snapshot(&table, &gm()).figures.iter().filter(|figure| figure.kind == CharacterKind::Adversary).all(|figure| figure.health == "Defeated"));
+    }
+
+    #[test]
+    fn dimetric_facing_uses_the_artwork_screen_axes_in_both_directions() {
+        for (x, y, expected, reverse) in [(1., 1., "east", "west"), (1., -1., "north", "south"), (1., 0., "east", "west"), (0., 1., "east", "west")] {
+            assert_eq!(cardinal_facing(0., 0., x, y, "south"), expected);
+            assert_eq!(cardinal_facing(x, y, 0., 0., "south"), reverse);
+        }
+        assert_eq!(cardinal_facing(2., 2., 2., 2., "west"), "west");
+    }
+
+    #[test]
+    fn player_attack_turning_accepts_visible_targets_and_rejects_hidden_or_out_of_sight_ones() {
+        let mut table = Table::new();
+        table.players.push(Player { dummy: false, id: "p".into(), name: "Player".into(), role: Role::Player, color: "#ffffff".into(), connected: true });
+        table.command(&gm(), ClientMsg::CreateScene { name: "Room".into(), width: 12, height: 12 }, None).unwrap();
+        for (name, kind) in [("Hero", CharacterKind::Pc), ("Foe", CharacterKind::Adversary)] {
+            table.command(&gm(), ClientMsg::CreateCharacter { name: name.into(), kind }, None).unwrap();
+        }
+        let hero = table.characters[0].id.clone(); let foe = table.characters[1].id.clone();
+        let mut a = named_token("hero-body", 2.5, 2.5); a.character_id = Some(hero.clone());
+        let mut b = named_token("foe-body", 3.5, 3.5); b.character_id = Some(foe.clone());
+        table.tokens = vec![a, b];
+        table.assign_character_owner(&hero, Some("p".into()));
+        table.reveal_from_tokens();
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "unused".into() };
+        assert!(table.prepare_attack(&player, &hero, &foe, 0, 0).is_ok());
+        table.face_combatants(&player, &hero, &foe, Some("hero-body"), Some("foe-body")).unwrap();
+        assert_eq!((&*table.tokens[0].facing, &*table.tokens[1].facing), ("east", "west"));
+        table.tokens[1].hidden = true;
+        assert!(table.face_combatants(&player, &hero, &foe, Some("hero-body"), Some("foe-body")).is_err());
+        assert!(table.face_combatants(&player, &hero, &foe, None, None).is_err());
+        table.tokens[1].hidden = false; table.tokens[1].x = 11.5; table.tokens[1].y = 11.5;
+        table.reveal_from_tokens();
+        assert!(table.face_combatants(&player, &hero, &foe, None, None).is_err());
+        assert_eq!(table.tokens[0].facing, "east", "refused actions must not change a figure's facing");
     }
 
     #[test]

@@ -21,10 +21,10 @@
   const ownFigure = $derived(!!token && token.ownerId === table.playerId && !table.viewAs);
   const colors = ['#d4a656', '#c45c4a', '#6e9a72', '#6f8fbf', '#8d5b86', '#e7d7b6'];
   const faces = [
-    { value: 'north', label: 'North' },
-    { value: 'east', label: 'East' },
-    { value: 'south', label: 'South' },
-    { value: 'west', label: 'West' },
+    { value: 'north', label: 'Back' },
+    { value: 'east', label: 'Right' },
+    { value: 'south', label: 'Front' },
+    { value: 'west', label: 'Left' },
   ];
 
   function turn(tokenId: string, facing: string) {

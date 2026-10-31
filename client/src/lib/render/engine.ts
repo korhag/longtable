@@ -32,7 +32,7 @@ import { blockingSegments, walkRoute, type RouteLayout, type Segment } from './r
 import { motionFacing, motionPosition, walkMotion, type WalkMotion } from './motion';
 import { CastAnimator, type CastAnimationKind } from './castAnimation';
 import { AtlasTextureCache } from './atlasTextureCache';
-import { figurePress, isClick } from './interaction';
+import { figureCandidates, figurePress, isClick } from './interaction';
 import { stairLanding } from './stairLanding';
 import { fogStamp, sameFogPicture, sameFogStamp, type FogStamp } from './fogStamp';
 import { drawFog } from './fogImage';
@@ -604,7 +604,8 @@ export class TableEngine {
 
   private syncTokens() {
     const seen = new Set<string>();
-    for (const token of this.visibleTokens()) {
+    const visible = this.visibleTokens();
+    for (const token of visible) {
       seen.add(token.id);
       let node = this.nodes.get(token.id);
       if (!node) {
@@ -828,6 +829,8 @@ export class TableEngine {
     };
   }
 
+  private pickCycle: { x: number; y: number; key: string; index: number } | null = null;
+
   private tokenAt(event: PointerEvent): string | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
@@ -836,6 +839,7 @@ export class TableEngine {
     );
     this.raycaster.setFromCamera(ndc, this.camera);
     const hits = this.raycaster.intersectObjects(this.tokenGroup.children, true);
+    const opaqueIds: string[] = [];
     for (const hit of hits) {
       if (!shown(hit.object)) continue;
       const mesh = hit.object as THREE.Mesh;
@@ -845,19 +849,19 @@ export class TableEngine {
       }
       let object: THREE.Object3D | null = hit.object;
       while (object) {
-        if (typeof object.userData.tokenId === 'string') return object.userData.tokenId;
+        if (typeof object.userData.tokenId === 'string') { opaqueIds.push(object.userData.tokenId); break; }
         object = object.parent;
       }
     }
-    return this.cellToken(event);
-  }
-
-  private cellToken(event: { clientX: number; clientY: number }): string | null {
-    const hit = this.hitMap(event);
-    if (!hit) return null;
-    const x = Math.floor(hit.x);
-    const y = Math.floor(hit.z);
-    return this.visibleTokens().find((token) => coversCell(token, x, y))?.id ?? null;
+    const ground = this.hitMap(event);
+    const cellIds = ground ? this.visibleTokens().filter(token => coversCell(token, Math.floor(ground.x), Math.floor(ground.z))).map(token => token.id) : [];
+    const candidates = figureCandidates(cellIds, opaqueIds);
+    if (!candidates.length) { this.pickCycle = null; return null; }
+    const key = candidates.join(':');
+    const repeat = this.pickCycle && this.pickCycle.key === key && Math.hypot(event.clientX - this.pickCycle.x, event.clientY - this.pickCycle.y) < 5;
+    const index = event.shiftKey ? ((repeat ? this.pickCycle!.index : 0) + 1) % candidates.length : 0;
+    this.pickCycle = { x: event.clientX, y: event.clientY, key, index };
+    return candidates[index] ?? null;
   }
 
   private onDown = (event: PointerEvent) => {
@@ -911,7 +915,8 @@ export class TableEngine {
     }
     const token = this.view.tokens.find((item) => item.id === tokenId);
     this.acted = true;
-    const intent = figurePress(this.view.selectedId, this.view.targetId, tokenId, !!token && this.hooks.canDrag(token));
+    const intent = event.shiftKey && token && this.hooks.canDrag(token) ? 'select'
+      : figurePress(this.view.selectedId, this.view.targetId, tokenId, !!token && this.hooks.canDrag(token));
     if (intent === 'select') {
       this.hooks.onSelect(tokenId);
       this.hooks.onTarget?.(null);

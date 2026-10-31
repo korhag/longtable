@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { figurePress, isClick } from './interaction';
+import { figureCandidates, figurePress, isClick } from './interaction';
 
 it('selects first owned figure, targets another, then selects that target on repeat click', () => {
   expect(figurePress(null, null, 'elf', true)).toBe('select');
@@ -14,4 +14,10 @@ it('never takes control of someone else’s figure, including a repeated target 
 it('separates a destination click from camera dragging', () => {
   expect(isClick({ x: 100, y: 50 }, { clientX: 102, clientY: 51 })).toBe(true);
   expect(isClick({ x: 100, y: 50 }, { clientX: 110, clientY: 50 })).toBe(false);
+});
+
+it('prioritizes an occupied rear cell over a covering foreground sprite and keeps all overlaps cyclable', () => {
+  expect(figureCandidates(['rear'], ['front', 'rear', 'front'])).toEqual(['rear', 'front']);
+  expect(figureCandidates([], ['front', 'rear', 'front'])).toEqual(['front', 'rear']);
+  expect(figureCandidates(['same-cell-a', 'same-cell-b'], ['same-cell-b'])).toEqual(['same-cell-a', 'same-cell-b']);
 });

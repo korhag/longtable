@@ -8,3 +8,8 @@ export function figurePress(selected: string | null, target: string | null, clic
 export function isClick(start: { x: number; y: number }, end: { clientX: number; clientY: number }): boolean {
   return Math.hypot(end.clientX - start.x, end.clientY - start.y) < 5;
 }
+
+/** Feet/cells are unambiguous even when a foreground sprite covers that cell. */
+export function figureCandidates(cellIds: string[], opaqueIds: string[]): string[] {
+  return [...new Set([...cellIds, ...opaqueIds])];
+}

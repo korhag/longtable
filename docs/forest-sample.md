@@ -36,7 +36,7 @@ Open **Sounds** to try female and male combat voices: Attack, Exertion, Take dam
 
 Play starts with compact side rails. Open Tools or Dice when needed; click them again to recover map space. Selecting a figure shows a compact summary; expand Details for editing. **F** toggles focus mode while no text field is active. Brass-framed windows rise when clicked, stay within the viewport, and scroll internally on small screens. Menus and the action dial close with Escape. The View menu contains camera controls. See [the interface guide](ui.md) for window and keyboard controls.
 
-All eight characters have four distinct views. Select a figure and use North, East, South or West in the compact inspector; moving a figure also updates its facing. Facing persists through save and reload.
+All eight characters have four distinct views. Select a figure and use Back, Right, Front or Left in the compact inspector. Movement chooses the closest screen-facing view on the diamond grid. An accepted attack turns both figures toward each other. Facing persists through save and reload. The current artwork approximates diagonals with these four views; no new image assets are needed for this correction.
 
 Try `docs/examples/forest-adventurers-sheet.png` or `docs/examples/forest-bandits-sheet.png` in Import sheet: choose Cast, set cells to **160 × 256**, zero margin/gutter, **128 pixels per world unit**, **1 × 1 footprint**, and foot pivot **80, 245**. The four columns are North, East, South, West; each row becomes one character. Use a new pack ID to preserve the bundled artwork.
 
@@ -44,7 +44,7 @@ The importer expects regular-grid PNG sheets. It does not remove backgrounds or 
 
 ## Select, target and move
 
-Left-click a controllable figure to select it. With a figure selected, click another figure to target it; click that target again to select it if your seat controls it. Transparent space around a sprite passes the click through to figures behind it.
+Left-click a controllable figure to select it. With a figure selected, click another figure to target it; click that target again to select it if your seat controls it. Clicking an occupied foot cell prioritizes that figure even when another sprite covers the cell. Elsewhere, opaque sprite pixels determine the hit and transparent margins pass through. **Shift-click** cycles overlapping figures and directly selects one your seat controls; another player's figure can be targeted but never taken over.
 
 Click clear ground to move the selected figure, or drag it to a destination. Walking follows a route around blocked objects and walls, through open doors and across connected stairs. An unreachable destination leaves the figure in place. The entire footprint must fit; a large figure cannot squeeze through a narrow gap. GM walking follows the same rules.
 
@@ -60,9 +60,13 @@ See [asset size measurements](animation-assets.md) for the before/after count an
 
 ## Roll and apply damage
 
-In Daggerheart, attack a targeted character through the action dial. Once the attack dice settle on a hit, **Roll damage** appears directly below the dice. Nothing damages the target until that button is pressed. A miss has no damage button.
+In Daggerheart, select the acting figure and click another character once to target it, then use the gold **Attack** button or the action dial. The toolbar follows the selected figure. PCs use Hope d12 + Fear d12 + their equipped weapon's trait; adversaries use d20 + Attack. The server compares the total with the target's Difficulty or Evasion. Hope/Fear criticals still hit regardless of the defense.
 
-The damage result shows the target's thresholds and the HP actually marked. Damage below Major marks 1 HP, meeting Major marks 2, and meeting Severe marks 3; zero damage marks none. Adversaries receive these marks immediately. Critical hits add the maximum of the damage dice, and PCs with available armor can answer the armor prompt. Each successful attack permits one damage roll, including after reconnecting.
+For PC attacks, choose **Normal**, **Advantage (+d6)** or **Disadvantage (−d6)** after the GM resolves the net circumstances; the adjacent +/− controls add flat bonuses and penalties. Range, cover and fictional positioning remain GM decisions. These controls do not automatically infer them from scenery. The circumstance die applies to the attack, not its damage roll.
+
+Once the attack dice settle on a hit, **Roll damage** appears directly below the dice. Nothing damages the target until that button is pressed. A miss has no damage button. Standalone damage dice in a sheet or the dice tray are free rolls; they do not apply HP. The command bar uses the linked attack flow instead of its former standalone Damage button.
+
+The damage result shows the target's thresholds and the HP actually marked. Damage below Major marks 1 HP, meeting Major marks 2, and meeting Severe marks 3; zero damage marks none. Adversaries receive these marks immediately. Their public health label and portrait marker update with marked HP, ending at **Defeated** when every HP slot is marked. PCs keep the **Near Death** label at their HP limit, leaving their death move to the table. Critical hits add the maximum of the damage dice, and PCs with available armor can answer the armor prompt. Each successful attack permits one damage roll, including after reconnecting.
 
 ## Each player's sight
 

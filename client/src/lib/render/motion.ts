@@ -1,4 +1,5 @@
 import type { WalkPoint } from './route';
+import { facingToward } from './facing';
 export interface WalkMotion { points: WalkPoint[]; lengths: number[]; distance: number; started: number; duration: number }
 export function walkMotion(points: WalkPoint[], started: number): WalkMotion {
   const lengths = [0];
@@ -27,5 +28,5 @@ export function motionFacing(motion: WalkMotion, now: number, fallback: string):
   const b = motionPosition(motion, now + 20);
   const dx = b.x - a.x, dy = b.z - a.z;
   if (Math.abs(dx) + Math.abs(dy) < 0.001) return fallback;
-  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'east' : 'west') : (dy > 0 ? 'south' : 'north');
+  return facingToward(dx, dy, fallback);
 }

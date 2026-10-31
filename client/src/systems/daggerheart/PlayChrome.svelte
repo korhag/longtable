@@ -40,7 +40,7 @@
   }
 
   function dot(word: string, words: string[], colors: string[]): string {
-    const index = words.indexOf(word);
+    const index = word === 'Defeated' ? words.length - 1 : words.indexOf(word);
     return colors[index < 0 ? 0 : index] ?? colors[0] ?? '#8a8478';
   }
 

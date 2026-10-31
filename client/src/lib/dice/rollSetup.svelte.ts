@@ -5,10 +5,12 @@
 // ------------------------------------------------------------
 
 import type { RollVisibility } from '../net/bindings/RollVisibility.ts';
+import type { AttackEdge } from '../net/bindings/AttackEdge.ts';
 
 class RollSetup {
   plus = $state(0);
   minus = $state(0);
+  attackEdge = $state<AttackEdge>('none');
   visibility = $state<RollVisibility>('public');
 }
 

@@ -266,17 +266,25 @@ fn figure_for(table: &Table, token: &Token) -> Option<Figure> {
         token_id: token.id.clone(),
         name: token.name.clone(),
         kind: character.kind,
-        health: track_word(number("hp"), number("hpmax"), &HEALTH),
+        health: health_word(character),
         stress: track_word(number("stress"), number("stressmax"), &STRESS),
         hope: if character.kind == CharacterKind::Pc { Some(number("hope")) } else { None },
     })
 }
 
+fn health_word(character: &Character) -> String {
+    let marked = character.numbers.get("hp").copied().unwrap_or(0);
+    let max = character.numbers.get("hpmax").copied().unwrap_or(6);
+    if character.kind == CharacterKind::Adversary && max > 0 && marked >= max { return "Defeated".into(); }
+    track_word(marked, max, &HEALTH)
+}
+
 /// Name a mark track by quarters. The last quarter, including a full track, is the final word.
 fn track_word(marked: i32, max: i32, names: &[&str; 5]) -> String {
-    if max <= 0 || marked <= 0 {
+    if marked <= 0 {
         return names[0].to_string();
     }
+    if max <= 0 { return names[1].to_string(); }
     if marked >= max {
         return names[4].to_string();
     }
@@ -378,6 +386,21 @@ mod tests {
     use crate::net::protocol::Role;
     use crate::session::state::{StoredRoll, Token};
     use crate::systems::{Character, CharacterKind, RollOutcome};
+
+    #[test]
+    fn marked_health_never_reads_uninjured_when_legacy_capacity_is_missing() {
+        let mut character = Character { id: "hero".into(), name: "Hero".into(), kind: CharacterKind::Pc, owner_id: None, system_id: Some("daggerheart".into()), numbers: Default::default(), texts: Default::default(), cast_asset_id: None };
+        assert_eq!(health_word(&character), "Uninjured");
+        character.numbers.insert("hp".into(), 1);
+        assert_eq!(health_word(&character), "Slightly Wounded");
+        character.numbers.insert("hpmax".into(), 0);
+        assert_ne!(health_word(&character), "Uninjured");
+        character.kind = CharacterKind::Adversary;
+        character.numbers.extend([("hpmax".into(), 6), ("hp".into(), 5)]);
+        assert_eq!(health_word(&character), "Near Death");
+        character.numbers.insert("hp".into(), 6);
+        assert_eq!(health_word(&character), "Defeated");
+    }
 
     fn viewer(role: Role, id: &str) -> Viewer {
         Viewer {
@@ -731,7 +754,7 @@ mod tests {
         assert_eq!(gm_view.campaigns.len(), 1);
         assert!(gm_view.scenes.is_empty());
         let lurker = gm_view.figures.iter().find(|figure| figure.token_id == "secret").unwrap();
-        assert_eq!(lurker.health, "Near Death");
+        assert_eq!(lurker.health, "Defeated");
         assert_eq!(lurker.stress, "Spent");
         assert_eq!(lurker.hope, None);
     }
