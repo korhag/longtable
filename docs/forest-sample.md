@@ -66,6 +66,14 @@ The damage result shows the target's thresholds and the HP actually marked. Dama
 
 ## Each player's sight
 
-Select an adventurer, expand **Figure details**, and choose its player under **Owner**. This assigns the linked character sheet, combat actions and all its figures in the campaign's scenes together; changing the sheet's owner does the same. Unlinked figures keep independent owners. Leave vision enabled. A seat sees from its own figures; an unowned figure does not grant everyone sight. The GM can use **View as** to inspect an individual player's view.
+Select an adventurer, expand **Figure details**, and choose its player under **Owner**. This assigns the linked character sheet, combat actions and all its figures in the campaign's scenes together; changing the sheet's owner does the same. Unlinked figures keep independent owners. Leave vision enabled. A seat sees from its own figures; an unowned figure does not grant everyone sight.
+
+To test without another browser, open **Player view → Create dummy player** in the top bar. Give the dummy a name and choose a player character in the creation form, then choose **Create & see as player**. **Create only** saves the seat and assignment without switching views. Make one dummy per adventurer to compare their sight. The form warns if the chosen character already belongs to someone, has no figure in this scene, or has no active vision.
+
+**Player view** lists real and dummy seats with **See as player** buttons. Preview uses the server's player vision and personal exploration, filters character sheets and secret roll results, and disables table changes. **Return to GM** restores the full view. Preview shows the published scene, so use **Put on the table** after map edits. Your editable draft is kept when switching out of Map.
+
+Dummy seats and their assignments/exploration survive a save and restart. They do not sign in or open another connection. Remove a dummy with **×** beside its name in Player view; its characters and figures stay in the campaign and become unassigned. Its personal fog history is removed; other players keep theirs.
+
+[See the GM's player-preview example](milestones/player-preview.png).
 
 Trees, rocks, cabin walls, closed doors and terrain block sight according to their height. Unseen areas are dark; explored areas outside current sight remain dim, including upright scenery. Another player's exploration does not reveal your map. The GM's explicit reveal brush remains shared. Opening the cabin door or moving around an obstacle updates the view, and personal exploration persists when switching scenes or reloading.

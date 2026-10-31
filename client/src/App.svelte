@@ -54,7 +54,8 @@
   const noSightSource = $derived(table.fog?.mode === 'player' && !table.tokens.some(token =>
     token.ownerId === (table.viewAs ?? table.playerId) && token.grantsVision && !token.hidden && token.visionRadius > 0));
 
-  const shown = $derived<SceneView | null>(editor.active && editor.draft
+  const editing = $derived(editor.active && !table.viewAs);
+  const shown = $derived<SceneView | null>(editing && editor.draft
     ? {
         id: editor.draft.id,
         name: editor.draft.name,
@@ -202,8 +203,8 @@
     engine.sync({
       scene: shown,
       tokens: table.tokens,
-      doors: editor.active ? [] : table.doors,
-      fog: editor.active ? null : table.fog,
+      doors: editing ? [] : table.doors,
+      fog: editing ? null : table.fog,
       role: table.viewAs ? 'player' : table.role,
       seatId: table.viewAs ?? table.playerId,
       selectedId: table.selectedTokenId,
@@ -211,10 +212,10 @@
       hoverId: table.hoverTokenId,
       tool: editor.active || table.viewAs ? 'select' : table.tool,
       packs: editor.packs,
-      ghost: editor.ghost,
+      ghost: editing ? editor.ghost : [],
       placeSpan: armedSpan(),
-      buildMode: editor.active,
-      viewId: editor.active ? '' : table.viewId,
+      buildMode: editing,
+      viewId: editing ? '' : table.viewId,
       cast: Object.fromEntries(table.tokens.map((token) => [token.id, castFor(token, table.characters, table.players)])),
     });
   });
@@ -319,14 +320,21 @@
   const PlayChrome = $derived(playChromeFor(table.campaign.systemId));
 
   $effect(() => {
-    if (table.role !== 'player' || table.viewAs || table.selectedTokenId || autoSelectedSeat === table.playerId) return;
-    const owned = table.tokens.filter((token) => token.ownerId === table.playerId);
+    if (table.role === 'gm' && !table.viewAs) { autoSelectedSeat = null; return; }
+    const seat = table.viewAs ?? table.playerId;
+    if (table.selectedTokenId || autoSelectedSeat === seat) return;
+    const owned = table.tokens.filter((token) => token.ownerId === seat);
     if (owned.length !== 1) return;
     const token = owned[0];
     if (!token) return;
-    autoSelectedSeat = table.playerId;
+    autoSelectedSeat = seat;
     table.selectedTokenId = token.id;
     if (token.characterId) systems.selectedId = token.characterId;
+    if (table.viewAs) engine?.centerOn(token.x, token.y);
+  });
+
+  $effect(() => {
+    if (table.viewAs && editor.active) { modes.set('play'); editor.leave(); }
   });
 
   $effect(() => {
@@ -336,7 +344,7 @@
   function mine() {
     const characterId = systems.chosen?.id;
     return table.tokens.find((token) => characterId && token.characterId === characterId)
-      ?? table.tokens.find((token) => token.ownerId === table.playerId)
+      ?? table.tokens.find((token) => token.ownerId === (table.viewAs ?? table.playerId))
       ?? null;
   }
 </script>

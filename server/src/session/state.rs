@@ -36,6 +36,9 @@ const FEAR_CAP: u8 = 12;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Player {
+    /// A saved preview seat created by the GM; never attach a real connection.
+    #[serde(default)]
+    pub dummy: bool,
     pub id: String,
     pub name: String,
     pub role: crate::net::protocol::Role,
@@ -551,7 +554,7 @@ impl Table {
         };
 
         if let Some(id) = resume_id.filter(|id| !id.is_empty()) {
-            let same_role = self.players.iter().any(|player| player.id == id && player.role == role);
+            let same_role = self.players.iter().any(|player| player.id == id && player.role == role && !player.dummy);
             if same_role {
                 if let Some(player) = self.players.iter_mut().find(|player| player.id == id) {
                     player.name = name;
@@ -563,7 +566,7 @@ impl Table {
         let id = Uuid::new_v4().to_string();
         let color = COLORS[self.next_color % COLORS.len()].to_string();
         self.next_color += 1;
-        self.players.push(Player { id: id.clone(), name, role, color, connected: false });
+        self.players.push(Player { dummy: false, id: id.clone(), name, role, color, connected: false });
         Ok(Seat { player_id: id, role })
     }
 
@@ -572,8 +575,8 @@ impl Table {
         player_id: &str,
         out: mpsc::UnboundedSender<ServerMsg>,
     ) -> Result<(u64, String), String> {
-        if !self.players.iter().any(|player| player.id == player_id) {
-            return Err("that seat is gone".into());
+        if !self.players.iter().any(|player| player.id == player_id && !player.dummy) {
+            return Err("that seat is gone or is a dummy preview seat".into());
         }
         self.epoch += 1;
         let epoch = self.epoch;
@@ -744,6 +747,10 @@ impl Table {
             }
             ClientMsg::DeleteToken { token_id } => {
                 self.delete_token(viewer, &token_id)?;
+                Ok(CommandEffect::Refresh)
+            }
+            ClientMsg::CreateDummyPlayer { name, character_id, preview } => {
+                self.create_dummy_player(viewer, name, &character_id, preview)?;
                 Ok(CommandEffect::Refresh)
             }
             ClientMsg::RemovePlayer { player_id } => {
@@ -1295,6 +1302,23 @@ impl Table {
         Ok(())
     }
 
+    fn create_dummy_player(&mut self, viewer: &Viewer, name: String, character_id: &str, preview: bool) -> Result<(), String> {
+        self.require_gm(viewer)?;
+        if viewer.view_as.is_some() { return Err("return to GM view before creating a dummy player".into()); }
+        let name = title(&name)?;
+        if !self.characters.iter().any(|character| character.id == character_id && character.kind == CharacterKind::Pc) {
+            return Err("choose a player character in this campaign".into());
+        }
+        let id = Uuid::new_v4().to_string();
+        let color = COLORS[self.next_color % COLORS.len()].to_string();
+        self.next_color += 1;
+        self.players.push(Player { dummy: true, id: id.clone(), name, role: crate::net::protocol::Role::Player, color, connected: false });
+        self.assign_character_owner(character_id, Some(id.clone()));
+        self.reveal_from_tokens();
+        if preview { self.set_view_as(viewer, Some(id))?; }
+        Ok(())
+    }
+
     fn remove_player(&mut self, viewer: &Viewer, player_id: &str) -> Result<(), String> {
         self.require_gm(viewer)?;
         if player_id == viewer.player_id {
@@ -1317,11 +1341,24 @@ impl Table {
         }
         self.sessions.retain(|_, id| id != player_id);
         self.players.retain(|player| player.id != player_id);
-        for token in &mut self.tokens {
+        for character in &mut self.characters {
+            if character.owner_id.as_deref() == Some(player_id) { character.owner_id = None; }
+        }
+        for token in self.tokens.iter_mut().chain(self.scenes.iter_mut().flat_map(|scene| scene.tokens.iter_mut())) {
             if token.owner_id.as_deref() == Some(player_id) {
                 token.owner_id = None;
             }
         }
+        for campaign in &mut self.shelved {
+            for character in &mut campaign.characters {
+                if character.owner_id.as_deref() == Some(player_id) { character.owner_id = None; }
+            }
+            for token in campaign.tokens.iter_mut().chain(campaign.scenes.iter_mut().flat_map(|scene| scene.tokens.iter_mut())) {
+                if token.owner_id.as_deref() == Some(player_id) { token.owner_id = None; }
+            }
+        }
+        for memory in self.fog_memory.values_mut() { memory.seats.remove(player_id); }
+        self.sight_cache.borrow_mut().explored_stamp = None;
         Ok(())
     }
 
@@ -2697,6 +2734,80 @@ mod tests {
     }
 
     #[test]
+    fn dummy_player_assigns_a_character_and_previews_real_personal_sight_without_a_connection() {
+        let mut table = Table::new();
+        table.passphrase = "test".into(); table.gm_key = "test".into();
+        let seat = table.take_seat("GM", "test", true, Some("test"), None).unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (epoch, _) = table.attach(&seat.player_id, tx).unwrap();
+        let host = table.viewer(&seat.player_id, epoch).unwrap();
+        table.command(&host, ClientMsg::CreateScene { name: "Preview room".into(), width: 12, height: 12 }, None).unwrap();
+        table.scene.as_mut().unwrap().walls.push(Segment { a: Vec2::new(6., 0.), b: Vec2::new(6., 12.) });
+        table.command(&host, ClientMsg::CreateCharacter { name: "Hero".into(), kind: CharacterKind::Pc }, None).unwrap();
+        let character = table.characters[0].id.clone();
+        let mut hero = named_token("Hero body", 2.5, 6.5); hero.character_id = Some(character.clone());
+        table.tokens = vec![hero.clone(), named_token("Hidden by wall", 9.5, 6.5)];
+        table.scenes.push(SceneShelf { id: "other".into(), name: "Other room".into(), scene: None, tokens: vec![hero], explored: Explored::new(12, 12) });
+        table.rolls.push(StoredRoll { id: "secret".into(), roller_id: seat.player_id.clone(), roller_name: "GM".into(), formula: "1d20".into(), label: None, visibility: RollVisibility::GmSecret, modifier: 0, total: 19, dice: vec![], created_at: 0, outcome: None, contest: None });
+        table.command(&host, ClientMsg::CreateDummyPlayer { name: "Test eyes".into(), character_id: character.clone(), preview: true }, None).unwrap();
+        let dummy = table.players.iter().find(|player| player.dummy).unwrap().clone();
+        assert!(!dummy.connected);
+        assert_eq!(table.clients.len(), 1, "dummy preview must not attach a websocket");
+        assert_eq!(table.characters[0].owner_id.as_deref(), Some(dummy.id.as_str()));
+        assert_eq!(table.tokens[0].owner_id.as_deref(), Some(dummy.id.as_str()));
+        assert_eq!(table.scenes[0].tokens[0].owner_id.as_deref(), Some(dummy.id.as_str()));
+        let preview = table.viewer(&seat.player_id, epoch).unwrap();
+        let actual_player = Viewer { player_id: dummy.id.clone(), role: Role::Player, view_as: None, session_token: "unused".into() };
+        let seen = snapshot(&table, &preview);
+        let player_seen = snapshot(&table, &actual_player);
+        assert_eq!(serde_json::to_value(&seen.fog).unwrap(), serde_json::to_value(&player_seen.fog).unwrap());
+        assert_eq!(seen.tokens.iter().map(|token| &token.id).collect::<Vec<_>>(), vec![&table.tokens[0].id]);
+        assert_eq!(seen.characters.len(), 1);
+        assert!(seen.rolls[0].concealed, "GM-only results must not appear in player preview");
+        assert_eq!(seen.you.role, Role::Gm, "the host must retain a way to return");
+        assert_eq!(seen.view_as.as_deref(), Some(dummy.id.as_str()));
+        assert!(table.attach(&dummy.id, mpsc::unbounded_channel().0).is_err());
+        let attempted = table.take_seat("Real visitor", "test", false, None, Some(&dummy.id)).unwrap();
+        assert_ne!(attempted.player_id, dummy.id, "a dummy cannot become a signed-in player");
+
+        let dir = std::env::temp_dir().join(format!("longtable-dummy-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        crate::storage::write_to(&table, &path).unwrap();
+        let mut restored = Table::new();
+        crate::storage::load_file(&mut restored, &path).unwrap();
+        assert!(restored.players.iter().any(|player| player.id == dummy.id && player.dummy && !player.connected));
+        assert_eq!(restored.characters[0].owner_id.as_deref(), Some(dummy.id.as_str()));
+        assert_eq!(restored.explored_for(&dummy.id).to_base64(), table.explored_for(&dummy.id).to_base64());
+        std::fs::remove_dir_all(dir).unwrap();
+
+        table.command(&preview, ClientMsg::RemovePlayer { player_id: dummy.id.clone() }, None).unwrap();
+        assert!(table.viewer(&seat.player_id, epoch).unwrap().view_as.is_none());
+        assert!(table.characters[0].owner_id.is_none());
+        assert!(table.tokens[0].owner_id.is_none());
+        assert!(table.scenes[0].tokens[0].owner_id.is_none());
+        assert!(table.fog_memory.values().all(|memory| !memory.seats.contains_key(&dummy.id)));
+        assert_eq!(table.tokens.len(), 2, "removing a dummy keeps figures and characters");
+    }
+
+    #[test]
+    fn dummy_creation_rejects_invalid_assignments_without_leaving_an_orphan_seat() {
+        let mut table = Table::new();
+        table.command(&gm(), ClientMsg::CreateCharacter { name: "Bandit".into(), kind: CharacterKind::Adversary }, None).unwrap();
+        let adversary = table.characters[0].id.clone();
+        let before = table.players.len();
+        for id in ["missing", adversary.as_str()] {
+            assert!(table.command(&gm(), ClientMsg::CreateDummyPlayer { name: "Dummy".into(), character_id: id.into(), preview: false }, None).is_err());
+        }
+        let player = Viewer { role: Role::Player, ..gm() };
+        assert!(table.command(&player, ClientMsg::CreateDummyPlayer { name: "Dummy".into(), character_id: adversary, preview: false }, None).is_err());
+        assert_eq!(table.players.len(), before);
+        assert!(table.characters[0].owner_id.is_none());
+        let old: Player = serde_json::from_value(serde_json::json!({"id":"old","name":"Old player","role":"player","color":"#ffffff","connected":false})).unwrap();
+        assert!(!old.dummy, "old saved players remain ordinary seats");
+    }
+
+    #[test]
     fn duplicating_a_scene_leaves_the_figures_where_they_are() {
         let mut table = Table::new();
         table.scene = Some(Scene {
@@ -2756,6 +2867,7 @@ mod tests {
     fn a_player_can_turn_their_own_figure() {
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -2801,7 +2913,7 @@ mod tests {
         let system = catalog.get("daggerheart").unwrap();
         let mut table = Table::new();
         for id in ["p1", "p2"] {
-            table.players.push(Player { id: id.into(), name: id.into(), role: Role::Player, color: "#ffffff".into(), connected: true });
+            table.players.push(Player { dummy: false, id: id.into(), name: id.into(), role: Role::Player, color: "#ffffff".into(), connected: true });
         }
         let p1 = Viewer { player_id: "p1".into(), role: Role::Player, view_as: None, session_token: "p1".into() };
         let p2 = Viewer { player_id: "p2".into(), role: Role::Player, view_as: None, session_token: "p2".into() };
@@ -2945,6 +3057,7 @@ mod tests {
     fn players_cannot_walk_through_walls() {
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -2998,6 +3111,7 @@ mod tests {
     fn opening_a_door_lets_a_player_through() {
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3048,6 +3162,7 @@ mod tests {
     fn a_table_blocks_walking_but_not_sight() {
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3202,6 +3317,7 @@ mod tests {
         let system = catalog.get("daggerheart").unwrap();
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3614,6 +3730,7 @@ mod tests {
     fn lighting_cannot_change_the_fixed_view() {
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3735,6 +3852,7 @@ mod tests {
         layout.stairs = Some(vec![StairLink { id: "up".into(), asset: "steps/stair".into(), x: 0, y: 0, x2: 1, y2: 0 }]);
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3782,6 +3900,7 @@ mod tests {
         let layout = MapLayout::blank(5, 5, "core/grass");
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3832,6 +3951,7 @@ mod tests {
         layout.levels = Some(encode_cells(&levels));
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3896,6 +4016,7 @@ mod tests {
 
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "p".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -3949,6 +4070,7 @@ mod tests {
 
         let mut table = Table::new();
         table.players.push(Player {
+            dummy: false,
             id: "gm".into(),
             name: "Host".into(),
             role: Role::Gm,
@@ -4045,7 +4167,7 @@ mod tests {
         let mut table = Table::new();
         table.publish_built(&gm(), "Lighting".into(), layout, compiled, None).unwrap();
         assert_eq!(table.scene.as_ref().unwrap().environment, dusk);
-        table.players.push(Player { id: "p".into(), name: "Player".into(), role: Role::Player, color: "#7eb8a2".into(), connected: true });
+        table.players.push(Player { dummy: false, id: "p".into(), name: "Player".into(), role: Role::Player, color: "#7eb8a2".into(), connected: true });
         let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "p".into() };
         let night = EnvironmentLighting { preset: EnvironmentPreset::Night, brightness: 0.16 };
         assert!(table.command(&player, ClientMsg::SetEnvironment { environment: night.clone() }, None).is_err());

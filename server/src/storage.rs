@@ -397,6 +397,7 @@ mod tests {
         assert!(review.contains("older version"), "{review}");
         assert!(review.contains("No map was on the table"), "{review}");
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "gm".into(),
             name: "Host".into(),
             role: crate::net::protocol::Role::Gm,
@@ -404,6 +405,7 @@ mod tests {
             connected: true,
         });
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "ada".into(),
             name: "Ada".into(),
             role: crate::net::protocol::Role::Player,

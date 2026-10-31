@@ -17,10 +17,12 @@ use super::state::{Table, Token, Viewer};
 use crate::net::protocol::Role;
 
 pub fn can_see_roll(viewer: &Viewer, visibility: RollVisibility, roller_id: &str) -> bool {
+    let gm = viewer.role == Role::Gm && viewer.view_as.is_none();
+    let seat = viewer.view_as.as_deref().unwrap_or(&viewer.player_id);
     match visibility {
         RollVisibility::Public => true,
-        RollVisibility::ToGm => viewer.role == Role::Gm || viewer.player_id == roller_id,
-        RollVisibility::GmSecret => viewer.role == Role::Gm,
+        RollVisibility::ToGm => gm || seat == roller_id,
+        RollVisibility::GmSecret => gm,
     }
 }
 
@@ -215,12 +217,12 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
         scenes: if matches!(sight, Sight::Gm) { scene_listings(table) } else { Vec::new() },
         fear: table.fear,
         figures: faces(table, &sight, &polygons),
-        can_undo: table.undo.is_some(),
+        can_undo: viewer.view_as.is_none() && table.undo.is_some(),
         strike: strike_offer(table, viewer),
         talk: table.talk.clone(),
         catalog_revision: table.catalog_revision.clone(),
         notice: table.save_hold.clone(),
-        review: if viewer.role == Role::Gm { table.review.clone() } else { None },
+        review: if matches!(sight, Sight::Gm) { table.review.clone() } else { None },
     }
 }
 
@@ -228,7 +230,7 @@ fn strike_offer(table: &Table, viewer: &Viewer) -> Option<StrikeOffer> {
     let pending = table.strike.as_ref()?;
     let character = table.characters.iter().find(|character| character.id == pending.target_id)?;
     let gm = viewer.role == Role::Gm && viewer.view_as.is_none();
-    let owner = character.owner_id.as_deref() == Some(viewer.player_id.as_str());
+    let owner = character.owner_id.as_deref() == Some(viewer.view_as.as_deref().unwrap_or(&viewer.player_id));
     if !gm && !owner {
         return None;
     }
@@ -361,6 +363,7 @@ fn visible_characters(table: &Table, viewer: &Viewer) -> Vec<Character> {
 
 fn player_info(table: &Table, id: &str) -> Option<PlayerInfo> {
     table.players.iter().find(|player| player.id == id).map(|player| PlayerInfo {
+        dummy: player.dummy,
         id: player.id.clone(),
         name: player.name.clone(),
         role: player.role,
@@ -390,6 +393,7 @@ mod tests {
         let mut table = Table::new();
         for id in ["gm", "p1", "p2", "unassigned"] {
             table.players.push(crate::session::state::Player {
+                dummy: false,
                 id: id.into(), name: id.into(), role: if id == "gm" { Role::Gm } else { Role::Player },
                 color: "#d4a656".into(), connected: true,
             });
@@ -610,6 +614,7 @@ mod tests {
     fn players_do_not_receive_hidden_tokens_or_secret_totals() {
         let mut table = Table::new();
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "gm".into(),
             name: "Mara".into(),
             role: Role::Gm,
@@ -617,6 +622,7 @@ mod tests {
             connected: true,
         });
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "p1".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -736,6 +742,7 @@ mod tests {
 
         let mut table = Table::new();
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "gm".into(),
             name: "Mara".into(),
             role: Role::Gm,
@@ -743,6 +750,7 @@ mod tests {
             connected: true,
         });
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "p1".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -815,6 +823,7 @@ mod tests {
         layout.levels = Some(encode_cells(&levels));
         let mut table = Table::new();
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "p1".into(),
             name: "Ada".into(),
             role: Role::Player,

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Soundboard from '../ui/Soundboard.svelte';
+  import PlayerPreview from '../ui/PlayerPreview.svelte';
   import { onDestroy, onMount } from 'svelte';
   import EnvironmentControls from '../ui/EnvironmentControls.svelte';
   import type { EnvironmentLighting } from '../net/bindings/EnvironmentLighting';
@@ -181,6 +182,23 @@
     layout.reset();
   }
 
+  function previewPlayer(playerId: string | null) {
+    closeMenus();
+    modes.set('play');
+    editor.leave();
+    systems.sheetOpen = false;
+    table.menu = null;
+    table.tool = 'select';
+    table.selectedTokenId = null;
+    table.targetTokenId = null;
+    table.placingId = null;
+    table.placingToken = false;
+    layout.leftOpen = false;
+    layout.rightOpen = false;
+    // null prepares creation; an empty string returns to the GM's eyes.
+    if (playerId !== null) send({ type: 'viewAs', playerId: playerId || null });
+  }
+
   $effect(() => {
     if (!seatMenu) return;
     const openId = seatMenu.id;
@@ -206,7 +224,7 @@
     <span class="brand-mark" aria-hidden="true">L</span>
     <div class="min-w-0">
       <p class="display brand-name">LONGTABLE <span class="mode-indicator">{mode}</span></p>
-      <p class="scene-name">{sceneName}</p>
+      <p class="scene-name">{sceneName}{#if table.viewAs} · {table.players.find(player => player.id === table.viewAs)?.name}'s view{/if}</p>
     </div>
   </div>
   {#if gm}
@@ -217,6 +235,15 @@
     </nav>
   {/if}
   <div class="topbar-actions">
+    {#if table.role === 'gm'}
+      <details class="topbar-menu" ontoggle={menuToggled}>
+        <summary class="btn quiet" class:active={!!table.viewAs}>Player view <span aria-hidden="true">⌄</span></summary>
+        <div class="topbar-menu-body player-view-popover">
+          {@render popoverHeading('Through their eyes', 'See as player', '◎')}
+          <div class="popover-body"><PlayerPreview onpreview={previewPlayer} /></div>
+        </div>
+      </details>
+    {/if}
     <details class="topbar-menu" ontoggle={menuToggled}>
       <summary class="btn quiet">Sounds <span aria-hidden="true">⌄</span></summary>
       <div class="topbar-menu-body">
@@ -251,7 +278,7 @@
     <button class="btn quiet" class:active={chrome.talk} type="button" onclick={() => openPanel('talk')}>Talk</button>
     <button class="btn quiet" class:active={chrome.settings} type="button" onclick={() => openPanel('settings')}>Settings{account.lobby && account.lobby.requests.length > 0 ? ` · ${account.lobby.requests.length}` : ''}</button>
     {#if table.role === 'gm' && table.viewAs}
-      <button class="btn" type="button" onclick={() => send({ type: 'viewAs', playerId: null })}>Your eyes</button>
+      <button class="btn" type="button" onclick={() => previewPlayer('')}>Return to GM</button>
     {/if}
     <details class="topbar-menu" ontoggle={menuToggled}>
       <summary class="btn quiet" aria-label="Table menu">•••</summary>
@@ -280,6 +307,7 @@
 </header>
 
 <style>
+  .player-view-popover { width: 420px; }
   .topbar:has(details[open]) { z-index: var(--z-menu); }
   @media (max-width: 760px) {
     .topbar-actions { flex-wrap: wrap; justify-content: flex-start; }

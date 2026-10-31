@@ -36,3 +36,5 @@ From back to front: the map, the docks, a floating panel, a menu, the dice tray,
 ## GM modes
 
 Play runs the table. Edit holds Map and Campaign: the map, scenes, and the cast. Design holds Rules. Entering Design loads the campaign's rule set. Load on a system card opens that set, and the center board reads it. PC, NPC, and adversary each have a sheet, and the adversary sheet is a card. The campaign's system is chosen in Campaign, not in Rules.
+
+**Player view** in the GM's top bar creates dummy seats with a player-character assignment and switches between real or dummy players' views. **Create & see as player** enters the preview immediately; **Create only** keeps the GM view. A preview uses the published scene's actual player fog, exits the editor without deleting its draft, and leaves the table read-only. The top bar names the active player and keeps **Return to GM** available. Dummy seats remain saved and can be removed without deleting their figures or sheets. See [the sample scene guide](forest-sample.md#each-players-sight) for the full flow.

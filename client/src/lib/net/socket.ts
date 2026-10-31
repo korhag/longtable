@@ -40,6 +40,10 @@ export function leaveTable() {
 }
 
 export function send(message: ClientMsg) {
+  if (table.viewAs && !['viewAs', 'ping', 'join'].includes(message.type)) {
+    table.error = 'Return to GM view to change the table. Player preview is read-only.';
+    return;
+  }
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
   }

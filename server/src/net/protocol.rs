@@ -186,6 +186,8 @@ pub struct ConcealedRoll {
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename_all = "camelCase")]
 pub struct PlayerInfo {
+    #[serde(default)]
+    pub dummy: bool,
     pub id: String,
     pub name: String,
     pub role: Role,
@@ -628,6 +630,12 @@ pub enum ClientMsg {
     },
     DeleteToken {
         token_id: String,
+    },
+    CreateDummyPlayer {
+        name: String,
+        character_id: String,
+        #[serde(default)]
+        preview: bool,
     },
     RemovePlayer {
         player_id: String,

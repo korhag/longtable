@@ -22,7 +22,7 @@
   let bookmarks = $state<DiceBookmark[]>(loadBookmarks());
 
   const modes = $derived(
-    table.role === 'gm'
+    table.role === 'gm' && !table.viewAs
       ? [
           { id: 'public' as const, name: 'Everyone' },
           { id: 'toGm' as const, name: 'To the GM' },
@@ -133,7 +133,7 @@
   <div class="flex items-center gap-1.5">
     <button class="btn quiet px-2 text-sm" type="button" onclick={() => sound.set(!sound.muted)}>{sound.muted ? 'Sound off' : 'Sound on'}</button>
     <button class="btn quiet px-2 text-sm" type="button" onclick={clear}>Clear</button>
-    <button class="btn display ml-auto px-4 text-sm" type="button" onclick={roll}>Roll</button>
+    <button class="btn display ml-auto px-4 text-sm" type="button" disabled={!!table.viewAs} onclick={roll}>Roll</button>
   </div>
 </div>
 

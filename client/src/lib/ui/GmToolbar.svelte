@@ -47,7 +47,7 @@
     >
       <option value="">Yourself, the GM</option>
       {#each players as player (player.id)}
-        <option value={player.id}>{player.name}</option>
+        <option value={player.id}>{player.name}{player.dummy ? ' · dummy' : ''}</option>
       {/each}
     </select>
   </label>

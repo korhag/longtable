@@ -183,6 +183,7 @@ mod tests {
 
         let player = Viewer { player_id: "ada-seat".into(), role: Role::Player, view_as: None, session_token: "seat".into() };
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "ada-seat".into(),
             name: "Ada".into(),
             role: Role::Player,
@@ -200,6 +201,7 @@ mod tests {
         let names = seen.tokens.iter().map(|token| token.name.as_str()).collect::<Vec<_>>();
         assert!(!names.contains(&"Lurker") && !names.contains(&"Shade"), "{names:?}");
         table.players.push(crate::session::state::Player {
+            dummy: false,
             id: "gm".into(),
             name: "Host".into(),
             role: Role::Gm,

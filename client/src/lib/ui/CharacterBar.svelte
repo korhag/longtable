@@ -111,7 +111,7 @@
     });
   }
 
-  const voiceId = $derived(preview ? null : character?.id ?? null);
+  const voiceId = $derived(preview || table.viewAs ? null : character?.id ?? null);
 
   $effect(() => {
     if (!voiceId) return;
@@ -170,6 +170,7 @@
     </div>
 
     {#if character && sheet}
+      <fieldset class="contents" disabled={!!table.viewAs}>
       <div class="command-resources mt-2 flex flex-wrap items-center gap-3">
         {#each sheet.toolbar.resources as id (id)}
           {@const field = fieldOf(id)}
@@ -238,6 +239,7 @@
           {/if}
         {/each}
       </div>
+      </fieldset>
     {/if}
   </section>
 {/if}
@@ -255,10 +257,12 @@
 
 {#if !preview && systems.sheetOpen && character && system}
   <Panel id="sheet" title={character.name} dockable={false} onclose={() => (systems.sheetOpen = false)}>
+    <fieldset class="contents" disabled={!!table.viewAs}>
     {#if Fancy}
       <Fancy {character} />
     {:else}
       <CharacterSheet {character} {system} />
     {/if}
+    </fieldset>
   </Panel>
 {/if}
