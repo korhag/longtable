@@ -4,9 +4,9 @@
 
 [View the cabin cutaway in focus mode](milestones/forest-cabin-cutaway.png) or [inspect the stone stairs](milestones/forest-stairs.png).
 
-Open **Edit → Map → Load forest encounter**. This creates a new playable encounter and an editable draft. It keeps the previous scene and its figures in the campaign. Switch to **Play** for the encounter, or keep editing and use **Put on the table** to publish changes.
+Open **Map → Load forest encounter**. This creates a new playable encounter and an editable draft. It keeps the previous scene and its figures in the campaign. Switch to **Play** for the encounter, or keep editing and use **Put on the table** to publish changes.
 
-The road winds past a furnished log cabin, four species of trees, a mossy boulder, and two raised terraces. Both height changes have solid stone treads and landings: the lower path connects tier 0 to 1, and the upper path connects 1 to 2. Four adventurers (Human, Elf, Dwarf, Orc) approach four different bandits. The captain starts inside a seven-by-seven cabin with a bed, writing desk, two barrels and two bookshelves. These are reusable object assets with movement blockers and a clear aisle through the room.
+The encounter covers **36 × 32 cells (1,152 total)**, roughly twice the original 26 × 22 area. The road winds through **72 trees of four species**, four mossy boulders, a furnished log cabin and two raised terraces. Dense groves surround open approaches, with forest-floor flank paths and small clearings that create more choices for movement and line of sight. Both height changes have solid stone treads and landings: the lower path connects tier 0 to 1, and the upper path connects 1 to 2. Four adventurers (Human, Elf, Dwarf, Orc) approach four different bandits. The captain starts inside a seven-by-seven cabin with a bed, writing desk, two barrels and two bookshelves. These are reusable object assets with movement blockers and a clear aisle through the room.
 
 The cabin has full-height log walls and a framed oak door taller than the human figure. The GM can click the door's artwork to open it. During play, selecting a figure inside lowers the room's foreground walls; with no selection, visible occupants determine the cutaway. Edit mode displays the full walls. Characters hidden by fog or GM permissions never gain an outline.
 
@@ -34,7 +34,7 @@ Open **Sounds** to try female and male combat voices: Attack, Exertion, Take dam
 
 ## Workspace controls
 
-Play starts with compact side rails. Open Tools or Dice when needed; click them again to recover map space. Selecting a figure shows a compact summary; expand Details for editing. **F** toggles focus mode while no text field is active. Sheet windows stay within the viewport and scroll internally on small screens. The View menu contains camera and layout controls.
+Play starts with compact side rails. Open Tools or Dice when needed; click them again to recover map space. Selecting a figure shows a compact summary; expand Details for editing. **F** toggles focus mode while no text field is active. Brass-framed windows rise when clicked, stay within the viewport, and scroll internally on small screens. Menus and the action dial close with Escape. The View menu contains camera controls. See [the interface guide](ui.md) for window and keyboard controls.
 
 All eight characters have four distinct views. Select a figure and use North, East, South or West in the compact inspector; moving a figure also updates its facing. Facing persists through save and reload.
 

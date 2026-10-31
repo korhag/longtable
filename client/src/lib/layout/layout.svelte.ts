@@ -23,6 +23,8 @@ interface SavedLayout {
   rightOpen?: boolean;
 }
 
+interface FloatingPanel { id: string; closable: boolean }
+
 function read(): SavedLayout {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -50,6 +52,37 @@ class LayoutStore {
   rightOpen = $state(saved.rightOpen ?? false);
   focusMode = $state(false);
   panels = $state<Record<string, PanelPlace>>({ ...(saved.panels ?? {}) });
+  // Only mounted windows belong to the stack. Z order is session UI state,
+  // so hiding a dock or changing modes cannot leave an invisible top window.
+  floatingPanels = $state<FloatingPanel[]>([]);
+
+  registerWindow(id: string, floating: boolean, closable: boolean) {
+    if (!floating) { this.removeWindow(id); return; }
+    const existing = this.floatingPanels.find(panel => panel.id === id);
+    if (existing?.closable === closable) return;
+    if (existing) this.floatingPanels = this.floatingPanels.map(panel => panel.id === id ? { id, closable } : panel);
+    else this.floatingPanels = [...this.floatingPanels, { id, closable }];
+  }
+
+  removeWindow(id: string) {
+    if (this.floatingPanels.some(panel => panel.id === id)) this.floatingPanels = this.floatingPanels.filter(panel => panel.id !== id);
+  }
+
+  raiseWindow(id: string) {
+    const panel = this.floatingPanels.find(panel => panel.id === id);
+    if (!panel || this.frontmostWindow === id) return;
+    this.floatingPanels = [...this.floatingPanels.filter(panel => panel.id !== id), panel];
+  }
+
+  windowDepth(id: string) { return Math.max(0, this.floatingPanels.findIndex(panel => panel.id === id)); }
+  get frontmostWindow() { return this.floatingPanels.at(-1)?.id ?? null; }
+  get frontmostClosableWindow() {
+    for (let index = this.floatingPanels.length - 1; index >= 0; index--) {
+      const panel = this.floatingPanels[index];
+      if (panel?.closable) return panel.id;
+    }
+    return null;
+  }
 
   place(id: string): PanelPlace {
     return this.panels[id] ?? EMPTY;

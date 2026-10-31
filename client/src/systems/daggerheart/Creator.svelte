@@ -142,11 +142,11 @@
   }
 </script>
 
-<div class="dh-overlay">
+<div class="dh-overlay dh-character-creator">
   <aside class="dh-rail">
-    <p class="display px-2 text-sm text-[var(--color-gold-bright)]">New character</p>
+    <p class="dh-rail-title display text-sm text-[var(--color-gold-bright)]">Character folio<span>New adventurer</span></p>
     {#each steps as item, index (item.title)}
-      <button class:on={step === index} class:done={index < step} type="button" onclick={() => { if (index <= step) step = index; }}>
+      <button class:on={step === index} class:done={index < step} type="button" aria-current={step === index ? 'step' : undefined} onclick={() => { if (index <= step) step = index; }}>
         <span class="mark">{index < step ? '✓' : index + 1}</span>
         <span>{item.title}</span>
         <span class="kicker">{item.kicker}</span>

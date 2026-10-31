@@ -1,6 +1,6 @@
 <script lang="ts">
   import Soundboard from '../ui/Soundboard.svelte';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import EnvironmentControls from '../ui/EnvironmentControls.svelte';
   import type { EnvironmentLighting } from '../net/bindings/EnvironmentLighting';
   import { editor } from '../editor/draft.svelte';
@@ -26,6 +26,55 @@
     onCycle: () => 'off' | 'faint' | 'strong';
     onSetGrid: (style: 'off' | 'faint' | 'strong') => void;
   } = $props();
+
+  let headerEl: HTMLElement | undefined;
+  let seatTrigger: HTMLElement | null = null;
+
+  function closeMenus(except: HTMLDetailsElement | null = null, restoreFocus = false) {
+    let trigger: HTMLElement | null = null;
+    for (const menu of headerEl?.querySelectorAll<HTMLDetailsElement>('.topbar-menu[open]') ?? []) {
+      if (menu === except) continue;
+      menu.open = false;
+      trigger = menu.querySelector<HTMLElement>('summary');
+    }
+    if (restoreFocus) trigger?.focus();
+  }
+
+  function menuToggled(event: Event) {
+    const menu = event.currentTarget as HTMLDetailsElement;
+    if (menu.open) closeMenus(menu);
+  }
+
+  function closeSeat(restoreFocus = false) {
+    seatMenu = null;
+    if (restoreFocus && seatTrigger?.isConnected) seatTrigger.focus();
+  }
+
+  onMount(() => {
+    const outside = (event: Event) => {
+      // The seat's child menu is portalled to the document. Its own shade
+      // dismisses it, so a click on its actions must not unmount them first.
+      if (seatMenu) return;
+      const open = headerEl?.querySelector<HTMLDetailsElement>('.topbar-menu[open]');
+      if (open && event.target instanceof Node && !open.contains(event.target)) closeMenus();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== 'Escape') return;
+      if (seatMenu) {
+        event.preventDefault(); event.stopPropagation(); closeSeat(true);
+      } else if (headerEl?.querySelector('.topbar-menu[open]')) {
+        event.preventDefault(); event.stopPropagation(); closeMenus(null, true);
+      }
+    };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('focusin', outside);
+    document.addEventListener('keydown', escape, true);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('focusin', outside);
+      document.removeEventListener('keydown', escape, true);
+    };
+  });
 
   let lightingTimer: ReturnType<typeof setTimeout> | undefined;
   onDestroy(() => clearTimeout(lightingTimer));
@@ -58,6 +107,7 @@
     { id: 'campaign', name: 'Campaign' }, { id: 'rules', name: 'Rules' },
   ];
   function selectMode(next: TableMode) {
+    closeMenus();
     modes.set(next);
     layout.focusMode = false;
     layout.leftOpen = next !== 'play';
@@ -93,6 +143,7 @@
       return;
     }
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    seatTrigger = event.currentTarget as HTMLElement;
     seatMenu = {
       id: player.id,
       name: player.name,
@@ -101,6 +152,7 @@
   }
 
   function openPanel(id: 'talk' | 'settings') {
+    closeMenus();
     const open = id === 'talk' ? chrome.talk : chrome.settings;
     if (id === 'talk') chrome.talk = !open;
     else chrome.settings = !open;
@@ -121,6 +173,14 @@
     send({ type: 'removePlayer', playerId });
   }
 
+  function resetWorkspace() {
+    closeMenus(null, true);
+    chrome.settings = false;
+    chrome.talk = false;
+    systems.sheetOpen = false;
+    layout.reset();
+  }
+
   $effect(() => {
     if (!seatMenu) return;
     const openId = seatMenu.id;
@@ -130,7 +190,18 @@
 
 <svelte:window onkeydown={shortcuts} />
 
-<header class="topbar" data-mode={mode}>
+{#snippet popoverHeading(eyebrow: string, title: string, emblem: string)}
+  <div class="popover-heading">
+    <span class="popover-emblem" aria-hidden="true">{emblem}</span>
+    <div class="popover-heading-text">
+      <p class="popover-eyebrow">{eyebrow}</p>
+      <h2 class="popover-title">{title}</h2>
+    </div>
+    <button class="popover-close" type="button" aria-label={`Close ${title}`} title="Close (Esc)" onclick={() => closeMenus(null, true)}>×</button>
+  </div>
+{/snippet}
+
+<header bind:this={headerEl} class="topbar" data-mode={mode}>
   <div class="table-identity" title={`${table.campaign.name || 'Campaign'} · ${systemName} · ${expectation}`}>
     <span class="brand-mark" aria-hidden="true">L</span>
     <div class="min-w-0">
@@ -146,25 +217,34 @@
     </nav>
   {/if}
   <div class="topbar-actions">
-    <details class="topbar-menu">
+    <details class="topbar-menu" ontoggle={menuToggled}>
       <summary class="btn quiet">Sounds <span aria-hidden="true">⌄</span></summary>
-      <div class="topbar-menu-body"><Soundboard /></div>
+      <div class="topbar-menu-body">
+        {@render popoverHeading('Around the table', 'Sound & voices', '♫')}
+        <div class="popover-body"><Soundboard /></div>
+      </div>
     </details>
     {#if gm && table.scene && mode === 'play'}
-      <details class="topbar-menu">
+      <details class="topbar-menu" ontoggle={menuToggled}>
         <summary class="btn quiet">Lighting <span aria-hidden="true">⌄</span></summary>
         <div class="topbar-menu-body">
-          <EnvironmentControls environment={table.scene.environment} onchange={changeEnvironment} />
-          <p class="shortcut-hint mt-3">Applies to everyone at the table. Add sources in Map → Lights.</p>
+          {@render popoverHeading('Set the atmosphere', 'Light & time', '☼')}
+          <div class="popover-body">
+            <EnvironmentControls environment={table.scene.environment} onchange={changeEnvironment} />
+            <p class="shortcut-hint mt-3">Applies to everyone at the table. Add sources in Map → Lights.</p>
+          </div>
         </div>
       </details>
     {/if}
-    <details class="topbar-menu view-menu">
+    <details class="topbar-menu view-menu" ontoggle={menuToggled}>
       <summary class="btn quiet">View <span aria-hidden="true">⌄</span></summary>
       <div class="topbar-menu-body">
-        <ViewControls {onZoom} {onFit} {onMe} {onCycle} {onSetGrid} />
-        <p class="shortcut-hint">Wheel to zoom · middle-drag to pan</p>
-        <p class="shortcut-hint">0 fit · C your figure · G grid</p>
+        {@render popoverHeading('Survey the scene', 'View of the table', '⌖')}
+        <div class="popover-body">
+          <ViewControls {onZoom} {onFit} {onMe} {onCycle} {onSetGrid} />
+          <p class="shortcut-hint">Wheel to zoom · middle-drag to pan</p>
+          <p class="shortcut-hint"><kbd>0</kbd> fit · <kbd>C</kbd> your figure · <kbd>G</kbd> grid</p>
+        </div>
       </div>
     </details>
     <button class="btn quiet focus-control" class:active={layout.focusMode} aria-pressed={layout.focusMode} title="Focus on the scene (F)" type="button" onclick={() => layout.focusMode = !layout.focusMode}>{layout.focusMode ? 'Show tools' : 'Focus'}</button>
@@ -173,12 +253,13 @@
     {#if table.role === 'gm' && table.viewAs}
       <button class="btn" type="button" onclick={() => send({ type: 'viewAs', playerId: null })}>Your eyes</button>
     {/if}
-    <details class="topbar-menu">
+    <details class="topbar-menu" ontoggle={menuToggled}>
       <summary class="btn quiet" aria-label="Table menu">•••</summary>
-      <div class="topbar-menu-body table-options">
-        <p class="display">{table.campaign.name || 'Your table'}</p>
-        <p class="shortcut-hint">{systemName}</p>
-        <div class="flex flex-wrap items-center gap-1 py-2" aria-label="Players">
+      <div class="topbar-menu-body">
+        {@render popoverHeading(systemName, table.campaign.name || 'Your table', '◇')}
+        <div class="popover-body table-options">
+        <p class="popover-section-label">Seats at the table</p>
+        <div class="flex flex-wrap items-center gap-2 py-2" aria-label="Players">
           {#each table.players as player (player.id)}
             <button class="portrait portrait-sm" style={`--ring:${player.color}`} type="button" title={seatTitle(player)} aria-label={seatTitle(player)} onclick={() => dismiss(player.id)} oncontextmenu={(event) => openSeat(event, player)}>
               {player.name.slice(0, 2).toUpperCase()}
@@ -186,13 +267,14 @@
             </button>
           {/each}
         </div>
-        <button class="btn quiet" type="button" onclick={() => layout.reset()}>Reset layout</button>
-        <button class="btn quiet" type="button" onclick={() => leaveTable()}>Leave</button>
+        <button class="btn quiet" type="button" onclick={resetWorkspace}>Reset layout</button>
+        <button class="btn quiet" type="button" onclick={() => { closeMenus(); leaveTable(); }}>Leave the table</button>
         <span class="shortcut-hint" title={VERSION_NOTE}>Longtable v{VERSION}</span>
+        </div>
       </div>
     </details>
     {#if seatMenu}
-      <SeatMenu name={seatMenu.name} anchor={seatMenu.anchor} onkick={() => seatMenu && kick(seatMenu.id)} onclose={() => (seatMenu = null)} />
+      <SeatMenu name={seatMenu.name} anchor={seatMenu.anchor} onkick={() => seatMenu && kick(seatMenu.id)} onclose={() => closeSeat(true)} />
     {/if}
   </div>
 </header>

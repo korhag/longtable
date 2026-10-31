@@ -60,10 +60,10 @@
   }
 </script>
 
-<div class="dh-overlay" style="grid-template-columns: minmax(280px, 420px) 1fr">
-  <div class="dh-rail" style="border-right: 1px solid rgba(212,166,86,.22)">
+<div class="dh-overlay dh-adversary-maker">
+  <div class="dh-rail">
     <div class="flex items-center justify-between px-1">
-      <p class="display text-sm text-[var(--color-gold-bright)]">New adversary</p>
+      <p class="dh-rail-title display text-sm text-[var(--color-gold-bright)]">Adversary folio<span>New adversary</span></p>
       <button class="btn quiet px-2" type="button" onclick={() => creation.close()}>Close</button>
     </div>
     <label class="mt-3 block">Find in the book

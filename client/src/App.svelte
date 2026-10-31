@@ -410,12 +410,12 @@
     {/if}
 
     {#if chrome.settings}
-      <Panel id="settings" title="Settings" onclose={() => (chrome.settings = false)}>
+      <Panel id="settings" title="Settings" dockable={false} onclose={() => (chrome.settings = false)}>
         <SettingsPanel />
       </Panel>
     {/if}
     {#if chrome.talk}
-      <Panel id="talk" title="Talk" onclose={() => (chrome.talk = false)}>
+      <Panel id="talk" title="Talk" dockable={false} onclose={() => (chrome.talk = false)}>
         <TalkPanel />
       </Panel>
     {/if}

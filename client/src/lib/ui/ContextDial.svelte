@@ -14,6 +14,7 @@
     onAnimate: (id: string, kind: CastAnimationKind) => void;
   } = $props();
   let menuEl = $state<HTMLDivElement>();
+  let previousFocus: HTMLElement | null = null;
   let page = $state(0);
   let preview = $state(false);
   const previews: { id: CastAnimationKind; label: string; icon: string; detail: string }[] = [
@@ -34,18 +35,37 @@
   const actions = $derived(contextActions({ clicked, selected, actor, target, system: systems.active, gm, seat: table.playerId, readOnly: !!table.viewAs, hasPoint: !!table.menu?.point, hasClickedSheet: !!clickedCharacter }));
   const pages = $derived(preview ? 1 : Math.max(1, Math.ceil(actions.length / 6)));
   const current = $derived(preview ? previews : actions.slice((page % pages) * 6, (page % pages + 1) * 6));
-  const size = 292;
+  const size = $derived(Math.min(308, Math.max(252, viewportWidth - 12)));
   const left = $derived(Math.max(6, Math.min(viewportWidth - size - 6, (table.menu?.x ?? 0) - size / 2)));
   const top = $derived(Math.max(6, Math.min(viewportHeight - size - 40, (table.menu?.y ?? 0) - size / 2)));
-  function close() { table.menu = null; }
-  $effect(() => { table.menu; page = 0; preview = false; void tick().then(() => menuEl?.querySelector<HTMLButtonElement>('[role=menuitem]')?.focus()); });
+  const compassTicks = Array.from({ length: 24 }, (_, index) => index * Math.PI / 12);
+  function close(restoreFocus = false) {
+    table.menu = null;
+    if (restoreFocus && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+  }
+  function back() { preview = false; page = 0; void tick().then(() => menuEl?.querySelector<HTMLButtonElement>('[role=menuitem]')?.focus()); }
+  $effect(() => {
+    const menu = table.menu;
+    page = 0; preview = false;
+    if (!menu) return;
+    if (document.activeElement instanceof HTMLElement && !menuEl?.contains(document.activeElement)) previousFocus = document.activeElement;
+    void tick().then(() => menuEl?.querySelector<HTMLButtonElement>('[role=menuitem]')?.focus());
+  });
   onMount(() => {
     const dismiss = (event: PointerEvent) => { if (event.button === 2) return; if (event.target instanceof Node && !menuEl?.contains(event.target)) close(); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !table.menu || event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation(); close(true);
+    };
     window.addEventListener('pointerdown', dismiss);
-    return () => window.removeEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape, true);
+    return () => {
+      window.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape, true);
+    };
   });
   function key(event: KeyboardEvent) {
-    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
     const buttons = [...(menuEl?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -77,28 +97,47 @@
   }
 </script>
 
-<svelte:window bind:innerWidth={viewportWidth} bind:innerHeight={viewportHeight} onkeydown={event => { if (table.menu && event.key === 'Escape') { event.preventDefault(); close(); } }} />
+<svelte:window bind:innerWidth={viewportWidth} bind:innerHeight={viewportHeight} />
 {#if table.menu && actions.length}
-  <div bind:this={menuEl} class="context-dial" style={`left:${left}px;top:${top}px`} role="menu" aria-label={`Actions for ${clicked?.name ?? 'this location'}`} tabindex="-1" onkeydown={key} oncontextmenu={event => event.preventDefault()}>
+  <div bind:this={menuEl} class="context-dial" style={`left:${left}px;top:${top}px;width:${size}px;height:${size}px`} role="menu" aria-label={`Actions for ${clicked?.name ?? 'this location'}`} tabindex="-1" onkeydown={key} oncontextmenu={event => event.preventDefault()}>
     <div class="dial-ring" aria-hidden="true"></div>
-    <button class="dial-center" type="button" onclick={close} aria-label="Close actions"><span>{clicked?.name ?? 'Move to here'}</span><small>{preview ? 'Local animation preview' : selected && selected.id !== clicked?.id ? selected.name : 'Character actions'}</small><b aria-hidden="true">×</b></button>
+    <svg class="dial-compass" viewBox="0 0 308 308" aria-hidden="true">
+      <circle cx="154" cy="154" r="149" />
+      <circle cx="154" cy="154" r="139" />
+      {#each compassTicks as angle, index}
+        <line x1={154 + Math.cos(angle) * (index % 6 === 0 ? 133 : 143)} y1={154 + Math.sin(angle) * (index % 6 === 0 ? 133 : 143)} x2={154 + Math.cos(angle) * 149} y2={154 + Math.sin(angle) * 149} />
+      {/each}
+    </svg>
+    <button class="dial-center" type="button" onclick={() => close(true)} aria-label="Close actions" title="Close actions (Esc)">
+      <small class="dial-kicker">{preview ? 'Animation' : 'Take action'}</small>
+      <span>{clicked?.name ?? 'This location'}</span>
+      {#if !preview && selected && selected.id !== clicked?.id}<small class="dial-actor">As {selected.name}</small>{/if}
+      <b aria-hidden="true">×</b>
+    </button>
     {#each current as action, index (action.id)}
       {@const angle = -Math.PI / 2 + index * Math.PI / 3}
-      <button class="dial-action" type="button" role="menuitem" title={action.detail ?? action.label} style={`left:${146 + Math.cos(angle) * 100}px;top:${146 + Math.sin(angle) * 100}px`} onclick={() => press(action.id)}><span aria-hidden="true">{action.icon}</span><strong>{action.label}</strong></button>
+      <button class="dial-action" type="button" role="menuitem" title={action.detail ?? action.label} style={`left:${50 + Math.cos(angle) * 36.4}%;top:${50 + Math.sin(angle) * 36.4}%`} onclick={() => press(action.id)}><span aria-hidden="true">{action.icon}</span><strong>{action.label}</strong></button>
     {/each}
-    {#if pages > 1}<button class="dial-page" type="button" onclick={() => page = (page + 1) % pages}>More actions · {page + 1}/{pages} →</button>{/if}
+    {#if preview}<button class="dial-page" type="button" onclick={back}>← Character actions</button>
+    {:else if pages > 1}<button class="dial-page" type="button" onclick={() => page = (page + 1) % pages}>More actions · {page + 1}/{pages} →</button>
+    {:else}<span class="dial-hint">Choose an action · Esc to close</span>{/if}
   </div>
 {/if}
 <style>
-  .context-dial { position:fixed; z-index:var(--z-menu); width:292px; height:292px; pointer-events:auto; }
-  .dial-ring { position:absolute; inset:7px; border-radius:50%; border:1px solid #b18c4770; background:radial-gradient(circle,transparent 28%,#221b13ee 29%,#17130ff5 65%,#a6803e55 66%,transparent 67%); filter:drop-shadow(0 8px 20px #0009); }
-  .dial-center { position:absolute; left:146px; top:146px; transform:translate(-50%,-50%); width:112px; height:112px; border-radius:50%; border:1px solid #b18c4760; background:#17130ff2; color:var(--color-gold); display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; gap:3px; cursor:pointer; }
-  .dial-center span { font-size:11px; line-height:1.3; max-width:96px; }
-  .dial-center small { opacity:.65; font-size:9px; line-height:1.2; }
-  .dial-center b { font-size:17px; font-weight:400; }
-  .dial-action { position:absolute; transform:translate(-50%,-50%); width:84px; min-height:54px; display:flex; flex-direction:column; justify-content:center; gap:2px; padding:6px 4px; border:1px solid #b18c4777; background:linear-gradient(#312718,#1c1711); border-radius:16px; color:#ead8b5; cursor:pointer; }
-  .dial-action span { color:#d4a656; font-size:18px; line-height:20px; }
-  .dial-action strong { font-size:11px; font-weight:500; line-height:1.15; }
-  button:hover,button:focus-visible { outline:1px solid #f2d48a; background:#4b3920; color:#fff0d2; }
-  .dial-page { position:absolute; top:292px; left:50%; transform:translateX(-50%); white-space:nowrap; padding:6px 12px; border:1px solid #b18c4770; border-radius:20px; color:#d4a656; background:#1c1711f5; font-size:11px; cursor:pointer; }
+  .context-dial { position:fixed; z-index:var(--z-menu); pointer-events:auto; }
+  .dial-ring { position:absolute; inset:3px; border-radius:50%; background:radial-gradient(circle,#30251b 0 25%,#17130f 26% 49%,#211a13 50% 68%,#0e0c0a 69%); box-shadow:0 14px 30px #0009,inset 0 1px 0 #f4d59024; }
+  .dial-compass { position:absolute; inset:0; width:100%; height:100%; fill:none; stroke:#ac87454d; stroke-width:1; pointer-events:none; }
+  .dial-center { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:34%; height:34%; border-radius:50%; border:1px solid #b18c4777; background:radial-gradient(circle at 40% 20%,#33271c,#1c1611 76%); color:#ead7b3; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:9px; gap:4px; box-shadow:inset 0 0 0 3px #14100c,inset 0 0 0 4px #a67b3830; }
+  .dial-center span { font-family:var(--font-display); font-size:10px; line-height:1.35; overflow-wrap:anywhere; }
+  .dial-kicker { font-size:8px; line-height:1; letter-spacing:.13em; text-transform:uppercase; color:#c79d60; }
+  .dial-actor { max-width:100%; font-size:9px; line-height:1.2; color:#b7a78e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dial-center b { font-size:16px; font-weight:400; line-height:12px; color:#ab9064; }
+  .dial-action { position:absolute; transform:translate(-50%,-50%); width:28%; min-height:60px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:7px 5px; border:1px solid #a88247aa; background:linear-gradient(160deg,#3c2d1e,#211910 75%); border-radius:7px; color:#ead8b5; box-shadow:0 3px 8px #0008,inset 0 1px 0 #edcf8c26; transition:border-color .12s,color .12s,background .12s; }
+  .dial-action::after { content:''; position:absolute; inset:3px; border:1px solid #cda25818; border-radius:4px; pointer-events:none; }
+  .dial-action span { color:#dab675; font-size:21px; line-height:21px; }
+  .dial-action strong { font-size:11px; font-weight:500; line-height:1.18; }
+  button:hover { border-color:#e2bd78; background:#44331f; color:#fff0d2; }
+  button:focus-visible { outline:2px solid #f2d48a; outline-offset:3px; background:#44331f; color:#fff0d2; }
+  .dial-page,.dial-hint { position:absolute; top:calc(100% + 5px); left:50%; transform:translateX(-50%); white-space:nowrap; padding:6px 12px; border:1px solid #b18c4760; border-radius:5px; color:#d3b784; background:#1c1711f5; font-size:11px; }
+  .dial-hint { color:#b3a38b; border-color:#b18c4730; font-size:10px; pointer-events:none; }
 </style>

@@ -140,10 +140,11 @@
         </button>
       </div>
     {/if}
-    <div class="flex items-center gap-2">
+    <div class="command-heading flex items-center gap-2">
       {#if gm}
         <select
-          class="field max-w-40"
+          class="character-picker field max-w-40"
+          aria-label="Active character"
           value={character?.id ?? ''}
           onchange={(event) => (systems.selectedId = event.currentTarget.value || null)}
         >
@@ -169,7 +170,7 @@
     </div>
 
     {#if character && sheet}
-      <div class="mt-2 flex flex-wrap items-center gap-3">
+      <div class="command-resources mt-2 flex flex-wrap items-center gap-3">
         {#each sheet.toolbar.resources as id (id)}
           {@const field = fieldOf(id)}
           {#if field && (field.kind === 'pool' || field.kind === 'number')}
@@ -219,7 +220,7 @@
           {/if}
         {/each}
       </div>
-      <div class="mt-2 flex flex-wrap items-center gap-2">
+      <div class="command-actions mt-2 flex flex-wrap items-center gap-2">
         {#each sheet.toolbar.actions as id (id)}
           {@const action = system.actions.find((item) => item.id === id)}
           {@const dice = system.fields.find((item) => item.id === id && item.kind === 'dice')}
@@ -241,8 +242,19 @@
   </section>
 {/if}
 
+<style>
+  @media (max-width: 760px) {
+    .command-heading { flex-wrap: wrap; }
+    .character-picker { flex: 1 0 100%; width: 100%; max-width: none; min-width: 0; }
+    .command-heading > button { flex-shrink: 0; }
+    .command-heading > p { width: 100%; overflow-wrap: anywhere; }
+    .command-resources > div { max-width: 100%; flex-wrap: wrap; }
+    .command-actions > button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  }
+</style>
+
 {#if !preview && systems.sheetOpen && character && system}
-  <Panel id="sheet" title={character.name} onclose={() => (systems.sheetOpen = false)}>
+  <Panel id="sheet" title={character.name} dockable={false} onclose={() => (systems.sheetOpen = false)}>
     {#if Fancy}
       <Fancy {character} />
     {:else}

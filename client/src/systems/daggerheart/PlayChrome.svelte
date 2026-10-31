@@ -78,8 +78,9 @@
   {@const token = tokenOf(face.tokenId)}
   <button
     type="button"
-    class="pointer-events-auto flex items-center gap-2 rounded-lg px-1 py-1 text-left hover:bg-white/10"
-    title={face.name}
+    class="figure-button pointer-events-auto flex items-center gap-2 rounded-lg px-1 py-1 text-left hover:bg-white/10"
+    title={`${face.name} · ${face.health} · ${face.stress}${labeled ? ` · Hope ${face.hope ?? 0}` : ''}`}
+    aria-label={`${face.name} · ${face.health} · ${face.stress}${labeled ? ` · Hope ${face.hope ?? 0}` : ''}`}
     aria-pressed={table.targetTokenId === face.tokenId}
     onmouseenter={() => hover(face.tokenId)}
     onmouseleave={() => { if (table.hoverTokenId === face.tokenId) hover(null); }}
@@ -91,7 +92,7 @@
       <span class="absolute -bottom-0.5 right-0 h-2.5 w-2.5 rounded-full border border-black" style={`background:${dot(face.stress, STRESS, STRESS_COLORS)}`}></span>
     </span>
     {#if labeled}
-      <span class="min-w-0">
+      <span class="figure-label min-w-0">
         <span class="block max-w-36 truncate text-sm">{face.name}</span>
         <span class="block text-sm text-[var(--color-gold-bright)]">Hope {face.hope ?? 0}</span>
         <span class="block max-w-36 truncate text-sm">{face.health}</span>
@@ -101,10 +102,10 @@
 {/snippet}
 
 <div class="pointer-events-none absolute inset-0">
-  <div class="flex items-start gap-2 p-2">
-    <div class="pointer-events-auto flex shrink-0 items-center gap-2 rounded-full border border-[#c4a2ee]/40 bg-[#120c18]/90 px-2.5 py-1 shadow-[0_10px_28px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]" aria-label="Fear">
-      <span class="pl-1 text-sm tracking-[0.2em] text-[#e4d4f8] uppercase">Fear</span>
-      <span class="flex flex-nowrap items-center gap-[5px]">
+  <div class="play-status-row flex items-start gap-2 p-2">
+    <div class="fear-track pointer-events-auto flex shrink-0 items-center gap-2 rounded-full border border-[#c4a2ee]/40 bg-[#120c18]/90 px-2.5 py-1 shadow-[0_10px_28px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]" aria-label="Fear">
+      <span class="fear-label pl-1 text-sm tracking-[0.2em] text-[#e4d4f8] uppercase">Fear</span>
+      <span class="fear-pips flex flex-nowrap items-center gap-[5px]">
         {#each Array.from({ length: 12 }, (_, index) => index) as index (index)}
           <button
             type="button"
@@ -117,11 +118,11 @@
           ></button>
         {/each}
       </span>
-      <span class="display min-w-[1.1rem] pr-0.5 text-center text-sm text-[#f2d48a]">{table.fear}</span>
+      <span class="fear-value display min-w-[1.1rem] pr-0.5 text-center text-sm text-[#f2d48a]">{table.fear}</span>
     </div>
-    <button class="btn quiet pointer-events-auto px-2 py-1 text-sm" type="button" onclick={() => (book = true)}>Rules</button>
+    <button class="rules-button btn quiet pointer-events-auto px-2 py-1 text-sm" type="button" onclick={() => (book = true)}>Rules</button>
     {#if foes.length > 0}
-      <div class="flex max-w-full gap-1 overflow-x-auto">
+      <div class="adversary-roster flex max-w-full gap-1 overflow-x-auto">
         {#each foes as face (face.tokenId)}
           {@render faceButton(face, false)}
         {/each}
@@ -129,7 +130,7 @@
     {/if}
   </div>
   {#if party.length > 0}
-    <div class="ml-2 flex w-max max-w-56 flex-col gap-1">
+    <div class="party-roster ml-2 flex w-max max-w-56 flex-col gap-1">
       {#each party as face (face.tokenId)}
         {@render faceButton(face, true)}
       {/each}
@@ -140,6 +141,25 @@
 {#if book}
   <RuleBook close={() => (book = false)} />
 {/if}
+
+<style>
+  .adversary-roster { min-width: 0; pointer-events: auto; scrollbar-width: thin; }
+  .adversary-roster .figure-button { flex-shrink: 0; }
+  @media (max-width: 760px) {
+    .play-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 6px; max-width: 100%; }
+    .fear-track { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 5px; padding: 5px 7px; border-radius: 8px; }
+    .fear-label { padding-left: 0; font-size: 10px; letter-spacing: .12em; }
+    .fear-pips { display: grid; grid-template-columns: repeat(6, 16px); justify-content: center; gap: 3px; }
+    .fear-pips button { width: 16px; height: 16px; }
+    .fear-value { min-width: 14px; padding: 0; font-size: 12px; }
+    .rules-button { padding: 6px; font-size: 11px; }
+    .adversary-roster { grid-column: 1 / -1; width: 100%; overscroll-behavior-x: contain; }
+    .figure-button { gap: 0; min-height: 44px; padding: 3px; }
+    .figure-button .portrait { width: 36px; height: 36px; font-size: 11px; }
+    .party-roster { gap: 2px; max-width: 44px; }
+    .party-roster .figure-label { display: none; }
+  }
+</style>
 
 {#if targetFace}
   <div class="glass pointer-events-none fixed z-[var(--z-float)] w-44 rounded-lg px-3 py-2 text-sm" style={cardStyle(aimPoint)}>

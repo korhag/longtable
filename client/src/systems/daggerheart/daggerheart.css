@@ -4,21 +4,42 @@
   z-index: var(--z-menu);
   pointer-events: auto;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 240px minmax(0, 1fr);
   background:
-    radial-gradient(ellipse at top, rgba(212, 166, 86, 0.12), transparent 42%),
-    #100e0c;
+    radial-gradient(ellipse at top right, rgba(190, 144, 76, 0.09), transparent 55%),
+    #17120e;
   color: var(--color-parchment);
+  box-shadow: inset 0 0 0 1px rgba(212, 166, 86, 0.25);
 }
 
 .dh-rail {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  min-height: 0;
+  gap: 0.35rem;
   padding: 1.25rem 0.9rem;
-  border-right: 1px solid rgba(212, 166, 86, 0.22);
-  background: rgba(12, 9, 7, 0.72);
+  border-right: 1px solid rgba(212, 166, 86, 0.3);
+  background: linear-gradient(90deg, #1d1711, #211a13 94%, #100d0a);
+  box-shadow: inset 5px 0 0 rgba(212, 166, 86, 0.05);
   overflow: auto;
+}
+
+.dh-rail-title {
+  flex-shrink: 0;
+  padding: 0.25rem 0.55rem 1rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(212, 166, 86, 0.25);
+  letter-spacing: 0.06em;
+}
+
+.dh-rail-title span {
+  display: block;
+  margin-top: 0.3rem;
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 223, 0.55);
 }
 
 .dh-rail > button {
@@ -26,22 +47,25 @@
   grid-template-columns: auto 1fr;
   gap: 0.15rem 0.55rem;
   min-height: 2.4rem;
-  padding: 0.35rem 0.55rem;
-  border: 0;
-  border-radius: 0.7rem;
+  padding: 0.6rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
   background: transparent;
   text-align: left;
   color: inherit;
 }
 
 .dh-rail > button.on {
-  background: rgba(212, 166, 86, 0.16);
+  border-color: rgba(212, 166, 86, 0.35);
+  background: linear-gradient(90deg, rgba(212, 166, 86, 0.17), rgba(212, 166, 86, 0.04));
+  box-shadow: inset 3px 0 0 #b28b4f;
+  color: #f2d9a5;
 }
 
 .dh-rail .kicker {
   grid-column: 2;
-  font-size: 0.875rem;
-  letter-spacing: 0.14em;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(242, 212, 138, 0.7);
 }
@@ -49,19 +73,19 @@
 .dh-rail .mark {
   grid-row: span 2;
   align-self: center;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.5rem;
+  height: 1.5rem;
   border-radius: 999px;
   border: 1px solid rgba(212, 166, 86, 0.45);
   font-size: 0.875rem;
-  line-height: 1.35rem;
+  line-height: 1.4rem;
   text-align: center;
 }
 
 .dh-rail > button.done .mark {
-  background: #6e9a72;
-  border-color: #6e9a72;
-  color: #102016;
+  background: #304333;
+  border-color: #7d9670;
+  color: #cfdbbf;
 }
 
 .dh-main {
@@ -80,12 +104,23 @@
 }
 
 .dh-main header {
-  border-bottom: 1px solid rgba(212, 166, 86, 0.18);
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(212, 166, 86, 0.3);
+  background: linear-gradient(180deg, #30251a, #251d15);
+  box-shadow: inset 0 -3px 0 rgba(212, 166, 86, 0.05);
+}
+
+.dh-main header h2 {
+  color: #f0dec0;
+  letter-spacing: 0.025em;
 }
 
 .dh-foot {
-  border-top: 1px solid rgba(212, 166, 86, 0.18);
-  background: rgba(8, 6, 4, 0.45);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(212, 166, 86, 0.3);
+  background: #211910;
+  box-shadow: inset 0 3px 0 rgba(212, 166, 86, 0.04);
 }
 
 .dh-body {
@@ -97,35 +132,57 @@
 
 .dh-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 0.75rem;
 }
 
 .dh-card {
   min-height: 7.5rem;
   padding: 0.85rem 0.9rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(212, 166, 86, 0.28);
-  background: linear-gradient(180deg, rgba(48, 34, 22, 0.92), rgba(22, 16, 12, 0.94));
+  border-radius: 0.35rem;
+  border: 1px solid rgba(212, 166, 86, 0.3);
+  background: linear-gradient(145deg, #30261b, #211a13);
+  box-shadow: inset 0 0 0 3px rgba(13, 10, 7, 0.2), 0 2px 4px rgba(0, 0, 0, 0.15);
   text-align: left;
   color: inherit;
 }
 
 .dh-card.on,
 .dh-chip.on {
-  border-color: #f2d48a;
-  box-shadow: inset 0 0 0 1px rgba(242, 212, 138, 0.45);
+  border-color: #cfab68;
+  background: linear-gradient(145deg, #493722, #2f2518);
+  box-shadow: inset 0 0 0 2px rgba(212, 166, 86, 0.16);
+}
+
+.dh-card > .display {
+  color: #efdbb9;
+}
+
+@media (hover: hover) {
+  .dh-card:hover,
+  .dh-chip:hover,
+  .dh-rail > button:hover {
+    border-color: rgba(242, 212, 138, 0.65);
+  }
+}
+
+.dh-card:focus-visible,
+.dh-chip:focus-visible,
+.dh-rail > button:focus-visible,
+.dh-boxes button:focus-visible {
+  outline: 2px solid #e6c27f;
+  outline-offset: 3px;
 }
 
 .dh-card small,
 .dh-muted {
-  color: rgba(244, 236, 223, 0.62);
+  color: rgba(244, 236, 223, 0.7);
 }
 
 .dh-chip {
   min-height: 2rem;
   padding: 0.3rem 0.7rem;
-  border-radius: 999px;
+  border-radius: 0.25rem;
   border: 1px solid rgba(212, 166, 86, 0.3);
   background: rgba(20, 14, 10, 0.55);
   color: inherit;
@@ -163,16 +220,18 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  padding: 0.85rem;
-  border-radius: 1rem;
+  padding: 1rem;
+  border-radius: 0.35rem;
   border: 1px solid rgba(212, 166, 86, 0.4);
   background:
-    linear-gradient(180deg, rgba(244, 236, 223, 0.05), transparent 28%),
-    #1a140f;
+    linear-gradient(90deg, rgba(212, 166, 86, 0.08) 4px, transparent 4px),
+    linear-gradient(145deg, #2b2218, #1d1710);
+  box-shadow: inset 0 0 0 4px rgba(8, 6, 4, 0.2);
 }
 
 .dh-banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
@@ -188,7 +247,8 @@
 
 .dh-block {
   padding: 0.55rem 0.65rem;
-  border-radius: 0.8rem;
+  min-width: 0;
+  border-radius: 0.25rem;
   border: 1px solid rgba(212, 166, 86, 0.18);
   background: rgba(8, 6, 4, 0.28);
 }
@@ -220,9 +280,10 @@
 
 .dh-adv {
   padding: 0.9rem 1rem 1rem;
-  border-radius: 0.9rem;
+  border-radius: 0.35rem;
   border: 1px solid rgba(212, 166, 86, 0.55);
-  background: linear-gradient(180deg, #2a2118, #16110c 28%);
+  background: linear-gradient(180deg, #34271b, #21190f 28%);
+  box-shadow: inset 0 0 0 4px rgba(8, 6, 4, 0.2);
 }
 
 .dh-adv h2 {
@@ -231,6 +292,7 @@
   font-size: 1.35rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: #efd6aa;
 }
 
 .dh-stat {
@@ -244,15 +306,71 @@
   font-size: 0.875rem;
 }
 
+.dh-adversary-maker {
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+}
+
+.dh-adversary-maker .dh-rail-title {
+  padding: 0.25rem 0 0.5rem;
+  margin: 0;
+  border: 0;
+}
+
+.dh-adversary-maker > .dh-body {
+  padding-top: 1.75rem;
+}
+
 @media (max-width: 800px) {
   .dh-overlay {
     grid-template-columns: 1fr;
   }
 
-  .dh-rail {
+  .dh-character-creator {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .dh-character-creator .dh-rail {
     flex-direction: row;
+    padding: 0.65rem;
     border-right: 0;
-    border-bottom: 1px solid rgba(212, 166, 86, 0.22);
+    border-bottom: 1px solid rgba(212, 166, 86, 0.3);
+  }
+
+  .dh-character-creator .dh-rail-title {
+    align-self: center;
+    min-width: 9rem;
+    margin: 0;
+    padding: 0 0.6rem;
+    border: 0;
+  }
+
+  .dh-character-creator .dh-rail > button {
+    flex: 0 0 auto;
+    min-width: 9rem;
+  }
+
+  .dh-main header,
+  .dh-foot {
+    padding: 0.75rem 1rem;
+  }
+
+  .dh-body {
+    padding: 1rem;
+  }
+
+  .dh-adversary-maker {
+    display: block;
+    overflow: auto;
+  }
+
+  .dh-adversary-maker > .dh-rail {
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid rgba(212, 166, 86, 0.3);
+  }
+
+  .dh-adversary-maker > .dh-body {
+    overflow: visible;
   }
 
   .dh-columns {

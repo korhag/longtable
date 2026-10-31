@@ -126,9 +126,23 @@
 <div class="dice-overlay" class:away={!showing} class:quarter={prefs.diceTray !== 'cover'} class:corner-top-left={prefs.diceCorner === 'top-left'} class:corner-top-right={prefs.diceCorner === 'top-right'} class:corner-bottom-left={prefs.diceCorner === 'bottom-left'} class:corner-bottom-right={prefs.diceCorner === 'bottom-right'}>
   <button class="dice-dim" type="button" aria-label="Dismiss the roll" onclick={dismiss}></button>
   <div class="dice-tray">
+    {#if showing}
+      <div class="dice-tray-heading">
+        <svg aria-hidden="true" width="22" height="24" viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M12 1 22 7v12l-10 6L2 19V7L12 1Z M12 1 7 9h10l-5-8ZM2 7l5 2-5 10m20-12-5 2 5 10M7 9l5 16 5-16M2 19l10-5 10 5M7 9l5 5 5-5" />
+        </svg>
+        <div class="min-w-0 flex-1">
+          <p class="dice-tray-title">Dice tray</p>
+          <p class="dice-tray-caption">{landed ? 'Roll resolved' : 'The dice are rolling'}</p>
+        </div>
+        <button class="dice-tray-close" type="button" aria-label="Close dice tray" title="Close dice tray" onclick={dismiss}>
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </button>
+      </div>
+    {/if}
     <canvas bind:this={canvas} class="block min-h-0 w-full flex-1" onclick={dismiss}></canvas>
     {#if showing}
-      <button class="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left" type="button" onclick={dismiss}>
+      <button class="dice-result flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left" type="button" onclick={dismiss}>
         {#if showing.contest}
           <p class="text-base">{showing.contest.attackerName} {showing.contest.blow ? 'damages' : 'attacks'} {showing.contest.targetName}</p>
         {:else}
@@ -171,12 +185,12 @@
         {/if}
       </button>
       {#if landed && table.campaign.systemId === 'daggerheart' && blow}
-        <div class="shrink-0 border-t border-[var(--color-gold)]/20 px-4 py-2 text-sm" role="status">
+        <div class="dice-resolution shrink-0 border-t border-[var(--color-gold)]/20 px-4 py-2 text-sm" role="status">
           <p>{showing.total} damage{#if thresholds} · {thresholds}{/if}</p>
           <p class="mt-1 text-[var(--color-gold-bright)]">{damageApplication(blow)}</p>
         </div>
       {:else if landed && (canDamage || pendingRollId === showing.id || damageError)}
-        <div class="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--color-gold)]/20 px-4 py-3">
+        <div class="dice-actions flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--color-gold)]/20 px-4 py-3">
           {#if canDamage || pendingRollId === showing.id}
             <button class="btn disabled:opacity-50" type="button" onclick={rollDamage} disabled={pendingRollId === showing.id || !table.connected}>
               {pendingRollId === showing.id ? 'Rolling damage…' : 'Roll damage'}

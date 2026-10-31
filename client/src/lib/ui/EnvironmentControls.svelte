@@ -13,7 +13,10 @@
 <div class="environment-controls">
   <div class="environment-presets" aria-label="Time of day">
     {#each ENVIRONMENT_PRESETS as preset}
-      <button class="btn quiet" class:active={current.preset === preset.value.preset} aria-pressed={current.preset === preset.value.preset} type="button" onclick={() => onchange({ ...preset.value }, true)}>{preset.name}</button>
+      <button class="btn quiet" class:active={current.preset === preset.value.preset} aria-pressed={current.preset === preset.value.preset} type="button" onclick={() => onchange({ ...preset.value }, true)}>
+        <span class="time-emblem" aria-hidden="true">{preset.value.preset === 'day' ? '☼' : preset.value.preset === 'dusk' ? '◒' : '☾'}</span>
+        <span>{preset.name}</span>
+      </button>
     {/each}
   </div>
   <label>
@@ -24,7 +27,8 @@
 <style>
   .environment-controls { display:grid; gap:12px; min-width:0; }
   .environment-presets { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
-  .environment-presets button { padding-inline:8px; }
+  .environment-presets button { display:grid; justify-items:center; gap:5px; padding:10px 8px; font-family:var(--font-display); font-size:11px; }
+  .time-emblem { font-family:serif; font-size:25px; line-height:1; }
   label { display:grid; gap:6px; font-size:12px; }
   label span { display:flex; justify-content:space-between; gap:16px; }
   output { color:var(--color-gold); font-variant-numeric:tabular-nums; }

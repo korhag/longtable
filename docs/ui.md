@@ -1,6 +1,8 @@
 # The table screen
 
-The map fills the window. Everything else sits in a region, so two panels cannot land on the same spot.
+The map fills the window. Tools live at its edges or in movable windows, leaving the playing surface available. The interface uses a field-journal style: dark walnut surfaces, brass frames and controls, parchment text, and restrained shield and compass motifs. Decoration is static and uses CSS or small SVGs rather than extra image textures or continuous effects.
+
+![Lighting menu over the expanded encounter](milestones/table-lighting-menu.png)
 
 ## Regions
 
@@ -12,7 +14,11 @@ The map fills the window. Everything else sits in a region, so two panels cannot
 
 Focus (F) hides the rails and bottom controls to give the scene the full window; F or Escape brings them back. On narrow screens, the drawers overlay the map and only one opens at a time.
 
-A panel can collapse, pop out, and be dragged and resized. Floating panels stay within the current viewport, including after resizing the browser. A dock's inner edge sets its width. Those choices are remembered in this browser under `game-table.layout`. Reset layout, in the table menu, puts them back.
+A dock panel can collapse, pop out, and be dragged and resized. Settings, Talk, and character sheets are movable windows with their own close controls. Clicking or focusing a floating window brings it to the front. Floating panels stay within the current viewport, including after resizing the browser, and scroll inside their frames. Focus a title bar or resize handle and use arrow keys to move or resize; Shift makes larger steps. A dock's inner edge sets its width. These choices are remembered in this browser under `game-table.layout`. Reset layout closes open popup windows and restores the defaults.
+
+Top-bar menus have a title, context label, and explicit close button. Only one opens at a time; clicking outside, moving focus outside, or pressing Escape dismisses it. Escape closes the foreground menu before affecting windows behind it or Focus mode. When no higher popup is present and no text field is being edited, Escape closes the foremost closable window. Closing by keyboard returns focus to its opener when available.
+
+The action dial uses a brass compass frame, identifies the acting figure, and keeps actions readable around its rim. Dice appear in a framed tray with a close control and a result section. Successful Daggerheart attacks still wait for **Roll damage** below the dice. Short viewports give the tray additional height so this action stays accessible.
 
 Do not place a new control with `fixed` outside these regions. A menu that must cover the screen, the dice tray, a toast, and the lobby are the exceptions, and they use the layers below.
 
@@ -22,8 +28,8 @@ From back to front: the map, the docks, a floating panel, a menu, the dice tray,
 
 ## Controls
 
-- Text is at least 12px.
-- A button or field is at least 32px tall.
+- Body and action text is at least 12px; compact decorative captions can be smaller.
+- A button or field is normally at least 32px tall; grouped window controls can be 28px.
 - A panel has one primary button. The others stay quiet.
 - Three or more choices in a narrow panel are a vertical list, not a row of cramped labels.
 
