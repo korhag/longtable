@@ -627,6 +627,14 @@ impl Table {
                 self.set_door(viewer, &door_id, open)?;
                 Ok(CommandEffect::Refresh)
             }
+            ClientMsg::SetEnvironment { environment } => {
+                self.require_gm(viewer)?;
+                environment.validate()?;
+                let scene = self.scene.as_mut().ok_or_else(|| "there is no map".to_string())?;
+                scene.environment = environment.clone();
+                if let Some(layout) = scene.layout.as_mut() { layout.environment = Some(environment); }
+                Ok(CommandEffect::Refresh)
+            }
             ClientMsg::SetLighting { lighting } => {
                 self.set_lighting(viewer, &lighting)?;
                 Ok(CommandEffect::Refresh)
@@ -1242,6 +1250,7 @@ impl Table {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -1314,6 +1323,7 @@ impl Table {
             walls: compiled.walls,
             doors,
             lights: compiled.lights,
+            environment: layout.environment.clone().unwrap_or_default(),
             layout: Some(layout),
             move_blockers: compiled.move_blockers,
             sight: compiled.sight,
@@ -1778,6 +1788,7 @@ impl Table {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -2489,6 +2500,7 @@ mod tests {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: Some(crate::map::layout::MapLayout::blank(12, 12, "core/grass")),
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -2666,6 +2678,7 @@ mod tests {
             walls: vec![Segment { a: Vec2::new(0.0, 5.0), b: Vec2::new(10.0, 5.0) }],
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -2716,6 +2729,7 @@ mod tests {
             walls: Vec::new(),
             doors: vec![Door { id: "door-0".into(), a: Vec2::new(0.0, 5.0), b: Vec2::new(10.0, 5.0), open: false }],
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -2765,6 +2779,7 @@ mod tests {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: vec![
                 Segment { a: Vec2::new(1.0, 5.0), b: Vec2::new(3.0, 5.0) },
@@ -3105,6 +3120,7 @@ mod tests {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -3230,6 +3246,7 @@ mod tests {
             walls: vec![Segment { a: Vec2::new(1.0, 1.0), b: Vec2::new(4.0, 1.0) }],
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -3628,4 +3645,48 @@ mod tests {
         assert_eq!(cast_of(&table, "Shade").as_deref(), Some("ruin/bandit"));
         assert_eq!(table.tokens[0].footprint, [2, 2], "a new picture does not resize the body");
     }
+    #[test]
+    fn environment_is_gm_controlled_and_lighting_survives_save_reload() {
+        use crate::map::layout::{EnvironmentLighting, EnvironmentPreset, LightKind};
+        use crate::net::protocol::ClientMsg;
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
+        let catalog = crate::assets::load_catalog(&assets).unwrap();
+        let mut layout = crate::forest_scene::layout();
+        let dusk = EnvironmentLighting { preset: EnvironmentPreset::Dusk, brightness: 0.55 };
+        layout.environment = Some(dusk.clone());
+        let compiled = crate::map::compile::compile(&layout, &catalog).unwrap();
+        let mut table = Table::new();
+        table.publish_built(&gm(), "Lighting".into(), layout, compiled, None).unwrap();
+        assert_eq!(table.scene.as_ref().unwrap().environment, dusk);
+        table.players.push(Player { id: "p".into(), name: "Player".into(), role: Role::Player, color: "#7eb8a2".into(), connected: true });
+        let player = Viewer { player_id: "p".into(), role: Role::Player, view_as: None, session_token: "p".into() };
+        let night = EnvironmentLighting { preset: EnvironmentPreset::Night, brightness: 0.16 };
+        assert!(table.command(&player, ClientMsg::SetEnvironment { environment: night.clone() }, None).is_err());
+        assert_eq!(table.scene.as_ref().unwrap().environment, dusk);
+        assert!(table.command(&gm(), ClientMsg::SetEnvironment { environment: EnvironmentLighting { preset: EnvironmentPreset::Night, brightness: f32::NAN } }, None).is_err());
+        let before = crate::session::permissions::snapshot(&table, &player);
+        assert!(matches!(table.command(&gm(), ClientMsg::SetEnvironment { environment: night.clone() }, None).unwrap(), CommandEffect::Refresh));
+        let after = crate::session::permissions::snapshot(&table, &player);
+        assert_eq!(after.fog.explored, before.fog.explored, "lighting never reveals fog");
+        assert_eq!(after.tokens.len(), before.tokens.len());
+        assert_eq!(after.scene.as_ref().unwrap().environment, night);
+        assert_eq!(after.scene.as_ref().unwrap().lights.len(), 2, "players see the same illumination");
+        assert_eq!(table.scene.as_ref().unwrap().layout.as_ref().unwrap().environment.as_ref(), Some(&night));
+        let dir = std::env::temp_dir().join(format!("longtable-lighting-{}", Uuid::new_v4()));
+        crate::storage::write(&table, &dir).unwrap();
+        let mut restored = Table::new();
+        crate::storage::load_file(&mut restored, &dir.join("state.json")).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        let scene = restored.scene.as_ref().unwrap();
+        assert_eq!(scene.environment, night);
+        assert_eq!(scene.layout.as_ref().unwrap().environment.as_ref(), Some(&night));
+        assert_eq!(scene.lights[0].kind, LightKind::Torch);
+        assert_eq!(scene.lights[0].intensity, 1.4);
+        assert_eq!(scene.lights[1].kind, LightKind::Magic);
+        assert_eq!(scene.lights[1].color, "#79c8ff");
+        let layout = scene.layout.as_ref().unwrap();
+        assert_eq!(layout.lights[0].kind, scene.lights[0].kind);
+        assert_eq!(layout.lights[1].intensity, scene.lights[1].intensity);
+    }
+
 }

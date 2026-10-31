@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::map::MapLayout;
+use crate::map::layout::{EnvironmentLighting, LightKind, light_intensity};
 use crate::systems::{Campaign, Character, CharacterKind, RollOutcome, SystemDef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -204,6 +205,12 @@ pub struct LightView {
     pub y: f32,
     pub range: f32,
     pub color: String,
+    #[serde(default)]
+    #[ts(as = "Option<LightKind>", optional)]
+    pub kind: LightKind,
+    #[serde(default = "light_intensity")]
+    #[ts(as = "Option<f32>", optional)]
+    pub intensity: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -296,6 +303,9 @@ pub struct SceneView {
     /// Walls are sent to the GM only. Players see the drawing, not the vectors.
     pub walls: Vec<SegmentView>,
     pub lights: Vec<LightView>,
+    #[serde(default)]
+    #[ts(as = "Option<EnvironmentLighting>", optional)]
+    pub environment: EnvironmentLighting,
     /// Present when the map was built in the editor. Players receive it whole,
     /// the same way they receive an imported image. Fog still covers the view.
     #[serde(default)]
@@ -539,6 +549,9 @@ pub enum ClientMsg {
     SetDoor {
         door_id: String,
         open: bool,
+    },
+    SetEnvironment {
+        environment: EnvironmentLighting,
     },
     SetLighting {
         lighting: String,

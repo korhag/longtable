@@ -1,0 +1,55 @@
+import * as THREE from 'three';
+import type { Pack } from '../assets/catalog';
+import type { MapLayout } from '../net/bindings/MapLayout';
+import { TerrainLayer } from './terrain';
+import { SceneLighting, lightPulse, type LightingScene, type SceneLight } from './lighting';
+
+const out = document.querySelector('#out')!;
+const errors: string[] = [];
+const original = console.error;
+console.error = (...args: unknown[]) => { errors.push(args.map(String).join(' ')); original(...args); };
+const canvas = document.querySelector('#view') as HTMLCanvasElement;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setSize(512, 256, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-4, 4, 2, -2, 0.1, 30);
+camera.position.set(4, 10, 2); camera.up.set(0, 0, -1); camera.lookAt(4, 0, 2);
+const source = document.createElement('canvas'); source.width = source.height = 128;
+source.getContext('2d')!.fillStyle = '#808080'; source.getContext('2d')!.fillRect(0, 0, 128, 128);
+const pack: Pack = { id: 'light-check', name: 'Light check', pixelsPerCell: 128, filtering: 'linear', terrains: [], decals: [], walls: [], doors: [], props: [], themes: [], baseUrl: '', tiles: [{ id: 'floor', name: 'Floor', kind: 'ground', sourceSizePx: [128, 128], coverageCells: [1, 1], files: [source.toDataURL()], transitionPolicy: 'organic' }] };
+const layout: MapLayout = { width: 8, height: 4, terrains: ['light-check/floor'], cells: btoa('\0'.repeat(32)), pieces: [], props: [], decals: [], lights: [] };
+const terrain = new TerrainLayer(scene);
+const lighting = new SceneLighting(scene);
+const material = new THREE.MeshBasicMaterial({ color: '#808080' });
+const prop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material); prop.rotation.x = -Math.PI / 2; prop.position.set(6, 0.1, 2); scene.add(prop);
+const instance = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#808080' }), 1);
+instance.setMatrixAt(0, new THREE.Matrix4().compose(new THREE.Vector3(4, 0.1, 2), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), new THREE.Vector3(1, 1, 1))); scene.add(instance);
+const sample = (x: number) => { const p = new Uint8Array(4); renderer.getContext().readPixels(Math.floor(x / 8 * 512), 128, 1, 1, renderer.getContext().RGBA, renderer.getContext().UNSIGNED_BYTE, p); return [...p]; };
+const render = (state: LightingScene, seconds = 0) => { lighting.sync({ layout, ...state }, null, true); lighting.update(seconds, { x: 4, z: 2 }); lighting.markers.visible = false; renderer.render(scene, camera); };
+const assert = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
+try {
+  await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('ground picture did not load')), 4000); terrain.sync(layout, [pack], () => { clearTimeout(timer); resolve(); }); });
+  lighting.bindScene(scene);
+  render({}); const day = sample(2), propDay = sample(6), instanceDay = sample(4);
+  assert(Math.abs(day[0]! - 128) < 4 && Math.abs(propDay[0]! - 128) < 4 && Math.abs(instanceDay[0]! - 128) < 4, `day changed base art: ${day};${propDay};${instanceDay}`);
+  const night = { preset: 'night', brightness: 0.16 } as const;
+  render({ environment: night }); const dark = sample(2), propDark = sample(6), instanceDark = sample(4);
+  assert(dark[0]! < day[0]! / 2 && propDark[0]! < propDay[0]! / 2 && instanceDark[0]! < instanceDay[0]! / 2, 'night did not dim terrain, props and instances');
+  const blue: SceneLight = { x: 2, y: 2, color: '#79c8ff', range: 2.5, kind: 'magic', intensity: 1.3 };
+  const torch: SceneLight = { x: 6, y: 2, color: '#ffad42', range: 2.5, kind: 'torch', intensity: 1.4 };
+  render({ environment: night, lights: [blue, torch] }); const cold = sample(2), warm = sample(6), outside = sample(0.2);
+  assert(cold[2]! > cold[0]! * 1.4, `magic is not cold blue: ${cold}`);
+  assert(warm[0]! > warm[2]! * 1.4, `torch does not warm prop: ${warm}`);
+  assert(cold[2]! > outside[2]! + 20, 'light has no distance falloff');
+  const times = Array.from({ length: 50 }, (_, i) => i / 10).sort((a, b) => lightPulse(torch, a).intensity - lightPulse(torch, b).intensity);
+  render({ environment: night, lights: [torch] }, times[0]); const low = sample(6);
+  render({ environment: night, lights: [torch] }, times.at(-1)); const high = sample(6);
+  assert(high[0]! > low[0]! + 2, `torch did not animate: ${low};${high}`);
+  const raised = { ...layout, levels: btoa(String.fromCharCode(...Array(32).fill(2))) };
+  lighting.sync({ layout: raised, lights: [torch] }, null, true); lighting.update(0, { x: 6, z: 2 });
+  assert(lighting.uniforms.sourcePositions.value[0]!.y > 2.8, 'light did not follow terrain height');
+  assert(errors.length === 0, errors.join('\n'));
+  out.textContent = 'LIGHTING_OK: day/night, blue magic, warm torch, falloff, animation, props, instances, raised sources';
+} catch (error) { out.textContent = 'LIGHTING_FAIL: ' + String(error); }
+finally { lighting.dispose(); terrain.clear(); prop.geometry.dispose(); material.dispose(); instance.geometry.dispose(); (instance.material as THREE.Material).dispose(); renderer.dispose(); }

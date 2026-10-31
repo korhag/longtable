@@ -49,7 +49,11 @@ pub fn layout() -> MapLayout {
     MapLayout {
         width, height, terrains: vec!["forest/forest-floor".into(), "forest/road".into(), "forest/cabin-floor".into()],
         cells: encode_cells(&cells), pieces, props, decals: Vec::new(),
-        lights: vec![PlacedLight { x: 6.5, y: 8.5, range: 4., color: "#e8a04a".into() }],
+        lights: vec![
+            PlacedLight { x: 6.5, y: 8.5, range: 5., color: "#ffad42".into(), kind: crate::map::layout::LightKind::Torch, intensity: 1.4 },
+            PlacedLight { x: 19.5, y: 7.5, range: 5., color: "#79c8ff".into(), kind: crate::map::layout::LightKind::Magic, intensity: 1.3 },
+        ],
+        environment: Some(Default::default()),
         levels: Some(encode_cells(&levels)), seed: Some(7013), variants: None,
         stairs: Some(vec![
             StairLink { id: "forest-lower-stairs".into(), asset: "forest/stairs".into(), x: 17, y: 8, x2: 18, y2: 8 },
@@ -117,7 +121,7 @@ pub fn install(table: &mut Table, viewer: &Viewer, catalog: &Catalog) -> Result<
     table.characters.extend(prepared.characters);
     table.tokens = prepared.tokens;
     table.reveal_from_tokens();
-    Ok(Draft { id: Uuid::new_v4().to_string(), name: NAME.into(), updated_at: now_ms(), scene_id: Some(scene_id), layout })
+    Ok(Draft { id: Uuid::new_v4().to_string(), name: NAME.into(), updated_at: now_ms(), scene_id: Some(scene_id), environment_base: Some(layout.environment.clone().unwrap_or_default()), layout })
 }
 
 #[cfg(test)]
@@ -214,6 +218,12 @@ mod tests {
     fn forest_sample_loads_all_cast_and_keeps_the_previous_encounter() {
         let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
         let catalog = crate::assets::load_catalog(&assets).unwrap();
+        let pack = catalog.packs.iter().find(|pack| pack.id == "forest").unwrap();
+        let theme = pack.themes.iter().find(|theme| theme.id == "woodland").unwrap();
+        assert!(catalog.tile(&format!("{}/{}", pack.id, theme.terrain)).is_some());
+        for asset in [&theme.wall, &theme.door].into_iter().flatten() {
+            assert!(catalog.object(&format!("{}/{}", pack.id, asset)).is_some());
+        }
         let mut table = Table::new();
         let gm = Viewer { player_id: "gm".into(), role: Role::Gm, view_as: None, session_token: "gm".into() };
         let first = install(&mut table, &gm, &catalog).unwrap();

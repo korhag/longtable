@@ -85,6 +85,8 @@ pub fn compile(layout: &MapLayout, catalog: &Catalog) -> Result<Compiled, String
             y: light.y,
             range: light.range,
             color: light.color.clone(),
+            kind: light.kind,
+            intensity: light.intensity,
         });
     }
 
@@ -254,9 +256,11 @@ mod tests {
                 y: 3.5,
                 range: 6.0,
                 color: "#e8a04a".into(),
+                kind: Default::default(), intensity: 1.0,
             }],
             levels: None,
             seed: None,
+            environment: None,
             variants: None,
             stairs: None,
         }

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EnvironmentControls from '../ui/EnvironmentControls.svelte';
+  import { LIGHT_PRESETS } from '../lightingPresets';
   import { send } from '../net/socket';
   import { table } from '../table.svelte';
   import type { Pack } from '../assets/catalog';
@@ -41,11 +43,7 @@
     { id: 'erase', name: 'Erase' },
   ];
 
-  const lightRanges = [
-    { range: 3, name: '3' },
-    { range: 6, name: '6' },
-    { range: 12, name: '12' },
-  ];
+
   const lightColors = ['#e8a04a', '#f2e2b0', '#d45a3c', '#7eb6e0', '#9d7ad6'];
 
   const themes = $derived(editor.packs.flatMap((pack) => pack.themes.map((theme) => ({ id: `${pack.id}/${theme.id}`, name: theme.name }))));
@@ -125,6 +123,14 @@
     <button class="btn quiet flex-1 text-sm" type="button" disabled={!editor.draft} onclick={() => void editor.remove()}>Delete</button>
   </div>
 
+  {#if editor.draft}
+    <section class="lighting-card" aria-label="Map lighting">
+      <strong>Environment</strong>
+      <EnvironmentControls environment={editor.draft.layout.environment} onchange={(value, commit) => editor.setEnvironment(value, commit)} />
+      <p>Preview the time of day here. Publish the draft to apply it to the table.</p>
+    </section>
+  {/if}
+
   <div class="mt-3 grid grid-cols-4 gap-1.5">
     {#each tools as item (item.id)}
       <button class="btn quiet text-sm" class:active={editor.tool === item.id} type="button" onclick={() => (editor.tool = item.id)}>{item.name}</button>
@@ -202,23 +208,27 @@
       {/each}
     </div>
   {:else if editor.tool === 'light'}
-    <p class="mt-3 text-sm text-[var(--color-parchment)]/60">Click a square. The pool is how far the marker reaches, in squares. A second click on the same square updates it.</p>
-    <div class="mt-2 flex gap-1.5">
-      {#each lightRanges as item (item.range)}
-        <button class="btn quiet flex-1 text-sm" class:active={editor.lightRange === item.range} type="button" onclick={() => (editor.lightRange = item.range)}>{item.name}</button>
-      {/each}
-    </div>
-    <div class="mt-2 flex gap-1.5">
-      {#each lightColors as color (color)}
-        <button
-          class="h-8 flex-1 rounded-md"
-          style={`background:${color}; outline:${editor.lightColor === color ? '2px solid #f2d48a' : '1px solid transparent'}; outline-offset:2px`}
-          type="button"
-          aria-label={`Light color ${color}`}
-          onclick={() => (editor.lightColor = color)}
-        ></button>
-      {/each}
-    </div>
+    <section class="lighting-card" aria-label="Light source">
+      <div class="grid grid-cols-3 gap-1.5">
+        {#each LIGHT_PRESETS as preset}
+          <button class="btn quiet" class:active={editor.lightKind === preset.kind} aria-pressed={editor.lightKind === preset.kind} type="button" onclick={() => editor.chooseLight(preset.kind)}>{preset.name}</button>
+        {/each}
+      </div>
+      <p>{LIGHT_PRESETS.find(item => item.kind === editor.lightKind)?.note}</p>
+      <label>Light range <output>{editor.lightRange} squares</output>
+        <input aria-label="Light range" type="range" min="0.5" max="20" step="0.5" bind:value={editor.lightRange} />
+      </label>
+      <label>Light intensity <output>{Math.round(editor.lightIntensity * 100)}%</output>
+        <input aria-label="Light intensity" type="range" min="0" max="3" step="0.05" bind:value={editor.lightIntensity} />
+      </label>
+      <label class="light-color-label">Light color <input aria-label="Light color" type="color" bind:value={editor.lightColor} /></label>
+      <div class="flex gap-1.5">
+        {#each lightColors as color}
+          <button class="h-8 flex-1 rounded-md" style={`background:${color}; outline:${editor.lightColor === color ? '2px solid #f2d48a' : '1px solid transparent'}; outline-offset:2px`} type="button" aria-label={`Light color ${color}`} onclick={() => editor.lightColor = color}></button>
+        {/each}
+      </div>
+      <p>Click to place or replace. Erase removes a light. Light does not reveal unexplored areas.</p>
+    </section>
   {/if}
 
   {#if repair}
@@ -240,6 +250,15 @@
 </div>
 
 <style>
+  .lighting-card { display:grid; gap:10px; margin-top:14px; padding:12px; border:1px solid #d4a65638; border-radius:10px; background:#15130f80; }
+  .lighting-card strong { color:var(--color-gold); font-size:13px; }
+  .lighting-card p { font-size:12px; opacity:.68; line-height:1.5; }
+  .lighting-card label { display:block; font-size:12px; }
+  .lighting-card output { float:right; color:var(--color-gold); }
+  .lighting-card input[type=range] { display:block; width:100%; margin-top:7px; accent-color:var(--color-gold); }
+  .lighting-card .light-color-label { display:flex; justify-content:space-between; align-items:center; }
+  .lighting-card input[type=color] { width:64px; height:32px; padding:2px; border:1px solid #d4a65655; background:transparent; border-radius:6px; }
+
   .sample-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; margin-bottom: 12px; border: 1px solid #b9914e55; border-radius: 12px; background: linear-gradient(135deg, #283328, #181e18); }
   .sample-eyebrow { color: #c7a66e; text-transform: uppercase; letter-spacing: .12em; font-size: 10px; }
   .sample-card strong { font-family: Cinzel, serif; font-size: 20px; color: #ead7b1; }

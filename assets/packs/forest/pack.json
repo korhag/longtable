@@ -1020,9 +1020,9 @@
     {
       "id": "woodland",
       "name": "Ancient woodland",
-      "terrain": "forest/forest-floor",
-      "wall": "forest/cabin-wall",
-      "door": "forest/cabin-door",
+      "terrain": "forest-floor",
+      "wall": "cabin-wall",
+      "door": "cabin-door",
       "scatter": [
         {
           "asset": "forest/oak",

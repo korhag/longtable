@@ -91,6 +91,7 @@ mod tests {
             lights: Vec::new(),
             levels: Some(encode_cells(&levels)),
             seed: Some(7),
+            environment: None,
             variants: None,
             stairs: Some(vec![
                 StairLink { id: "step".into(), asset: "ruin/stair".into(), x: 7, y: 2, x2: 8, y2: 2 },

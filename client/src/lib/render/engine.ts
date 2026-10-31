@@ -24,6 +24,7 @@ import { opaqueTexel, orientUpright, uprightGeometry } from './cutout';
 import { DecalLayer } from './decals';
 import { OcclusionOutlines } from './occlusion';
 import { roomCutaway } from './roomCutaway';
+import { SceneLighting } from './lighting';
 import { ringPaint, type CastPaint, type RingMark } from './rings';
 import { SceneObjects } from './sceneObjects';
 import { StandeeLayer } from './standees';
@@ -125,7 +126,8 @@ export class TableEngine {
   private board: THREE.Mesh | null = null;
   private wallLines: THREE.LineSegments | null = null;
   private doorGroup = new THREE.Group();
-  private lightGroup = new THREE.Group();
+  private lighting: SceneLighting;
+  private lightTimer: ReturnType<typeof setTimeout> | null = null;
   private tokenGroup = new THREE.Group();
   private nodes = new Map<string, TokenNode>();
   private raycaster = new THREE.Raycaster();
@@ -167,7 +169,8 @@ export class TableEngine {
     const sun = new THREE.DirectionalLight(0xffe2b8, 0.45);
     sun.position.set(8, 18, 4);
     this.scene3.add(sun);
-    this.scene3.add(this.doorGroup, this.lightGroup, this.tokenGroup);
+    this.scene3.add(this.doorGroup, this.tokenGroup);
+    this.lighting = new SceneLighting(this.scene3, () => this.invalidate());
 
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
     this.terrain = new TerrainLayer(this.scene3);
@@ -225,6 +228,9 @@ export class TableEngine {
       if (!this.running || document.hidden || !this.dirty) return;
       this.draw();
       this.dirty = false;
+      if (this.lighting.animated && this.lightTimer === null) {
+        this.lightTimer = setTimeout(() => { this.lightTimer = null; this.invalidate(); }, this.lowPower ? 66 : 33);
+      }
     });
   }
 
@@ -246,6 +252,7 @@ export class TableEngine {
 
   private draw() {
     this.stats.draws += 1;
+    this.lighting.update(Date.now() / 1000, this.focus);
     try {
       const bodies = [...this.nodes.values()].map((node) => node.card).filter((body) => body.visible);
       this.renderer.render(this.scene3, this.camera);
@@ -260,6 +267,8 @@ export class TableEngine {
   dispose() {
     this.showPlace(null);
     this.running = false;
+    if (this.lightTimer !== null) clearTimeout(this.lightTimer);
+    this.lighting.dispose();
     cancelAnimationFrame(this.frameId);
     document.removeEventListener('visibilitychange', this.onVisible);
     window.removeEventListener('resize', this.resize);
@@ -285,13 +294,23 @@ export class TableEngine {
     this.syncFog();
     this.syncWalls();
     this.syncDoors();
-    this.syncLights();
+    const lightingChanged = this.syncLights();
     this.syncTokens();
     this.syncBuilt();
     this.syncGhost();
     if (!view.placeSpan) this.showPlace(null);
     this.applyPresentation();
-    if (changed) this.invalidate();
+    this.lighting.bindScene(this.scene3, mesh => {
+      if (mesh === this.fogMesh || mesh === this.ghostMesh || mesh === this.placeMesh) return false;
+      let parent: THREE.Object3D | null = mesh;
+      while (parent) {
+        if (parent === this.lighting.markers) return false;
+        if (parent === this.tokenGroup) return Boolean(mesh.userData.body);
+        parent = parent.parent;
+      }
+      return true;
+    });
+    if (changed || lightingChanged) this.invalidate();
   }
 
   private bounds() {
@@ -439,24 +458,7 @@ export class TableEngine {
   }
 
   private syncLights() {
-    clearGroup(this.lightGroup);
-    if (this.view.role !== 'gm') return;
-    for (const light of this.view.scene?.lights ?? []) {
-      const pool = new THREE.Mesh(
-        new THREE.CircleGeometry(Math.max(0.4, light.range), 40),
-        new THREE.MeshBasicMaterial({ color: light.color, transparent: true, opacity: 0.16, depthWrite: false }),
-      );
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set(light.x, 0.04, light.y);
-      this.lightGroup.add(pool);
-      const mesh = new THREE.Mesh(
-        new THREE.CircleGeometry(0.18, 16),
-        new THREE.MeshBasicMaterial({ color: light.color, transparent: true, opacity: 0.9 }),
-      );
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(light.x, 0.07, light.y);
-      this.lightGroup.add(mesh);
-    }
+    return this.lighting.sync(this.view.scene, this.view.fog, this.view.buildMode || this.view.role === 'gm' || this.view.fog?.mode === 'gm');
   }
 
   private cutawayKey = '';

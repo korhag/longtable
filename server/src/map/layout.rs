@@ -77,6 +77,51 @@ fn one() -> f32 {
     1.0
 }
 
+/// The visual behavior of a placed light. Lights never grant token vision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub enum LightKind {
+    #[default]
+    Steady,
+    Torch,
+    Magic,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub enum EnvironmentPreset {
+    #[default]
+    Day,
+    Dusk,
+    Night,
+}
+
+/// Ambient color preset and brightness, independent of fog and token vision.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct EnvironmentLighting {
+    pub preset: EnvironmentPreset,
+    pub brightness: f32,
+}
+
+impl Default for EnvironmentLighting {
+    fn default() -> Self { Self { preset: EnvironmentPreset::Day, brightness: 1.0 } }
+}
+
+impl EnvironmentLighting {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.brightness.is_finite() || !(0.05..=1.0).contains(&self.brightness) {
+            return Err("environment brightness must be between 5% and 100%".into());
+        }
+        Ok(())
+    }
+}
+
+pub fn light_intensity() -> f32 { 1.0 }
+
 /// A light the GM placed on a built map. The marker is the source;
 /// sight still comes from tokens.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -87,6 +132,12 @@ pub struct PlacedLight {
     pub y: f32,
     pub range: f32,
     pub color: String,
+    #[serde(default)]
+    #[ts(as = "Option<LightKind>", optional)]
+    pub kind: LightKind,
+    #[serde(default = "light_intensity")]
+    #[ts(as = "Option<f32>", optional)]
+    pub intensity: f32,
 }
 
 /// A stair between two neighboring squares. The squares must differ by one tier.
@@ -118,6 +169,9 @@ pub struct MapLayout {
     pub decals: Vec<PlacedDecal>,
     #[serde(default)]
     pub lights: Vec<PlacedLight>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub environment: Option<EnvironmentLighting>,
     /// One height byte per cell, base64. Absent or empty means every cell is tier 0.
     #[serde(default)]
     #[ts(optional)]
@@ -148,6 +202,7 @@ impl MapLayout {
             props: Vec::new(),
             decals: Vec::new(),
             lights: Vec::new(),
+            environment: None,
             levels: None,
             seed: Some(1),
             variants: None,
@@ -156,6 +211,7 @@ impl MapLayout {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(environment) = &self.environment { environment.validate()?; }
         if !(MIN_SIDE..=MAX_SIDE).contains(&self.width) || !(MIN_SIDE..=MAX_SIDE).contains(&self.height) {
             return Err(format!("a map is between {MIN_SIDE} and {MAX_SIDE} squares on a side"));
         }
@@ -205,8 +261,11 @@ impl MapLayout {
             if !light.range.is_finite() || !(0.5..=40.0).contains(&light.range) {
                 return Err("a light reaches between half a square and 40".into());
             }
-            if light.color.is_empty() || light.color.chars().count() > 32 {
-                return Err("a light needs a color".into());
+            if light.color.len() != 7 || !light.color.starts_with('#') || !light.color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("a light color must be #RRGGBB".into());
+            }
+            if !light.intensity.is_finite() || !(0.0..=3.0).contains(&light.intensity) {
+                return Err("light intensity must be between 0 and 3".into());
             }
         }
         let heights = if let Some(levels) = &self.levels {
@@ -334,4 +393,41 @@ mod tests {
         let err = layout.validate().unwrap_err();
         assert!(err.contains("two things on this map use the id same"), "{err}");
     }
+    #[test]
+    fn old_light_records_keep_steady_full_intensity_defaults() {
+        let light: PlacedLight = serde_json::from_str(r##"{"x":2.5,"y":2.5,"range":5,"color":"#ffad42"}"##).unwrap();
+        assert_eq!(light.kind, LightKind::Steady);
+        assert_eq!(light.intensity, 1.0);
+        let mut layout = MapLayout::blank(5, 5, "core/grass");
+        layout.lights.push(light);
+        layout.validate().unwrap();
+        let mut old = serde_json::to_value(&layout).unwrap();
+        old.as_object_mut().unwrap().remove("environment");
+        assert!(serde_json::from_value::<MapLayout>(old).unwrap().environment.is_none());
+    }
+
+    #[test]
+    fn lighting_rejects_invalid_colors_and_nonfinite_or_unbounded_values() {
+        let mut layout = MapLayout::blank(5, 5, "core/grass");
+        layout.lights.push(PlacedLight { x: 2.5, y: 2.5, range: 5.0, color: "#ffad42".into(), kind: LightKind::Torch, intensity: 1.4 });
+        for color in ["red", "#fff", "#gggggg", "#fffffff", "💡💡"] {
+            layout.lights[0].color = color.into();
+            assert!(layout.validate().unwrap_err().contains("color"));
+        }
+        layout.lights[0].color = "#79c8ff".into();
+        for intensity in [-0.1, 3.1, f32::NAN, f32::INFINITY] {
+            layout.lights[0].intensity = intensity;
+            assert!(layout.validate().unwrap_err().contains("intensity"));
+        }
+        layout.lights[0].intensity = 1.0;
+        for brightness in [0.0, 1.01, f32::NAN, f32::INFINITY] {
+            layout.environment = Some(EnvironmentLighting { preset: EnvironmentPreset::Night, brightness });
+            assert!(layout.validate().unwrap_err().contains("brightness"));
+        }
+        assert!(serde_json::from_str::<EnvironmentLighting>(r#"{"preset":"unknown","brightness":1}"#).is_err());
+        assert!(serde_json::from_str::<LightKind>("\"unknown\"").is_err());
+        layout.environment = Some(EnvironmentLighting { preset: EnvironmentPreset::Night, brightness: 0.16 });
+        layout.validate().unwrap();
+    }
+
 }

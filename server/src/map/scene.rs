@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::map::layout::MapLayout;
+use crate::map::layout::{MapLayout, LightKind, EnvironmentLighting, light_intensity};
 use crate::map::presentation::Prerendered;
 
 /// A point on the battle map, in grid squares.
@@ -88,6 +88,10 @@ pub struct Light {
     pub y: f32,
     pub range: f32,
     pub color: String,
+    #[serde(default)]
+    pub kind: LightKind,
+    #[serde(default = "light_intensity")]
+    pub intensity: f32,
 }
 
 pub const DIMETRIC_PROFILE: &str = "dimetric-30-v1";
@@ -108,6 +112,8 @@ pub struct Scene {
     pub walls: Vec<Segment>,
     pub doors: Vec<Door>,
     pub lights: Vec<Light>,
+    #[serde(default)]
+    pub environment: EnvironmentLighting,
     /// The editor's layout, when this map was built rather than imported.
     #[serde(default)]
     pub layout: Option<MapLayout>,
@@ -140,5 +146,6 @@ mod tests {
         assert!(scene.move_blockers.is_empty());
         assert_eq!(scene.schema_version, 1);
         assert!(scene.visual_profile.is_empty());
+        assert_eq!(scene.environment, EnvironmentLighting::default());
     }
 }

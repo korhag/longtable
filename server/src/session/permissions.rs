@@ -84,20 +84,11 @@ pub fn snapshot(table: &Table, viewer: &Viewer) -> Snapshot {
             } else {
                 Vec::new()
             },
-            lights: if matches!(sight, Sight::Gm) {
-                scene
-                    .lights
-                    .iter()
-                    .map(|light| LightView {
-                        x: light.x,
-                        y: light.y,
-                        range: light.range,
-                        color: light.color.clone(),
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
+            lights: scene.lights.iter().map(|light| LightView {
+                x: light.x, y: light.y, range: light.range, color: light.color.clone(),
+                kind: light.kind, intensity: light.intensity,
+            }).collect(),
+            environment: scene.environment.clone(),
             layout: scene.layout.clone(),
             presentation: scene.presentation.as_ref().map(filed_notice),
             schema_version: scene.schema_version,
@@ -538,6 +529,7 @@ mod tests {
             walls: vec![Segment { a: Vec2::new(5.0, 0.0), b: Vec2::new(5.0, 10.0) }],
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: None,
             move_blockers: Vec::new(),
             sight: Vec::new(),
@@ -609,6 +601,7 @@ mod tests {
             walls: Vec::new(),
             doors: Vec::new(),
             lights: Vec::new(),
+            environment: Default::default(),
             layout: Some(layout),
             move_blockers: Vec::new(),
             sight: vec![SightBlock { a: Vec2::new(4.0, 0.0), b: Vec2::new(4.0, 8.0), base: 0.0, top: 0.5 }],

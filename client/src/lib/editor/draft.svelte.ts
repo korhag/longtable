@@ -5,6 +5,9 @@
 // ------------------------------------------------------------
 
 import { findIn, loadCatalog, type Pack } from '../assets/catalog';
+import type { EnvironmentLighting } from '../net/bindings/EnvironmentLighting';
+import type { LightKind } from '../net/bindings/LightKind';
+import { DAYLIGHT, LIGHT_PRESETS } from '../lightingPresets';
 import type { MapLayout } from '../net/bindings/MapLayout.ts';
 import type { PlacedDecal } from '../net/bindings/PlacedDecal.ts';
 import type { PlacedProp } from '../net/bindings/PlacedProp.ts';
@@ -31,6 +34,8 @@ export interface Draft {
   name: string;
   updatedAt: number;
   sceneId?: string | null;
+  /** Ambient settings when copied or last published; retained across draft reloads. */
+  environmentBase?: EnvironmentLighting | null;
   layout: MapLayout;
 }
 
@@ -49,8 +54,11 @@ class EditorStore {
   stairId = $state('');
   tier = $state<0 | 1 | 2>(1);
   castId = $state('');
-  lightRange = $state(6);
-  lightColor = $state('#e8a04a');
+  lightRange = $state(5);
+  lightColor = $state('#ffad42');
+  lightKind = $state<LightKind>('torch');
+  lightIntensity = $state(1.4);
+  private environmentBase: MapLayout | null = null;
   mirror = $state(false);
   packs = $state<Pack[]>([]);
   summaries = $state<DraftSummary[]>([]);
@@ -104,6 +112,7 @@ class EditorStore {
     this.draft = normalize((await response.json()) as Draft);
     this.past = [];
     this.future = [];
+    this.environmentBase = null;
     await this.refresh();
   }
 
@@ -113,6 +122,7 @@ class EditorStore {
       const response = await fetch('/api/samples/forest', { method: 'POST', headers: this.headers() });
       if (!response.ok) { this.note = await response.text(); return; }
       this.draft = normalize((await response.json()) as Draft);
+      this.environmentBase = null;
       this.past = [];
       this.future = [];
       this.ghost = [];
@@ -144,6 +154,7 @@ class EditorStore {
       return;
     }
     this.draft = normalize((await response.json()) as Draft);
+    this.environmentBase = null;
     await this.refresh();
   }
 
@@ -153,6 +164,7 @@ class EditorStore {
     this.draft = normalize((await response.json()) as Draft);
     this.past = [];
     this.future = [];
+    this.environmentBase = null;
     this.ghost = [];
   }
 
@@ -165,6 +177,13 @@ class EditorStore {
 
   async publish() {
     if (!this.draft) return;
+    // A live day/night change wins over a draft that did not edit lighting.
+    const currentEnvironment = this.draft.layout.environment ?? DAYLIGHT;
+    const baseEnvironment = this.draft.environmentBase ?? DAYLIGHT;
+    if (sameEnvironment(currentEnvironment, baseEnvironment) && this.draft.sceneId === table.scene?.id) {
+      this.draft.layout.environment = { ...(table.scene?.environment ?? DAYLIGHT) };
+      this.draft.environmentBase = { ...this.draft.layout.environment };
+    }
     window.clearTimeout(this.timer);
     const saved = await this.save();
     if (!saved) return;
@@ -175,6 +194,8 @@ class EditorStore {
     }
     const fresh = await fetch(`/api/drafts/${this.draft.id}`, { headers: this.headers() });
     if (fresh.ok) this.draft = normalize((await fresh.json()) as Draft);
+    this.draft.environmentBase = { ...(this.draft.layout.environment ?? DAYLIGHT) };
+    this.environmentBase = null;
     this.note = 'On the table';
   }
 
@@ -189,6 +210,40 @@ class EditorStore {
     if (!this.draft || this.future.length === 0 || this.painting) return;
     this.past.push(cloneLayout(this.draft.layout));
     this.draft.layout = this.future.pop() ?? this.draft.layout;
+    this.schedule();
+  }
+
+  chooseLight(kind: LightKind) {
+    const preset = LIGHT_PRESETS.find(item => item.kind === kind)!;
+    this.lightKind = kind;
+    this.lightColor = preset.color;
+    this.lightRange = preset.range;
+    this.lightIntensity = preset.intensity;
+    this.tool = 'light';
+  }
+
+  setEnvironment(environment: EnvironmentLighting, commit = true) {
+    if (!this.draft) return;
+    this.draft.environmentBase ??= { ...(this.draft.layout.environment ?? DAYLIGHT) };
+    this.environmentBase ??= cloneLayout(this.draft.layout);
+    this.draft.layout.environment = { ...environment };
+    if (!commit) return;
+    if (JSON.stringify(this.environmentBase) !== JSON.stringify(this.draft.layout)) {
+      this.past.push(this.environmentBase);
+      if (this.past.length > 40) this.past.shift();
+      this.future = [];
+      this.schedule();
+    }
+    this.environmentBase = null;
+  }
+
+  syncLiveEnvironment(sceneId: string, environment: EnvironmentLighting) {
+    if (!this.draft || this.draft.sceneId !== sceneId) return;
+    this.draft.layout.environment = { ...environment };
+    this.draft.environmentBase = { ...environment };
+    // An unrelated undo must not restore the live scene's earlier time of day.
+    for (const past of [...this.past, ...this.future]) past.environment = { ...environment };
+    this.environmentBase = null;
     this.schedule();
   }
 
@@ -324,7 +379,7 @@ class EditorStore {
     } else if (this.tool === 'decal') {
       this.draft.layout = addDecal(layout, point.x, point.y, this.decalId, this.packs);
     } else if (this.tool === 'light') {
-      this.draft.layout = addLight(layout, point.x, point.y, this.lightRange, this.lightColor);
+      this.draft.layout = addLight(layout, point.x, point.y, this.lightRange, this.lightColor, this.lightKind, this.lightIntensity);
     }
   }
 
@@ -544,13 +599,13 @@ function addStair(layout: MapLayout, edge: { x: number; y: number; axis: 'h' | '
   return { layout: next, note: '' };
 }
 
-function addLight(layout: MapLayout, x: number, y: number, range: number, color: string): MapLayout {
+function addLight(layout: MapLayout, x: number, y: number, range: number, color: string, kind: LightKind, intensity: number): MapLayout {
   const cellX = Math.floor(x);
   const cellY = Math.floor(y);
   if (cellX < 0 || cellY < 0 || cellX >= layout.width || cellY >= layout.height) return layout;
   const next = cloneLayout(layout);
   const lights = next.lights ?? [];
-  const light = { x: cellX + 0.5, y: cellY + 0.5, range, color };
+  const light = { x: cellX + 0.5, y: cellY + 0.5, range, color, kind, intensity };
   const index = lights.findIndex((item) => Math.floor(item.x) === cellX && Math.floor(item.y) === cellY);
   if (index >= 0) lights[index] = light;
   else lights.push(light);
@@ -562,6 +617,10 @@ function lightCell(x: number, y: number, width: number, height: number): Cell[] 
   const cell = { x: Math.floor(x), y: Math.floor(y) };
   if (cell.x < 0 || cell.y < 0 || cell.x >= width || cell.y >= height) return [];
   return [cell];
+}
+
+function sameEnvironment(a: EnvironmentLighting, b: EnvironmentLighting) {
+  return a.preset === b.preset && a.brightness === b.brightness;
 }
 
 function normalize(draft: Draft): Draft {

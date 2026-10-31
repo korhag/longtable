@@ -1,4 +1,10 @@
 <script lang="ts">
+  import Soundboard from '../ui/Soundboard.svelte';
+  import { onDestroy } from 'svelte';
+  import EnvironmentControls from '../ui/EnvironmentControls.svelte';
+  import type { EnvironmentLighting } from '../net/bindings/EnvironmentLighting';
+  import { editor } from '../editor/draft.svelte';
+
   import { designer } from '../designer/designer.svelte';
   import type { PlayerInfo } from '../net/bindings/PlayerInfo.ts';
   import { leaveTable, send } from '../net/socket';
@@ -20,6 +26,20 @@
     onCycle: () => 'off' | 'faint' | 'strong';
     onSetGrid: (style: 'off' | 'faint' | 'strong') => void;
   } = $props();
+
+  let lightingTimer: ReturnType<typeof setTimeout> | undefined;
+  onDestroy(() => clearTimeout(lightingTimer));
+  function changeEnvironment(environment: EnvironmentLighting, commit: boolean) {
+    clearTimeout(lightingTimer);
+    const sceneId = table.scene?.id;
+    const apply = () => {
+      if (!sceneId || table.scene?.id !== sceneId || table.role !== 'gm' || table.viewAs) return;
+      send({ type: 'setEnvironment', environment });
+      editor.syncLiveEnvironment(table.scene.id, environment);
+    };
+    if (commit) apply();
+    else lightingTimer = setTimeout(apply, 100);
+  }
 
   const gm = $derived(table.role === 'gm' && !table.viewAs);
   const mode = $derived<AppMode>(gm ? appMode(modes.current) : 'play');
@@ -124,6 +144,19 @@
     </nav>
   {/if}
   <div class="topbar-actions">
+    <details class="topbar-menu">
+      <summary class="btn quiet">Sounds <span aria-hidden="true">⌄</span></summary>
+      <div class="topbar-menu-body"><Soundboard /></div>
+    </details>
+    {#if gm && table.scene && mode === 'play'}
+      <details class="topbar-menu">
+        <summary class="btn quiet">Lighting <span aria-hidden="true">⌄</span></summary>
+        <div class="topbar-menu-body">
+          <EnvironmentControls environment={table.scene.environment} onchange={changeEnvironment} />
+          <p class="shortcut-hint mt-3">Applies to everyone at the table. Add sources in Map → Lights.</p>
+        </div>
+      </details>
+    {/if}
     <details class="topbar-menu view-menu">
       <summary class="btn quiet">View <span aria-hidden="true">⌄</span></summary>
       <div class="topbar-menu-body">
@@ -161,3 +194,21 @@
     {/if}
   </div>
 </header>
+
+<style>
+  .topbar:has(details[open]) { z-index: var(--z-menu); }
+  @media (max-width: 760px) {
+    .topbar-actions { flex-wrap: wrap; justify-content: flex-start; }
+    .topbar-menu { position: static; }
+    .topbar-menu .topbar-menu-body {
+      left: 8px;
+      right: 8px;
+      top: calc(100% + 6px);
+      width: auto;
+      min-width: 0;
+      max-width: none;
+      max-height: calc(100dvh - 180px);
+      overflow-y: auto;
+    }
+  }
+</style>

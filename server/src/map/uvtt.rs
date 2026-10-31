@@ -86,6 +86,8 @@ pub fn parse_uvtt(bytes: &[u8]) -> Result<ParsedMap, UvttError> {
             y: light.position.y - origin_y,
             range: light.range,
             color: css_color(light.color.as_deref()),
+            kind: Default::default(),
+            intensity: 1.0,
         })
         .collect();
 

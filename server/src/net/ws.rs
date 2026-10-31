@@ -240,6 +240,7 @@ async fn create_draft(
         id: Uuid::new_v4().to_string(),
         name: if trimmed.is_empty() { "Untitled map".into() } else { trimmed.chars().take(48).collect() },
         updated_at: now_ms(),
+        environment_base: Some(layout.environment.clone().unwrap_or_default()),
         layout,
         scene_id: None,
     };
@@ -283,12 +284,15 @@ async fn remove_draft(State(app): State<Arc<App>>, Path(id): Path<String>, heade
 
 async fn publish_draft(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Result<StatusCode, ApiError> {
     let token = require_gm(&app, &headers).await?;
-    let draft = DraftStore::new(&app.data_dir)
+    let mut draft = DraftStore::new(&app.data_dir)
         .get(&id)
         .map_err(|err| ApiError(StatusCode::NOT_FOUND, err))?;
     let catalog = app.catalog.lock().await.clone();
-    let compiled = compile(&draft.layout, &catalog).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     let mut table = app.table.lock().await;
+    if let Some(scene) = table.scene.as_ref().filter(|scene| draft.scene_id.as_deref() == Some(scene.id.as_str())) {
+        draft.follow_live_environment(&scene.environment);
+    }
+    let compiled = compile(&draft.layout, &catalog).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     let viewer = table
         .viewer_for_session(&token)
         .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "sign in again".into()))?;
@@ -299,6 +303,7 @@ async fn publish_draft(State(app): State<Arc<App>>, Path(id): Path<String>, head
     drop(table);
     let mut saved = draft;
     saved.scene_id = Some(scene_id);
+    saved.mark_environment_published();
     saved.updated_at = now_ms();
     DraftStore::new(&app.data_dir).put(&saved).map_err(|err| ApiError(StatusCode::BAD_REQUEST, err))?;
     app.request_save();
@@ -840,6 +845,7 @@ async fn import_map(
         walls: parsed.walls,
         doors: parsed.doors,
         lights: parsed.lights,
+        environment: Default::default(),
         layout: None,
         move_blockers: Vec::new(),
         sight: Vec::new(),
@@ -889,6 +895,7 @@ async fn import_package(app: Arc<App>, token: &str, name: &str, bytes: &[u8]) ->
         walls: loaded.parsed.walls,
         doors: loaded.parsed.doors,
         lights: loaded.parsed.lights,
+        environment: Default::default(),
         layout: None,
         move_blockers: Vec::new(),
         sight: Vec::new(),
